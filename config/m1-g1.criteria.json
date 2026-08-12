@@ -1,0 +1,21 @@
+{
+  "gate": "G1",
+  "required_trials": 12,
+  "required_completion_rate": 1,
+  "minimum_replay_rate": 0.1,
+  "first_trace_event_ms_max": 2000,
+  "heartbeat_ms_max": 10000,
+  "required_checks": [
+    "runner_restart_recovery",
+    "idempotency",
+    "trial_isolation",
+    "blind_identity",
+    "seeded_random_order",
+    "budget_soft_and_hard_limits",
+    "ledger_hash_chain",
+    "trace_cursor",
+    "trace_redaction",
+    "deterministic_replay"
+  ]
+}
+

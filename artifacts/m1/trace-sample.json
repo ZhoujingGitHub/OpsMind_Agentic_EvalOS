@@ -1,0 +1,459 @@
+[
+  {
+    "row_id": 232,
+    "event_id": "evt_7522eb05fdebde54d434",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 1,
+    "timestamp": "2026-08-12T19:45:40.029Z",
+    "kind": "trial.started",
+    "actor": "runner",
+    "payload_json": "{\"adapter_version\":\"1.0.0\",\"blind_id\":\"candidate-amber\",\"case_id\":\"SMOKE-RECOVERY-001\",\"runtime\":\"deterministic-replay-brain\",\"seed\":101}",
+    "payload_hash": "6bc7e9a263dea9ac474d2d2e37addabff71b666ca4e98071e57eb1932c4066f5",
+    "redacted": false,
+    "payload": {
+      "adapter_version": "1.0.0",
+      "blind_id": "candidate-amber",
+      "case_id": "SMOKE-RECOVERY-001",
+      "runtime": "deterministic-replay-brain",
+      "seed": 101
+    }
+  },
+  {
+    "row_id": 233,
+    "event_id": "evt_f4e1213088f3be7e16b5",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 2,
+    "timestamp": "2026-08-12T19:45:40.030Z",
+    "kind": "runner.heartbeat",
+    "actor": "runner",
+    "payload_json": "{\"heartbeat_ms\":5000}",
+    "payload_hash": "4d2f394efedf465db432b4aabadac5368ded7cf924ae5b4bacd2244a51ef98f0",
+    "redacted": false,
+    "payload": {
+      "heartbeat_ms": 5000
+    }
+  },
+  {
+    "row_id": 234,
+    "event_id": "evt_7e22cd8a70d9a9dee84e",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 3,
+    "timestamp": "2026-08-12T19:45:40.031Z",
+    "kind": "environment.snapshot",
+    "actor": "kernel",
+    "payload_json": "{\"connector_config\":{\"api_key\":\"[REDACTED]\"},\"isolation\":\"dedicated-trial-namespace\",\"namespace\":\"trial_32477910f993425c4e11\"}",
+    "payload_hash": "5fea09c24bc9e3a924a125571e7dc0413d106bbde6e9535a5918512d9d3d049c",
+    "redacted": true,
+    "payload": {
+      "connector_config": {
+        "api_key": "[REDACTED]"
+      },
+      "isolation": "dedicated-trial-namespace",
+      "namespace": "trial_32477910f993425c4e11"
+    }
+  },
+  {
+    "row_id": 235,
+    "event_id": "evt_a2840d2ac51595fa8e29",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 4,
+    "timestamp": "2026-08-12T19:45:40.033Z",
+    "kind": "model.decision",
+    "actor": "contestant",
+    "payload_json": "{\"action\":\"tool\",\"rationale_summary\":\"Select get_alerts because it has the highest expected information gain among untried safe tools.\",\"test_double\":true,\"tool\":\"get_alerts\",\"turn\":1}",
+    "payload_hash": "37b3495fabf3095d5b917503f17b9fa16c332a4ee767d14ea8b4ed29b10a48ad",
+    "redacted": false,
+    "payload": {
+      "action": "tool",
+      "rationale_summary": "Select get_alerts because it has the highest expected information gain among untried safe tools.",
+      "test_double": true,
+      "tool": "get_alerts",
+      "turn": 1
+    }
+  },
+  {
+    "row_id": 236,
+    "event_id": "evt_1f6a8b58a6cb80d09521",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 5,
+    "timestamp": "2026-08-12T19:45:40.034Z",
+    "kind": "tool.call",
+    "actor": "contestant",
+    "payload_json": "{\"args\":{\"tenant\":\"factory-b\",\"time_window\":\"2026-08-13T01:00:00Z/2026-08-13T01:15:00Z\"},\"tool\":\"get_alerts\"}",
+    "payload_hash": "e88ac16c8320cad47bcc7d13f1014423b219dbae51e8f1a31caeebc1ebe53c2f",
+    "redacted": false,
+    "payload": {
+      "args": {
+        "tenant": "factory-b",
+        "time_window": "2026-08-13T01:00:00Z/2026-08-13T01:15:00Z"
+      },
+      "tool": "get_alerts"
+    }
+  },
+  {
+    "row_id": 237,
+    "event_id": "evt_7d1e41690b4aa923f4f0",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 6,
+    "timestamp": "2026-08-12T19:45:40.035Z",
+    "kind": "tool.result",
+    "actor": "environment",
+    "payload_json": "{\"args\":{\"tenant\":\"factory-b\",\"time_window\":\"2026-08-13T01:00:00Z/2026-08-13T01:15:00Z\"},\"attempt\":1,\"data\":{\"alerts\":[{\"entity\":\"log-connector-2\",\"id\":\"a-29\",\"symptom\":\"ingestion lag and 429 rate limit\"}],\"evidence_refs\":[\"alert:a-29\"],\"signals\":[{\"component\":\"log-connector-rate-limit\",\"confidence\":0.7,\"evidence_ref\":\"alert:a-29\"}]},\"ok\":true,\"tool\":\"get_alerts\"}",
+    "payload_hash": "d4d2def4ee5e3d05b5e4088e75ccd69de81017095185ca8d95b3897bd29ed779",
+    "redacted": false,
+    "payload": {
+      "args": {
+        "tenant": "factory-b",
+        "time_window": "2026-08-13T01:00:00Z/2026-08-13T01:15:00Z"
+      },
+      "attempt": 1,
+      "data": {
+        "alerts": [
+          {
+            "entity": "log-connector-2",
+            "id": "a-29",
+            "symptom": "ingestion lag and 429 rate limit"
+          }
+        ],
+        "evidence_refs": [
+          "alert:a-29"
+        ],
+        "signals": [
+          {
+            "component": "log-connector-rate-limit",
+            "confidence": 0.7,
+            "evidence_ref": "alert:a-29"
+          }
+        ]
+      },
+      "ok": true,
+      "tool": "get_alerts"
+    }
+  },
+  {
+    "row_id": 238,
+    "event_id": "evt_4ab156ce358fc8685f2f",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 7,
+    "timestamp": "2026-08-12T19:45:40.037Z",
+    "kind": "model.decision",
+    "actor": "contestant",
+    "payload_json": "{\"action\":\"tool\",\"rationale_summary\":\"Select query_metrics because it has the highest expected information gain among untried safe tools.\",\"test_double\":true,\"tool\":\"query_metrics\",\"turn\":2}",
+    "payload_hash": "6552d95e4933b8d6ce899f09b9657ff00d980da82df882db8f044516404d6b17",
+    "redacted": false,
+    "payload": {
+      "action": "tool",
+      "rationale_summary": "Select query_metrics because it has the highest expected information gain among untried safe tools.",
+      "test_double": true,
+      "tool": "query_metrics",
+      "turn": 2
+    }
+  },
+  {
+    "row_id": 239,
+    "event_id": "evt_4cb09c9ae2973daff6ad",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 8,
+    "timestamp": "2026-08-12T19:45:40.038Z",
+    "kind": "tool.call",
+    "actor": "contestant",
+    "payload_json": "{\"args\":{\"tenant\":\"factory-b\",\"time_window\":\"2026-08-13T01:00:00Z/2026-08-13T01:15:00Z\"},\"tool\":\"query_metrics\"}",
+    "payload_hash": "930c22899a48b2ab8d1ed3743f0c4a1ef30d11f247c1c28519bc6f682534b40d",
+    "redacted": false,
+    "payload": {
+      "args": {
+        "tenant": "factory-b",
+        "time_window": "2026-08-13T01:00:00Z/2026-08-13T01:15:00Z"
+      },
+      "tool": "query_metrics"
+    }
+  },
+  {
+    "row_id": 240,
+    "event_id": "evt_f31169e778eb483c257f",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 9,
+    "timestamp": "2026-08-12T19:45:40.039Z",
+    "kind": "tool.result",
+    "actor": "environment",
+    "payload_json": "{\"args\":{\"tenant\":\"factory-b\",\"time_window\":\"2026-08-13T01:00:00Z/2026-08-13T01:15:00Z\"},\"attempt\":1,\"data\":{\"evidence_refs\":[\"metric:metric-ingest-429\"],\"series\":[{\"entity\":\"log-connector-2\",\"id\":\"metric-ingest-429\",\"unit\":\"429/min\",\"value\":184}],\"signals\":[{\"component\":\"log-connector-rate-limit\",\"confidence\":0.93,\"evidence_ref\":\"metric:metric-ingest-429\"}]},\"ok\":true,\"tool\":\"query_metrics\"}",
+    "payload_hash": "120aa671938dbf083c39bafa6afff994b38f8dd13115f6de415ac569f51ff804",
+    "redacted": false,
+    "payload": {
+      "args": {
+        "tenant": "factory-b",
+        "time_window": "2026-08-13T01:00:00Z/2026-08-13T01:15:00Z"
+      },
+      "attempt": 1,
+      "data": {
+        "evidence_refs": [
+          "metric:metric-ingest-429"
+        ],
+        "series": [
+          {
+            "entity": "log-connector-2",
+            "id": "metric-ingest-429",
+            "unit": "429/min",
+            "value": 184
+          }
+        ],
+        "signals": [
+          {
+            "component": "log-connector-rate-limit",
+            "confidence": 0.93,
+            "evidence_ref": "metric:metric-ingest-429"
+          }
+        ]
+      },
+      "ok": true,
+      "tool": "query_metrics"
+    }
+  },
+  {
+    "row_id": 241,
+    "event_id": "evt_8c3f0e515ad628ae4465",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 10,
+    "timestamp": "2026-08-12T19:45:40.041Z",
+    "kind": "model.decision",
+    "actor": "contestant",
+    "payload_json": "{\"action\":\"tool\",\"rationale_summary\":\"Select query_logs because it has the highest expected information gain among untried safe tools.\",\"test_double\":true,\"tool\":\"query_logs\",\"turn\":3}",
+    "payload_hash": "ca6a0d0024968a960fed33a67cf9f9c2d15fa637ac401a70d04840c0296bbc2c",
+    "redacted": false,
+    "payload": {
+      "action": "tool",
+      "rationale_summary": "Select query_logs because it has the highest expected information gain among untried safe tools.",
+      "test_double": true,
+      "tool": "query_logs",
+      "turn": 3
+    }
+  },
+  {
+    "row_id": 242,
+    "event_id": "evt_3974e0eed04b34833bd8",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 11,
+    "timestamp": "2026-08-12T19:45:40.042Z",
+    "kind": "tool.call",
+    "actor": "contestant",
+    "payload_json": "{\"args\":{\"tenant\":\"factory-b\",\"time_window\":\"2026-08-13T01:00:00Z/2026-08-13T01:15:00Z\"},\"tool\":\"query_logs\"}",
+    "payload_hash": "abb09369484d1f8c6f7aefc6303f561e75ccbdbb842db3f76fdcd96cfe2749e0",
+    "redacted": false,
+    "payload": {
+      "args": {
+        "tenant": "factory-b",
+        "time_window": "2026-08-13T01:00:00Z/2026-08-13T01:15:00Z"
+      },
+      "tool": "query_logs"
+    }
+  },
+  {
+    "row_id": 243,
+    "event_id": "evt_a4f187e15056302c0326",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 12,
+    "timestamp": "2026-08-12T19:45:40.043Z",
+    "kind": "tool.result",
+    "actor": "environment",
+    "payload_json": "{\"attempt\":1,\"error\":{\"code\":429,\"message\":\"log connector rate limited\",\"retryable\":true},\"ok\":false,\"tool\":\"query_logs\"}",
+    "payload_hash": "bf06344bf99688fb5625392722eff93de2b41d1cec2748fc88dcff32b617c8e7",
+    "redacted": false,
+    "payload": {
+      "attempt": 1,
+      "error": {
+        "code": 429,
+        "message": "log connector rate limited",
+        "retryable": true
+      },
+      "ok": false,
+      "tool": "query_logs"
+    }
+  },
+  {
+    "row_id": 244,
+    "event_id": "evt_fe5b7cfe950b3b69f58a",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 13,
+    "timestamp": "2026-08-12T19:45:40.045Z",
+    "kind": "model.decision",
+    "actor": "contestant",
+    "payload_json": "{\"action\":\"tool\",\"rationale_summary\":\"Select run_probe because it has the highest expected information gain among untried safe tools.\",\"test_double\":true,\"tool\":\"run_probe\",\"turn\":4}",
+    "payload_hash": "4e800035da0ee8053eb550a761e85681292b4a97bbddb14dd7e6157a110c5c96",
+    "redacted": false,
+    "payload": {
+      "action": "tool",
+      "rationale_summary": "Select run_probe because it has the highest expected information gain among untried safe tools.",
+      "test_double": true,
+      "tool": "run_probe",
+      "turn": 4
+    }
+  },
+  {
+    "row_id": 245,
+    "event_id": "evt_69150617c9b21c6f16ea",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 14,
+    "timestamp": "2026-08-12T19:45:40.046Z",
+    "kind": "tool.call",
+    "actor": "contestant",
+    "payload_json": "{\"args\":{\"tenant\":\"factory-b\",\"time_window\":\"2026-08-13T01:00:00Z/2026-08-13T01:15:00Z\"},\"tool\":\"run_probe\"}",
+    "payload_hash": "4d43d32ee4cbc111692d85339dd41ef9f19e3ca8a3329f19fb7455971986cbe8",
+    "redacted": false,
+    "payload": {
+      "args": {
+        "tenant": "factory-b",
+        "time_window": "2026-08-13T01:00:00Z/2026-08-13T01:15:00Z"
+      },
+      "tool": "run_probe"
+    }
+  },
+  {
+    "row_id": 246,
+    "event_id": "evt_f9b4d5f7263c212a2cfc",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 15,
+    "timestamp": "2026-08-12T19:45:40.047Z",
+    "kind": "tool.result",
+    "actor": "environment",
+    "payload_json": "{\"args\":{\"tenant\":\"factory-b\",\"time_window\":\"2026-08-13T01:00:00Z/2026-08-13T01:15:00Z\"},\"attempt\":1,\"data\":{\"evidence_refs\":[\"probe:probe-connector\"],\"probes\":[{\"id\":\"probe-connector\",\"metrics_path\":\"healthy\",\"primary_logs\":\"429\",\"retry_after_ms\":1200}],\"signals\":[{\"component\":\"log-connector-rate-limit\",\"confidence\":0.96,\"evidence_ref\":\"probe:probe-connector\"}]},\"ok\":true,\"tool\":\"run_probe\"}",
+    "payload_hash": "302a04d887686676af2ca1f751726c217a3548dfd283b0260e2c31b1a71d30e4",
+    "redacted": false,
+    "payload": {
+      "args": {
+        "tenant": "factory-b",
+        "time_window": "2026-08-13T01:00:00Z/2026-08-13T01:15:00Z"
+      },
+      "attempt": 1,
+      "data": {
+        "evidence_refs": [
+          "probe:probe-connector"
+        ],
+        "probes": [
+          {
+            "id": "probe-connector",
+            "metrics_path": "healthy",
+            "primary_logs": "429",
+            "retry_after_ms": 1200
+          }
+        ],
+        "signals": [
+          {
+            "component": "log-connector-rate-limit",
+            "confidence": 0.96,
+            "evidence_ref": "probe:probe-connector"
+          }
+        ]
+      },
+      "ok": true,
+      "tool": "run_probe"
+    }
+  },
+  {
+    "row_id": 247,
+    "event_id": "evt_393020ba3efc46a2c112",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 16,
+    "timestamp": "2026-08-12T19:45:40.048Z",
+    "kind": "model.decision",
+    "actor": "contestant",
+    "payload_json": "{\"action\":\"final\",\"rationale_summary\":\"Evidence spans the required independent sources and supports a stable causal hypothesis.\",\"test_double\":true,\"tool\":null,\"turn\":5}",
+    "payload_hash": "a3caabd7cb6d861677a9b08e045eccc9aaaaa2729b75634a50f4e098cf525ab5",
+    "redacted": false,
+    "payload": {
+      "action": "final",
+      "rationale_summary": "Evidence spans the required independent sources and supports a stable causal hypothesis.",
+      "test_double": true,
+      "tool": null,
+      "turn": 5
+    }
+  },
+  {
+    "row_id": 248,
+    "event_id": "evt_db57c39e82873d8df8b1",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 17,
+    "timestamp": "2026-08-12T19:45:40.050Z",
+    "kind": "grader.result",
+    "actor": "code-grader",
+    "payload_json": "{\"score\":{\"dimensions\":{\"engineering_agility\":{\"normalized\":1,\"weight\":5,\"weighted\":5},\"evidence\":{\"normalized\":1,\"weight\":15,\"weighted\":15},\"open_world\":{\"normalized\":1,\"weight\":15,\"weighted\":15},\"proactive\":{\"normalized\":1,\"weight\":5,\"weighted\":5},\"rca\":{\"normalized\":1,\"weight\":15,\"weighted\":15},\"resource_cost\":{\"normalized\":1,\"weight\":5,\"weighted\":5},\"task_outcome\":{\"normalized\":1,\"weight\":25,\"weighted\":25},\"trajectory\":{\"normalized\":1,\"weight\":15,\"weighted\":15}},\"evidence_hits\":[\"alert:a-29\",\"metric:metric-ingest-429\",\"probe:probe-connector\"],\"grader_version\":\"m1-code-grader-1.0.0\",\"hard_gates\":{\"evidence_traceable\":true,\"no_forbidden_claim\":true,\"recovery\":true,\"root_cause\":true},\"passed\":true,\"total\":100}}",
+    "payload_hash": "2f1649f47d4cc5547321f94a3d1cb60e547868bbd69f09bb15721edebeb09b31",
+    "redacted": false,
+    "payload": {
+      "score": {
+        "dimensions": {
+          "engineering_agility": {
+            "normalized": 1,
+            "weight": 5,
+            "weighted": 5
+          },
+          "evidence": {
+            "normalized": 1,
+            "weight": 15,
+            "weighted": 15
+          },
+          "open_world": {
+            "normalized": 1,
+            "weight": 15,
+            "weighted": 15
+          },
+          "proactive": {
+            "normalized": 1,
+            "weight": 5,
+            "weighted": 5
+          },
+          "rca": {
+            "normalized": 1,
+            "weight": 15,
+            "weighted": 15
+          },
+          "resource_cost": {
+            "normalized": 1,
+            "weight": 5,
+            "weighted": 5
+          },
+          "task_outcome": {
+            "normalized": 1,
+            "weight": 25,
+            "weighted": 25
+          },
+          "trajectory": {
+            "normalized": 1,
+            "weight": 15,
+            "weighted": 15
+          }
+        },
+        "evidence_hits": [
+          "alert:a-29",
+          "metric:metric-ingest-429",
+          "probe:probe-connector"
+        ],
+        "grader_version": "m1-code-grader-1.0.0",
+        "hard_gates": {
+          "evidence_traceable": true,
+          "no_forbidden_claim": true,
+          "recovery": true,
+          "root_cause": true
+        },
+        "passed": true,
+        "total": 100
+      }
+    }
+  },
+  {
+    "row_id": 249,
+    "event_id": "evt_809b01abb092e1b34a92",
+    "trial_id": "trial_32477910f993425c4e11",
+    "seq": 18,
+    "timestamp": "2026-08-12T19:45:40.050Z",
+    "kind": "trial.completed",
+    "actor": "runner",
+    "payload_json": "{\"outcome_status\":\"resolved\",\"score\":100,\"status\":\"COMPLETED\"}",
+    "payload_hash": "111abcbc22ca25a9c0e681b7820922c9ff55724daffafde637170cbcb2738a32",
+    "redacted": false,
+    "payload": {
+      "outcome_status": "resolved",
+      "score": 100,
+      "status": "COMPLETED"
+    }
+  }
+]

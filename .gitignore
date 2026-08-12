@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.next/
+.wrangler/
+.env
+.env.*
+!.env.example
+runtime/
+coverage/
+_work/
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+~$*.docx

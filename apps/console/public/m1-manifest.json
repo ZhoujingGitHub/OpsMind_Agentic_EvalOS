@@ -1,0 +1,66 @@
+{
+  "manifest_version": "1.0",
+  "name": "M1 trusted-kernel smoke",
+  "suite": {
+    "id": "m1-smoke",
+    "version": "1.0.0"
+  },
+  "dataset": {
+    "id": "m1-l0-fixtures",
+    "version": "1.0.0",
+    "sha256": "7d7174237eb508145444fb2993bf73d636017a36f6ee21271a09ca0e8a7a2d3c"
+  },
+  "contestants": [
+    {
+      "id": "mock-contestant-a",
+      "adapter_version": "1.0.0",
+      "code_commit": "m1-local",
+      "image_digest": "sha256:mock-a"
+    },
+    {
+      "id": "mock-contestant-b",
+      "adapter_version": "1.0.0",
+      "code_commit": "m1-local",
+      "image_digest": "sha256:mock-b"
+    }
+  ],
+  "cases": [
+    "SMOKE-RCA-001",
+    "SMOKE-RECOVERY-001"
+  ],
+  "seeds": [
+    101,
+    202,
+    303
+  ],
+  "model": {
+    "provider": "deepseek",
+    "id": "deepseek-v4-flash",
+    "interface": "anthropic",
+    "thinking": "enabled",
+    "temperature": 0
+  },
+  "budget": {
+    "input_tokens": 4000,
+    "output_tokens": 2000,
+    "tool_calls": 10,
+    "wallclock_ms": 30000,
+    "compute_ms": 15000,
+    "storage_bytes": 1048576
+  },
+  "policy": {
+    "allowed_tools": [
+      "get_alerts",
+      "query_metrics",
+      "query_logs",
+      "run_probe"
+    ],
+    "forbidden_actions": [
+      "shell",
+      "write_production",
+      "change_policy",
+      "read_hidden_answer"
+    ],
+    "heartbeat_ms": 5000
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "opsmind-agentic-evalos",
+  "version": "0.1.0-m1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "test": "node --test packages/kernel/test/*.test.mjs packages/agent-runtime/test/*.test.mjs services/control-api/test/*.test.mjs",
+    "accept:m1": "node scripts/run-m1-acceptance.mjs",
+    "api": "node services/control-api/src/server.mjs",
+    "adapter:check": "node packages/agent-runtime/scripts/check-adapter.mjs",
+    "console:lint": "npm --prefix apps/console run lint",
+    "console:build": "npm --prefix apps/console run build",
+    "console:test": "npm --prefix apps/console test",
+    "m1:verify": "npm test && npm run adapter:check && npm run console:lint && npm run console:test"
+  }
+}

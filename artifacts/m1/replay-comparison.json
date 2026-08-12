@@ -1,0 +1,16 @@
+[
+  {
+    "replay_id": "replay_6d727f8ca54f5bfb9e5d",
+    "source_id": "trial_e5170237dd4ec29dcd09",
+    "outcome_match": true,
+    "score_match": true,
+    "trajectory_match": true
+  },
+  {
+    "replay_id": "replay_332e71156165ce61cbbb",
+    "source_id": "trial_32477910f993425c4e11",
+    "outcome_match": true,
+    "score_match": true,
+    "trajectory_match": true
+  }
+]

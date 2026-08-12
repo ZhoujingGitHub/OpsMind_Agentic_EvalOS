@@ -1,0 +1,263 @@
+{
+  "generated_at": "2026-08-12T19:45:40.360Z",
+  "gate": "G1",
+  "status": "PASSED",
+  "summary": {
+    "trials": 12,
+    "total_trials": 12,
+    "replay_rate": 0.16666666666666666,
+    "average_score": 100,
+    "first_event_ms": 7,
+    "ledger_valid": true
+  },
+  "experiment": {
+    "id": "exp_567f7a6c10c9f8a34671",
+    "name": "M1 trusted-kernel smoke",
+    "status": "PASSED",
+    "manifest_hash": "158e72409fcb6eba53990babf1658e43e4860be1ac17205ef37dffad32caab9b",
+    "model": "deepseek-v4-flash",
+    "runtime": "Claude Agent SDK contract / deterministic G1 replay"
+  },
+  "trials": [
+    {
+      "id": "trial_32477910f993425c4e11",
+      "case_id": "SMOKE-RECOVERY-001",
+      "seed": 101,
+      "blind_id": "candidate-amber",
+      "status": "COMPLETED",
+      "score": 100,
+      "tool_calls": 4
+    },
+    {
+      "id": "trial_790af998987004e5cbf6",
+      "case_id": "SMOKE-RECOVERY-001",
+      "seed": 101,
+      "blind_id": "candidate-cobalt",
+      "status": "COMPLETED",
+      "score": 100,
+      "tool_calls": 4
+    },
+    {
+      "id": "trial_ab33316b89832024a268",
+      "case_id": "SMOKE-RECOVERY-001",
+      "seed": 303,
+      "blind_id": "candidate-amber",
+      "status": "COMPLETED",
+      "score": 100,
+      "tool_calls": 4
+    },
+    {
+      "id": "trial_3f2afe186f192a050d36",
+      "case_id": "SMOKE-RECOVERY-001",
+      "seed": 303,
+      "blind_id": "candidate-cobalt",
+      "status": "COMPLETED",
+      "score": 100,
+      "tool_calls": 4
+    },
+    {
+      "id": "trial_a2a72a0e985f1efe8692",
+      "case_id": "SMOKE-RECOVERY-001",
+      "seed": 202,
+      "blind_id": "candidate-amber",
+      "status": "COMPLETED",
+      "score": 100,
+      "tool_calls": 4
+    },
+    {
+      "id": "trial_5e4bac435a8010aee8a3",
+      "case_id": "SMOKE-RECOVERY-001",
+      "seed": 202,
+      "blind_id": "candidate-cobalt",
+      "status": "COMPLETED",
+      "score": 100,
+      "tool_calls": 4
+    },
+    {
+      "id": "trial_e5170237dd4ec29dcd09",
+      "case_id": "SMOKE-RCA-001",
+      "seed": 101,
+      "blind_id": "candidate-cobalt",
+      "status": "COMPLETED",
+      "score": 100,
+      "tool_calls": 3
+    },
+    {
+      "id": "trial_6738ed0ed262d012fbc0",
+      "case_id": "SMOKE-RCA-001",
+      "seed": 101,
+      "blind_id": "candidate-amber",
+      "status": "COMPLETED",
+      "score": 100,
+      "tool_calls": 3
+    }
+  ],
+  "trace": [
+    {
+      "seq": 1,
+      "kind": "trial.started",
+      "actor": "runner",
+      "timestamp": "2026-08-12T19:45:40.029Z",
+      "redacted": false,
+      "summary": "trial.started"
+    },
+    {
+      "seq": 2,
+      "kind": "runner.heartbeat",
+      "actor": "runner",
+      "timestamp": "2026-08-12T19:45:40.030Z",
+      "redacted": false,
+      "summary": "runner.heartbeat"
+    },
+    {
+      "seq": 3,
+      "kind": "environment.snapshot",
+      "actor": "kernel",
+      "timestamp": "2026-08-12T19:45:40.031Z",
+      "redacted": true,
+      "summary": "environment.snapshot"
+    },
+    {
+      "seq": 4,
+      "kind": "model.decision",
+      "actor": "contestant",
+      "timestamp": "2026-08-12T19:45:40.033Z",
+      "redacted": false,
+      "summary": "get_alerts"
+    },
+    {
+      "seq": 5,
+      "kind": "tool.call",
+      "actor": "contestant",
+      "timestamp": "2026-08-12T19:45:40.034Z",
+      "redacted": false,
+      "summary": "get_alerts"
+    },
+    {
+      "seq": 6,
+      "kind": "tool.result",
+      "actor": "environment",
+      "timestamp": "2026-08-12T19:45:40.035Z",
+      "redacted": false,
+      "summary": "get_alerts"
+    },
+    {
+      "seq": 7,
+      "kind": "model.decision",
+      "actor": "contestant",
+      "timestamp": "2026-08-12T19:45:40.037Z",
+      "redacted": false,
+      "summary": "query_metrics"
+    },
+    {
+      "seq": 8,
+      "kind": "tool.call",
+      "actor": "contestant",
+      "timestamp": "2026-08-12T19:45:40.038Z",
+      "redacted": false,
+      "summary": "query_metrics"
+    },
+    {
+      "seq": 9,
+      "kind": "tool.result",
+      "actor": "environment",
+      "timestamp": "2026-08-12T19:45:40.039Z",
+      "redacted": false,
+      "summary": "query_metrics"
+    },
+    {
+      "seq": 10,
+      "kind": "model.decision",
+      "actor": "contestant",
+      "timestamp": "2026-08-12T19:45:40.041Z",
+      "redacted": false,
+      "summary": "query_logs"
+    },
+    {
+      "seq": 11,
+      "kind": "tool.call",
+      "actor": "contestant",
+      "timestamp": "2026-08-12T19:45:40.042Z",
+      "redacted": false,
+      "summary": "query_logs"
+    },
+    {
+      "seq": 12,
+      "kind": "tool.result",
+      "actor": "environment",
+      "timestamp": "2026-08-12T19:45:40.043Z",
+      "redacted": false,
+      "summary": "query_logs"
+    }
+  ],
+  "checks": [
+    {
+      "id": "required_trial_count",
+      "passed": true
+    },
+    {
+      "id": "all_trials_completed",
+      "passed": true
+    },
+    {
+      "id": "all_code_grades_passed",
+      "passed": true
+    },
+    {
+      "id": "runner_restart_recovery",
+      "passed": true
+    },
+    {
+      "id": "idempotency",
+      "passed": true
+    },
+    {
+      "id": "trial_isolation",
+      "passed": true
+    },
+    {
+      "id": "blind_identity",
+      "passed": true
+    },
+    {
+      "id": "seeded_random_order",
+      "passed": true
+    },
+    {
+      "id": "budget_soft_and_hard_limits",
+      "passed": true
+    },
+    {
+      "id": "ledger_hash_chain",
+      "passed": true
+    },
+    {
+      "id": "trace_first_event",
+      "passed": true
+    },
+    {
+      "id": "trace_heartbeat",
+      "passed": true
+    },
+    {
+      "id": "trace_cursor",
+      "passed": true
+    },
+    {
+      "id": "trace_redaction",
+      "passed": true
+    },
+    {
+      "id": "deterministic_replay",
+      "passed": true
+    },
+    {
+      "id": "minimum_replay_rate",
+      "passed": true
+    },
+    {
+      "id": "claude_sdk_deepseek_contract",
+      "passed": true
+    }
+  ]
+}

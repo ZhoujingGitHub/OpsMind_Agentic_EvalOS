@@ -1,0 +1,201 @@
+{
+  "gate": "G1",
+  "status": "PASSED",
+  "accepted": true,
+  "run_id": "g1-20260812194540-23440",
+  "accepted_at": "2026-08-12T19:45:40.360Z",
+  "git_commit": "working-tree",
+  "experiment_id": "exp_567f7a6c10c9f8a34671",
+  "manifest_hash": "158e72409fcb6eba53990babf1658e43e4860be1ac17205ef37dffad32caab9b",
+  "dataset_hash": "7d7174237eb508145444fb2993bf73d636017a36f6ee21271a09ca0e8a7a2d3c",
+  "execution": {
+    "original_trials_executed": 12,
+    "replay_trials_executed": 2,
+    "original_trials_completed": 12,
+    "replay_count": 2,
+    "replay_rate": 0.16666666666666666,
+    "average_score": 100,
+    "maximum_first_trace_event_ms": 7,
+    "model_contract": {
+      "sdk": "@anthropic-ai/claude-agent-sdk",
+      "baseUrl": "https://api.deepseek.com/anthropic",
+      "model": "deepseek-v4-flash",
+      "orchestration": "model-driven-tool-loop",
+      "graphFramework": null
+    },
+    "acceptance_model_execution": "deterministic replay test double (no external API key available)"
+  },
+  "ledger": {
+    "valid": true,
+    "entries": 32,
+    "head_hash": "ebf9ada6d9964ec724311da918db238011f94a4d866df36fd835078c19acc640",
+    "errors": []
+  },
+  "replay_comparisons": [
+    {
+      "replay_id": "replay_6d727f8ca54f5bfb9e5d",
+      "source_id": "trial_e5170237dd4ec29dcd09",
+      "outcome_match": true,
+      "score_match": true,
+      "trajectory_match": true
+    },
+    {
+      "replay_id": "replay_332e71156165ce61cbbb",
+      "source_id": "trial_32477910f993425c4e11",
+      "outcome_match": true,
+      "score_match": true,
+      "trajectory_match": true
+    }
+  ],
+  "checks": [
+    {
+      "id": "required_trial_count",
+      "passed": true,
+      "evidence": "2 cases x 2 contestants x 3 seeds",
+      "actual": 12,
+      "expected": 12
+    },
+    {
+      "id": "all_trials_completed",
+      "passed": true,
+      "evidence": "All original smoke Trials reached COMPLETED",
+      "actual": 12,
+      "expected": 12
+    },
+    {
+      "id": "all_code_grades_passed",
+      "passed": true,
+      "evidence": "Every deterministic code grade passed",
+      "actual": 12,
+      "expected": 12
+    },
+    {
+      "id": "runner_restart_recovery",
+      "passed": true,
+      "evidence": "Expired lease was requeued and the same Trial completed",
+      "actual": 2,
+      "expected": ">=2"
+    },
+    {
+      "id": "idempotency",
+      "passed": true,
+      "evidence": "Duplicate create returned the existing experiment",
+      "actual": false,
+      "expected": false
+    },
+    {
+      "id": "trial_isolation",
+      "passed": true,
+      "evidence": "Every Trial has a dedicated namespace",
+      "actual": 12,
+      "expected": 12
+    },
+    {
+      "id": "blind_identity",
+      "passed": true,
+      "evidence": "Public Trial identity uses blind labels",
+      "actual": [
+        "candidate-amber",
+        "candidate-cobalt"
+      ],
+      "expected": "2 non-revealing labels"
+    },
+    {
+      "id": "seeded_random_order",
+      "passed": true,
+      "evidence": "A/B order is deterministic per seed and varies across pairs",
+      "actual": 2,
+      "expected": ">=2"
+    },
+    {
+      "id": "budget_soft_and_hard_limits",
+      "passed": true,
+      "evidence": "80% warning emitted and 100% consumption blocked",
+      "actual": {
+        "warnings": 1,
+        "hardStopped": true
+      },
+      "expected": {
+        "warnings": 1,
+        "hardStopped": true
+      }
+    },
+    {
+      "id": "ledger_hash_chain",
+      "passed": true,
+      "evidence": "Append-only ledger hash chain verifies",
+      "actual": 32,
+      "expected": ">0"
+    },
+    {
+      "id": "trace_first_event",
+      "passed": true,
+      "evidence": "Maximum first Trace event latency",
+      "actual": 7,
+      "expected": "<=2000"
+    },
+    {
+      "id": "trace_heartbeat",
+      "passed": true,
+      "evidence": "Heartbeat policy and events present",
+      "actual": 5000,
+      "expected": "<=10000"
+    },
+    {
+      "id": "trace_cursor",
+      "passed": true,
+      "evidence": "Cursor reads the next event without duplication",
+      "actual": 12,
+      "expected": 12
+    },
+    {
+      "id": "trace_redaction",
+      "passed": true,
+      "evidence": "Injected smoke secret was redacted before persistence",
+      "actual": 14,
+      "expected": ">0"
+    },
+    {
+      "id": "deterministic_replay",
+      "passed": true,
+      "evidence": "Two replays match outcome, score, and model/tool trajectory",
+      "actual": [
+        {
+          "replay_id": "replay_6d727f8ca54f5bfb9e5d",
+          "source_id": "trial_e5170237dd4ec29dcd09",
+          "outcome_match": true,
+          "score_match": true,
+          "trajectory_match": true
+        },
+        {
+          "replay_id": "replay_332e71156165ce61cbbb",
+          "source_id": "trial_32477910f993425c4e11",
+          "outcome_match": true,
+          "score_match": true,
+          "trajectory_match": true
+        }
+      ],
+      "expected": "all true"
+    },
+    {
+      "id": "minimum_replay_rate",
+      "passed": true,
+      "evidence": "Replay rate rounds 10% of 12 up to two Trials",
+      "actual": 0.16666666666666666,
+      "expected": ">=0.1"
+    },
+    {
+      "id": "claude_sdk_deepseek_contract",
+      "passed": true,
+      "evidence": "Live adapter contract uses Claude Agent SDK + DeepSeek V4 Flash without a graph framework",
+      "actual": {
+        "sdk": "@anthropic-ai/claude-agent-sdk",
+        "baseUrl": "https://api.deepseek.com/anthropic",
+        "model": "deepseek-v4-flash",
+        "orchestration": "model-driven-tool-loop",
+        "graphFramework": null
+      },
+      "expected": "Claude SDK + DeepSeek V4 Flash"
+    }
+  ]
+}

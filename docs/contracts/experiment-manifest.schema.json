@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsmind.local/contracts/experiment-manifest.schema.json",
+  "title": "OpsMind EvalOS Experiment Manifest",
+  "type": "object",
+  "required": ["manifest_version", "name", "suite", "dataset", "contestants", "cases", "seeds", "model", "budget", "policy"],
+  "properties": {
+    "manifest_version": { "const": "1.0" },
+    "name": { "type": "string", "minLength": 1 },
+    "suite": {
+      "type": "object",
+      "required": ["id", "version"],
+      "properties": { "id": { "type": "string" }, "version": { "type": "string" } },
+      "additionalProperties": false
+    },
+    "dataset": {
+      "type": "object",
+      "required": ["id", "version", "sha256"],
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "contestants": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["id", "adapter_version", "code_commit", "image_digest"],
+        "properties": {
+          "id": { "type": "string" },
+          "adapter_version": { "type": "string" },
+          "code_commit": { "type": "string" },
+          "image_digest": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "cases": { "type": "array", "minItems": 1, "items": { "type": "string" }, "uniqueItems": true },
+    "seeds": { "type": "array", "minItems": 1, "items": { "type": "integer" }, "uniqueItems": true },
+    "model": {
+      "type": "object",
+      "required": ["provider", "id", "interface", "thinking", "temperature"],
+      "properties": {
+        "provider": { "const": "deepseek" },
+        "id": { "const": "deepseek-v4-flash" },
+        "interface": { "const": "anthropic" },
+        "thinking": { "enum": ["enabled", "disabled"] },
+        "temperature": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "budget": { "$ref": "#/$defs/budget" },
+    "policy": {
+      "type": "object",
+      "required": ["allowed_tools", "forbidden_actions", "heartbeat_ms"],
+      "properties": {
+        "allowed_tools": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "forbidden_actions": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "heartbeat_ms": { "type": "integer", "minimum": 1000, "maximum": 10000 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "budget": {
+      "type": "object",
+      "required": ["input_tokens", "output_tokens", "tool_calls", "wallclock_ms", "compute_ms", "storage_bytes"],
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 1 },
+        "output_tokens": { "type": "integer", "minimum": 1 },
+        "tool_calls": { "type": "integer", "minimum": 1 },
+        "wallclock_ms": { "type": "integer", "minimum": 1 },
+        "compute_ms": { "type": "integer", "minimum": 1 },
+        "storage_bytes": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
+
