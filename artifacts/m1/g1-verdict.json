@@ -2,10 +2,10 @@
   "gate": "G1",
   "status": "PASSED",
   "accepted": true,
-  "run_id": "g1-20260812194540-23440",
-  "accepted_at": "2026-08-12T19:45:40.360Z",
-  "git_commit": "working-tree",
-  "experiment_id": "exp_567f7a6c10c9f8a34671",
+  "run_id": "38cb1f7a42151c707dd6005ad78d5c004766a090",
+  "accepted_at": "2026-08-12T20:09:44.889Z",
+  "git_commit": "38cb1f7a42151c707dd6005ad78d5c004766a090",
+  "experiment_id": "exp_69cc71348cdbd0e9ba49",
   "manifest_hash": "158e72409fcb6eba53990babf1658e43e4860be1ac17205ef37dffad32caab9b",
   "dataset_hash": "7d7174237eb508145444fb2993bf73d636017a36f6ee21271a09ca0e8a7a2d3c",
   "execution": {
@@ -27,21 +27,21 @@
   },
   "ledger": {
     "valid": true,
-    "entries": 32,
-    "head_hash": "ebf9ada6d9964ec724311da918db238011f94a4d866df36fd835078c19acc640",
+    "entries": 61,
+    "head_hash": "cd133735707310b6e835285fbfdcee7de36a769af3dd2a13263bff93b43c351d",
     "errors": []
   },
   "replay_comparisons": [
     {
-      "replay_id": "replay_6d727f8ca54f5bfb9e5d",
-      "source_id": "trial_e5170237dd4ec29dcd09",
+      "replay_id": "replay_5354665bb0a1e913f07b",
+      "source_id": "trial_8add9d54109616154152",
       "outcome_match": true,
       "score_match": true,
       "trajectory_match": true
     },
     {
-      "replay_id": "replay_332e71156165ce61cbbb",
-      "source_id": "trial_32477910f993425c4e11",
+      "replay_id": "replay_f459acb292fc15a74108",
+      "source_id": "trial_0e5874a0240c9c7adcf8",
       "outcome_match": true,
       "score_match": true,
       "trajectory_match": true
@@ -124,7 +124,7 @@
       "id": "ledger_hash_chain",
       "passed": true,
       "evidence": "Append-only ledger hash chain verifies",
-      "actual": 32,
+      "actual": 61,
       "expected": ">0"
     },
     {
@@ -161,15 +161,15 @@
       "evidence": "Two replays match outcome, score, and model/tool trajectory",
       "actual": [
         {
-          "replay_id": "replay_6d727f8ca54f5bfb9e5d",
-          "source_id": "trial_e5170237dd4ec29dcd09",
+          "replay_id": "replay_5354665bb0a1e913f07b",
+          "source_id": "trial_8add9d54109616154152",
           "outcome_match": true,
           "score_match": true,
           "trajectory_match": true
         },
         {
-          "replay_id": "replay_332e71156165ce61cbbb",
-          "source_id": "trial_32477910f993425c4e11",
+          "replay_id": "replay_f459acb292fc15a74108",
+          "source_id": "trial_0e5874a0240c9c7adcf8",
           "outcome_match": true,
           "score_match": true,
           "trajectory_match": true
