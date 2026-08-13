@@ -77,7 +77,11 @@ export async function judgeBlindTrial({ caseSpec, outcome, namespace, apiKey, mo
           // compatible provider repairs its first JSON response.  Four turns
           // remain a bounded no-tool Judge call while allowing that repair.
           maxTurns: 4,
-          maxBudgetUsd: 0.1,
+          // DeepSeek's Anthropic-compatible usage accounting can cross the
+          // SDK's default/low cap during structured-output repair.  Keep the
+          // Judge strictly bounded, but align its cap with one contestant
+          // Trial so a valid response is not discarded as infrastructure loss.
+          maxBudgetUsd: 0.5,
           thinking: { type: "disabled" },
           cwd: namespace,
           tools: [],
