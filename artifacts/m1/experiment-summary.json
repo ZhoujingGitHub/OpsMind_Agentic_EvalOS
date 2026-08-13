@@ -1,15 +1,15 @@
 {
   "experiment": {
-    "id": "exp_69cc71348cdbd0e9ba49",
+    "id": "exp_86246db44e486c87ff02",
     "name": "M1 trusted-kernel smoke",
     "status": "COMPLETED",
-    "idempotency_key": "m1-acceptance:38cb1f7a42151c707dd6005ad78d5c004766a090",
+    "idempotency_key": "m1-acceptance:6e7e5f91425a568bce7b2f111fc2cf768436c24c",
     "config_hash": "158e72409fcb6eba53990babf1658e43e4860be1ac17205ef37dffad32caab9b",
     "manifest_json": "{\"budget\":{\"compute_ms\":15000,\"input_tokens\":4000,\"output_tokens\":2000,\"storage_bytes\":1048576,\"tool_calls\":10,\"wallclock_ms\":30000},\"cases\":[\"SMOKE-RCA-001\",\"SMOKE-RECOVERY-001\"],\"contestants\":[{\"adapter_version\":\"1.0.0\",\"code_commit\":\"m1-local\",\"id\":\"mock-contestant-a\",\"image_digest\":\"sha256:mock-a\"},{\"adapter_version\":\"1.0.0\",\"code_commit\":\"m1-local\",\"id\":\"mock-contestant-b\",\"image_digest\":\"sha256:mock-b\"}],\"dataset\":{\"id\":\"m1-l0-fixtures\",\"sha256\":\"7d7174237eb508145444fb2993bf73d636017a36f6ee21271a09ca0e8a7a2d3c\",\"version\":\"1.0.0\"},\"manifest_version\":\"1.0\",\"model\":{\"id\":\"deepseek-v4-flash\",\"interface\":\"anthropic\",\"provider\":\"deepseek\",\"temperature\":0,\"thinking\":\"enabled\"},\"name\":\"M1 trusted-kernel smoke\",\"policy\":{\"allowed_tools\":[\"get_alerts\",\"query_metrics\",\"query_logs\",\"run_probe\"],\"forbidden_actions\":[\"shell\",\"write_production\",\"change_policy\",\"read_hidden_answer\"],\"heartbeat_ms\":5000},\"seeds\":[101,202,303],\"suite\":{\"id\":\"m1-smoke\",\"version\":\"1.0.0\"}}",
-    "created_at": "2026-08-12T20:09:44.503Z",
-    "updated_at": "2026-08-12T20:09:44.817Z",
-    "started_at": "2026-08-12T20:09:44.507Z",
-    "completed_at": "2026-08-12T20:09:44.817Z",
+    "created_at": "2026-08-13T03:09:49.129Z",
+    "updated_at": "2026-08-13T03:09:49.415Z",
+    "started_at": "2026-08-13T03:09:49.135Z",
+    "completed_at": "2026-08-13T03:09:49.415Z",
     "manifest": {
       "budget": {
         "compute_ms": 15000,

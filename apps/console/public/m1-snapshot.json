@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-12T20:09:44.889Z",
+  "generated_at": "2026-08-13T03:09:49.474Z",
   "gate": "G1",
   "status": "PASSED",
   "summary": {
@@ -11,7 +11,7 @@
     "ledger_valid": true
   },
   "experiment": {
-    "id": "exp_69cc71348cdbd0e9ba49",
+    "id": "exp_86246db44e486c87ff02",
     "name": "M1 trusted-kernel smoke",
     "status": "PASSED",
     "manifest_hash": "158e72409fcb6eba53990babf1658e43e4860be1ac17205ef37dffad32caab9b",
@@ -20,61 +20,43 @@
   },
   "trials": [
     {
-      "id": "trial_8add9d54109616154152",
+      "id": "trial_bb0d68ef5028e30c5a05",
       "case_id": "SMOKE-RCA-001",
-      "seed": 101,
-      "blind_id": "candidate-amber",
-      "status": "COMPLETED",
-      "score": 100,
-      "tool_calls": 3
-    },
-    {
-      "id": "trial_e72ba7305ff7aef74d7d",
-      "case_id": "SMOKE-RCA-001",
-      "seed": 101,
-      "blind_id": "candidate-cobalt",
-      "status": "COMPLETED",
-      "score": 100,
-      "tool_calls": 3
-    },
-    {
-      "id": "trial_0e5874a0240c9c7adcf8",
-      "case_id": "SMOKE-RECOVERY-001",
-      "seed": 303,
-      "blind_id": "candidate-amber",
-      "status": "COMPLETED",
-      "score": 100,
-      "tool_calls": 4
-    },
-    {
-      "id": "trial_429793c06f9dea6816a1",
-      "case_id": "SMOKE-RECOVERY-001",
       "seed": 303,
       "blind_id": "candidate-cobalt",
       "status": "COMPLETED",
       "score": 100,
-      "tool_calls": 4
-    },
-    {
-      "id": "trial_d4935e4bf2ab2a8fe6a5",
-      "case_id": "SMOKE-RCA-001",
-      "seed": 202,
-      "blind_id": "candidate-cobalt",
-      "status": "COMPLETED",
-      "score": 100,
       "tool_calls": 3
     },
     {
-      "id": "trial_0d9216dcdb2e40393f83",
+      "id": "trial_451f3d6935ee61c29312",
       "case_id": "SMOKE-RCA-001",
-      "seed": 202,
+      "seed": 303,
       "blind_id": "candidate-amber",
       "status": "COMPLETED",
       "score": 100,
       "tool_calls": 3
     },
     {
-      "id": "trial_cff0e88a5815d830252f",
+      "id": "trial_d682b2cbb08858398b98",
+      "case_id": "SMOKE-RECOVERY-001",
+      "seed": 202,
+      "blind_id": "candidate-amber",
+      "status": "COMPLETED",
+      "score": 100,
+      "tool_calls": 4
+    },
+    {
+      "id": "trial_5760a66ccf63380096f3",
+      "case_id": "SMOKE-RECOVERY-001",
+      "seed": 202,
+      "blind_id": "candidate-cobalt",
+      "status": "COMPLETED",
+      "score": 100,
+      "tool_calls": 4
+    },
+    {
+      "id": "trial_c6fc6fad200b13c5bac3",
       "case_id": "SMOKE-RECOVERY-001",
       "seed": 101,
       "blind_id": "candidate-amber",
@@ -83,10 +65,28 @@
       "tool_calls": 4
     },
     {
-      "id": "trial_830edddd8c1edbfec448",
+      "id": "trial_af396caee65a6002ab98",
       "case_id": "SMOKE-RECOVERY-001",
       "seed": 101,
       "blind_id": "candidate-cobalt",
+      "status": "COMPLETED",
+      "score": 100,
+      "tool_calls": 4
+    },
+    {
+      "id": "trial_ccefdf6f5929f4361ca9",
+      "case_id": "SMOKE-RECOVERY-001",
+      "seed": 303,
+      "blind_id": "candidate-cobalt",
+      "status": "COMPLETED",
+      "score": 100,
+      "tool_calls": 4
+    },
+    {
+      "id": "trial_093ff3b240c5642405e3",
+      "case_id": "SMOKE-RECOVERY-001",
+      "seed": 303,
+      "blind_id": "candidate-amber",
       "status": "COMPLETED",
       "score": 100,
       "tool_calls": 4
@@ -97,7 +97,7 @@
       "seq": 1,
       "kind": "trial.started",
       "actor": "runner",
-      "timestamp": "2026-08-12T20:09:44.515Z",
+      "timestamp": "2026-08-13T03:09:49.143Z",
       "redacted": false,
       "summary": "trial.started"
     },
@@ -105,7 +105,7 @@
       "seq": 2,
       "kind": "runner.heartbeat",
       "actor": "runner",
-      "timestamp": "2026-08-12T20:09:44.516Z",
+      "timestamp": "2026-08-13T03:09:49.144Z",
       "redacted": false,
       "summary": "runner.heartbeat"
     },
@@ -113,7 +113,7 @@
       "seq": 3,
       "kind": "environment.snapshot",
       "actor": "kernel",
-      "timestamp": "2026-08-12T20:09:44.517Z",
+      "timestamp": "2026-08-13T03:09:49.145Z",
       "redacted": true,
       "summary": "environment.snapshot"
     },
@@ -121,7 +121,7 @@
       "seq": 4,
       "kind": "model.decision",
       "actor": "contestant",
-      "timestamp": "2026-08-12T20:09:44.518Z",
+      "timestamp": "2026-08-13T03:09:49.146Z",
       "redacted": false,
       "summary": "get_alerts"
     },
@@ -129,7 +129,7 @@
       "seq": 5,
       "kind": "tool.call",
       "actor": "contestant",
-      "timestamp": "2026-08-12T20:09:44.519Z",
+      "timestamp": "2026-08-13T03:09:49.147Z",
       "redacted": false,
       "summary": "get_alerts"
     },
@@ -137,7 +137,7 @@
       "seq": 6,
       "kind": "tool.result",
       "actor": "environment",
-      "timestamp": "2026-08-12T20:09:44.520Z",
+      "timestamp": "2026-08-13T03:09:49.149Z",
       "redacted": false,
       "summary": "get_alerts"
     },
@@ -145,49 +145,49 @@
       "seq": 7,
       "kind": "model.decision",
       "actor": "contestant",
-      "timestamp": "2026-08-12T20:09:44.521Z",
+      "timestamp": "2026-08-13T03:09:49.150Z",
       "redacted": false,
-      "summary": "query_logs"
+      "summary": "query_metrics"
     },
     {
       "seq": 8,
       "kind": "tool.call",
       "actor": "contestant",
-      "timestamp": "2026-08-12T20:09:44.522Z",
+      "timestamp": "2026-08-13T03:09:49.151Z",
       "redacted": false,
-      "summary": "query_logs"
+      "summary": "query_metrics"
     },
     {
       "seq": 9,
       "kind": "tool.result",
       "actor": "environment",
-      "timestamp": "2026-08-12T20:09:44.523Z",
+      "timestamp": "2026-08-13T03:09:49.153Z",
       "redacted": false,
-      "summary": "query_logs"
+      "summary": "query_metrics"
     },
     {
       "seq": 10,
       "kind": "model.decision",
       "actor": "contestant",
-      "timestamp": "2026-08-12T20:09:44.525Z",
+      "timestamp": "2026-08-13T03:09:49.155Z",
       "redacted": false,
-      "summary": "query_metrics"
+      "summary": "query_logs"
     },
     {
       "seq": 11,
       "kind": "tool.call",
       "actor": "contestant",
-      "timestamp": "2026-08-12T20:09:44.526Z",
+      "timestamp": "2026-08-13T03:09:49.156Z",
       "redacted": false,
-      "summary": "query_metrics"
+      "summary": "query_logs"
     },
     {
       "seq": 12,
       "kind": "tool.result",
       "actor": "environment",
-      "timestamp": "2026-08-12T20:09:44.527Z",
+      "timestamp": "2026-08-13T03:09:49.157Z",
       "redacted": false,
-      "summary": "query_metrics"
+      "summary": "query_logs"
     }
   ],
   "checks": [

@@ -1,29 +1,29 @@
 [
   {
-    "row_id": 661,
-    "event_id": "evt_12fac19d89022b4a308a",
-    "trial_id": "trial_8add9d54109616154152",
+    "row_id": 892,
+    "event_id": "evt_f36f00568a3947b8aff9",
+    "trial_id": "trial_bb0d68ef5028e30c5a05",
     "seq": 1,
-    "timestamp": "2026-08-12T20:09:44.515Z",
+    "timestamp": "2026-08-13T03:09:49.143Z",
     "kind": "trial.started",
     "actor": "runner",
-    "payload_json": "{\"adapter_version\":\"1.0.0\",\"blind_id\":\"candidate-amber\",\"case_id\":\"SMOKE-RCA-001\",\"runtime\":\"deterministic-replay-brain\",\"seed\":101}",
-    "payload_hash": "7c9a547c6ffb80274cd81fbfa3b3fee9fbe8932247bb88e62ce4bb9701e0f370",
+    "payload_json": "{\"adapter_version\":\"1.0.0\",\"blind_id\":\"candidate-cobalt\",\"case_id\":\"SMOKE-RCA-001\",\"runtime\":\"deterministic-replay-brain\",\"seed\":303}",
+    "payload_hash": "6e743c0b4e1d7b4e4e2243b519656ee85b6e6cb8b8ed856a1f3c087add6591c1",
     "redacted": false,
     "payload": {
       "adapter_version": "1.0.0",
-      "blind_id": "candidate-amber",
+      "blind_id": "candidate-cobalt",
       "case_id": "SMOKE-RCA-001",
       "runtime": "deterministic-replay-brain",
-      "seed": 101
+      "seed": 303
     }
   },
   {
-    "row_id": 662,
-    "event_id": "evt_9efcce41b1204c93a2e2",
-    "trial_id": "trial_8add9d54109616154152",
+    "row_id": 893,
+    "event_id": "evt_442b8a8f706b4dee9820",
+    "trial_id": "trial_bb0d68ef5028e30c5a05",
     "seq": 2,
-    "timestamp": "2026-08-12T20:09:44.516Z",
+    "timestamp": "2026-08-13T03:09:49.144Z",
     "kind": "runner.heartbeat",
     "actor": "runner",
     "payload_json": "{\"heartbeat_ms\":5000}",
@@ -34,30 +34,30 @@
     }
   },
   {
-    "row_id": 663,
-    "event_id": "evt_6fadc2797aaffaa63fd2",
-    "trial_id": "trial_8add9d54109616154152",
+    "row_id": 894,
+    "event_id": "evt_4ddbab3ab917d4a0ab30",
+    "trial_id": "trial_bb0d68ef5028e30c5a05",
     "seq": 3,
-    "timestamp": "2026-08-12T20:09:44.517Z",
+    "timestamp": "2026-08-13T03:09:49.145Z",
     "kind": "environment.snapshot",
     "actor": "kernel",
-    "payload_json": "{\"connector_config\":{\"api_key\":\"[REDACTED]\"},\"isolation\":\"dedicated-trial-namespace\",\"namespace\":\"trial_8add9d54109616154152\"}",
-    "payload_hash": "97c82525051b557108dc92f0e8512e739c896c676be496391dc8ca3dbf41b5b7",
+    "payload_json": "{\"connector_config\":{\"api_key\":\"[REDACTED]\"},\"isolation\":\"dedicated-trial-namespace\",\"namespace\":\"trial_bb0d68ef5028e30c5a05\"}",
+    "payload_hash": "e4aecd2a7913f3688300713f971f4b5ab71c1a131800fb63b90ca08901e5463a",
     "redacted": true,
     "payload": {
       "connector_config": {
         "api_key": "[REDACTED]"
       },
       "isolation": "dedicated-trial-namespace",
-      "namespace": "trial_8add9d54109616154152"
+      "namespace": "trial_bb0d68ef5028e30c5a05"
     }
   },
   {
-    "row_id": 664,
-    "event_id": "evt_42a93eef5ab45b967221",
-    "trial_id": "trial_8add9d54109616154152",
+    "row_id": 895,
+    "event_id": "evt_d027d6355cc04903e4cf",
+    "trial_id": "trial_bb0d68ef5028e30c5a05",
     "seq": 4,
-    "timestamp": "2026-08-12T20:09:44.518Z",
+    "timestamp": "2026-08-13T03:09:49.146Z",
     "kind": "model.decision",
     "actor": "contestant",
     "payload_json": "{\"action\":\"tool\",\"rationale_summary\":\"Select get_alerts because it has the highest expected information gain among untried safe tools.\",\"test_double\":true,\"tool\":\"get_alerts\",\"turn\":1}",
@@ -72,11 +72,11 @@
     }
   },
   {
-    "row_id": 665,
-    "event_id": "evt_3b478abb082b16b71399",
-    "trial_id": "trial_8add9d54109616154152",
+    "row_id": 896,
+    "event_id": "evt_d25f9caa6c5016e9459c",
+    "trial_id": "trial_bb0d68ef5028e30c5a05",
     "seq": 5,
-    "timestamp": "2026-08-12T20:09:44.519Z",
+    "timestamp": "2026-08-13T03:09:49.147Z",
     "kind": "tool.call",
     "actor": "contestant",
     "payload_json": "{\"args\":{\"tenant\":\"factory-a\",\"time_window\":\"2026-08-13T00:00:00Z/2026-08-13T00:15:00Z\"},\"tool\":\"get_alerts\"}",
@@ -91,11 +91,11 @@
     }
   },
   {
-    "row_id": 666,
-    "event_id": "evt_189e3f15134d897ee364",
-    "trial_id": "trial_8add9d54109616154152",
+    "row_id": 897,
+    "event_id": "evt_8341e42adb3c9f30723c",
+    "trial_id": "trial_bb0d68ef5028e30c5a05",
     "seq": 6,
-    "timestamp": "2026-08-12T20:09:44.520Z",
+    "timestamp": "2026-08-13T03:09:49.149Z",
     "kind": "tool.result",
     "actor": "environment",
     "payload_json": "{\"args\":{\"tenant\":\"factory-a\",\"time_window\":\"2026-08-13T00:00:00Z/2026-08-13T00:15:00Z\"},\"attempt\":1,\"data\":{\"alerts\":[{\"entity\":\"UPF-01\",\"id\":\"a-17\",\"severity\":\"critical\",\"symptom\":\"N6 packet loss\"}],\"evidence_refs\":[\"alert:a-17\"],\"signals\":[{\"component\":\"upf-n6-path\",\"confidence\":0.72,\"evidence_ref\":\"alert:a-17\"}]},\"ok\":true,\"tool\":\"get_alerts\"}",
@@ -132,107 +132,30 @@
     }
   },
   {
-    "row_id": 667,
-    "event_id": "evt_c82e50a8173ad57eaa00",
-    "trial_id": "trial_8add9d54109616154152",
+    "row_id": 898,
+    "event_id": "evt_38e1a0aa16641800e970",
+    "trial_id": "trial_bb0d68ef5028e30c5a05",
     "seq": 7,
-    "timestamp": "2026-08-12T20:09:44.521Z",
+    "timestamp": "2026-08-13T03:09:49.150Z",
     "kind": "model.decision",
     "actor": "contestant",
-    "payload_json": "{\"action\":\"tool\",\"rationale_summary\":\"Select query_logs because it has the highest expected information gain among untried safe tools.\",\"test_double\":true,\"tool\":\"query_logs\",\"turn\":2}",
-    "payload_hash": "e70d7f5a9bfe962b48ad8e9e52cfb8c12f40c8710e52f95b9cb44ae44afedad6",
-    "redacted": false,
-    "payload": {
-      "action": "tool",
-      "rationale_summary": "Select query_logs because it has the highest expected information gain among untried safe tools.",
-      "test_double": true,
-      "tool": "query_logs",
-      "turn": 2
-    }
-  },
-  {
-    "row_id": 668,
-    "event_id": "evt_fb2d396c105a9fd56e5d",
-    "trial_id": "trial_8add9d54109616154152",
-    "seq": 8,
-    "timestamp": "2026-08-12T20:09:44.522Z",
-    "kind": "tool.call",
-    "actor": "contestant",
-    "payload_json": "{\"args\":{\"tenant\":\"factory-a\",\"time_window\":\"2026-08-13T00:00:00Z/2026-08-13T00:15:00Z\"},\"tool\":\"query_logs\"}",
-    "payload_hash": "c93365de887685cf86385e833865db2bb47d4dac387f4844552721c57dd2812c",
-    "redacted": false,
-    "payload": {
-      "args": {
-        "tenant": "factory-a",
-        "time_window": "2026-08-13T00:00:00Z/2026-08-13T00:15:00Z"
-      },
-      "tool": "query_logs"
-    }
-  },
-  {
-    "row_id": 669,
-    "event_id": "evt_e42f0f094309b9392725",
-    "trial_id": "trial_8add9d54109616154152",
-    "seq": 9,
-    "timestamp": "2026-08-12T20:09:44.523Z",
-    "kind": "tool.result",
-    "actor": "environment",
-    "payload_json": "{\"args\":{\"tenant\":\"factory-a\",\"time_window\":\"2026-08-13T00:00:00Z/2026-08-13T00:15:00Z\"},\"attempt\":1,\"data\":{\"evidence_refs\":[\"log:log-44\"],\"matches\":[{\"id\":\"log-44\",\"message\":\"UPF-01 N6 retransmit threshold exceeded before WMS latency rise\"}],\"signals\":[{\"component\":\"upf-n6-path\",\"confidence\":0.91,\"evidence_ref\":\"log:log-44\"}]},\"ok\":true,\"tool\":\"query_logs\"}",
-    "payload_hash": "b40a510ed12f626d384448a83c9627bbfc51987fb14f2e9a875db5d42a85cde5",
-    "redacted": false,
-    "payload": {
-      "args": {
-        "tenant": "factory-a",
-        "time_window": "2026-08-13T00:00:00Z/2026-08-13T00:15:00Z"
-      },
-      "attempt": 1,
-      "data": {
-        "evidence_refs": [
-          "log:log-44"
-        ],
-        "matches": [
-          {
-            "id": "log-44",
-            "message": "UPF-01 N6 retransmit threshold exceeded before WMS latency rise"
-          }
-        ],
-        "signals": [
-          {
-            "component": "upf-n6-path",
-            "confidence": 0.91,
-            "evidence_ref": "log:log-44"
-          }
-        ]
-      },
-      "ok": true,
-      "tool": "query_logs"
-    }
-  },
-  {
-    "row_id": 670,
-    "event_id": "evt_3bcac8da164695f92b2c",
-    "trial_id": "trial_8add9d54109616154152",
-    "seq": 10,
-    "timestamp": "2026-08-12T20:09:44.525Z",
-    "kind": "model.decision",
-    "actor": "contestant",
-    "payload_json": "{\"action\":\"tool\",\"rationale_summary\":\"Select query_metrics because it has the highest expected information gain among untried safe tools.\",\"test_double\":true,\"tool\":\"query_metrics\",\"turn\":3}",
-    "payload_hash": "4ab383da56c7bd83d33201aa4ad5f83a6441fd51f02f7d1250554337e1d9544a",
+    "payload_json": "{\"action\":\"tool\",\"rationale_summary\":\"Select query_metrics because it has the highest expected information gain among untried safe tools.\",\"test_double\":true,\"tool\":\"query_metrics\",\"turn\":2}",
+    "payload_hash": "6552d95e4933b8d6ce899f09b9657ff00d980da82df882db8f044516404d6b17",
     "redacted": false,
     "payload": {
       "action": "tool",
       "rationale_summary": "Select query_metrics because it has the highest expected information gain among untried safe tools.",
       "test_double": true,
       "tool": "query_metrics",
-      "turn": 3
+      "turn": 2
     }
   },
   {
-    "row_id": 671,
-    "event_id": "evt_fdfcf06d1fd5f8241347",
-    "trial_id": "trial_8add9d54109616154152",
-    "seq": 11,
-    "timestamp": "2026-08-12T20:09:44.526Z",
+    "row_id": 899,
+    "event_id": "evt_f8c44122590cf62a0541",
+    "trial_id": "trial_bb0d68ef5028e30c5a05",
+    "seq": 8,
+    "timestamp": "2026-08-13T03:09:49.151Z",
     "kind": "tool.call",
     "actor": "contestant",
     "payload_json": "{\"args\":{\"tenant\":\"factory-a\",\"time_window\":\"2026-08-13T00:00:00Z/2026-08-13T00:15:00Z\"},\"tool\":\"query_metrics\"}",
@@ -247,11 +170,11 @@
     }
   },
   {
-    "row_id": 672,
-    "event_id": "evt_02d2a4078389a2b5277e",
-    "trial_id": "trial_8add9d54109616154152",
-    "seq": 12,
-    "timestamp": "2026-08-12T20:09:44.527Z",
+    "row_id": 900,
+    "event_id": "evt_9bf3884cc6693f493d3e",
+    "trial_id": "trial_bb0d68ef5028e30c5a05",
+    "seq": 9,
+    "timestamp": "2026-08-13T03:09:49.153Z",
     "kind": "tool.result",
     "actor": "environment",
     "payload_json": "{\"args\":{\"tenant\":\"factory-a\",\"time_window\":\"2026-08-13T00:00:00Z/2026-08-13T00:15:00Z\"},\"attempt\":1,\"data\":{\"evidence_refs\":[\"metric:metric-n6-loss\",\"metric:metric-smf-ok\"],\"series\":[{\"entity\":\"UPF-01/N6\",\"id\":\"metric-n6-loss\",\"unit\":\"%\",\"value\":7.4},{\"entity\":\"SMF-01\",\"id\":\"metric-smf-ok\",\"unit\":\"% success\",\"value\":99.99}],\"signals\":[{\"component\":\"upf-n6-path\",\"confidence\":0.95,\"evidence_ref\":\"metric:metric-n6-loss\"},{\"component\":\"smf-control-plane\",\"confidence\":0.08,\"evidence_ref\":\"metric:metric-smf-ok\",\"exclusion\":true}]},\"ok\":true,\"tool\":\"query_metrics\"}",
@@ -301,11 +224,88 @@
     }
   },
   {
-    "row_id": 673,
-    "event_id": "evt_65bc3141813164b84e24",
-    "trial_id": "trial_8add9d54109616154152",
+    "row_id": 901,
+    "event_id": "evt_0cbc221acc153c6fcb32",
+    "trial_id": "trial_bb0d68ef5028e30c5a05",
+    "seq": 10,
+    "timestamp": "2026-08-13T03:09:49.155Z",
+    "kind": "model.decision",
+    "actor": "contestant",
+    "payload_json": "{\"action\":\"tool\",\"rationale_summary\":\"Select query_logs because it has the highest expected information gain among untried safe tools.\",\"test_double\":true,\"tool\":\"query_logs\",\"turn\":3}",
+    "payload_hash": "ca6a0d0024968a960fed33a67cf9f9c2d15fa637ac401a70d04840c0296bbc2c",
+    "redacted": false,
+    "payload": {
+      "action": "tool",
+      "rationale_summary": "Select query_logs because it has the highest expected information gain among untried safe tools.",
+      "test_double": true,
+      "tool": "query_logs",
+      "turn": 3
+    }
+  },
+  {
+    "row_id": 902,
+    "event_id": "evt_1689c0e665b0ee322129",
+    "trial_id": "trial_bb0d68ef5028e30c5a05",
+    "seq": 11,
+    "timestamp": "2026-08-13T03:09:49.156Z",
+    "kind": "tool.call",
+    "actor": "contestant",
+    "payload_json": "{\"args\":{\"tenant\":\"factory-a\",\"time_window\":\"2026-08-13T00:00:00Z/2026-08-13T00:15:00Z\"},\"tool\":\"query_logs\"}",
+    "payload_hash": "c93365de887685cf86385e833865db2bb47d4dac387f4844552721c57dd2812c",
+    "redacted": false,
+    "payload": {
+      "args": {
+        "tenant": "factory-a",
+        "time_window": "2026-08-13T00:00:00Z/2026-08-13T00:15:00Z"
+      },
+      "tool": "query_logs"
+    }
+  },
+  {
+    "row_id": 903,
+    "event_id": "evt_abcdd89631e7bc86f613",
+    "trial_id": "trial_bb0d68ef5028e30c5a05",
+    "seq": 12,
+    "timestamp": "2026-08-13T03:09:49.157Z",
+    "kind": "tool.result",
+    "actor": "environment",
+    "payload_json": "{\"args\":{\"tenant\":\"factory-a\",\"time_window\":\"2026-08-13T00:00:00Z/2026-08-13T00:15:00Z\"},\"attempt\":1,\"data\":{\"evidence_refs\":[\"log:log-44\"],\"matches\":[{\"id\":\"log-44\",\"message\":\"UPF-01 N6 retransmit threshold exceeded before WMS latency rise\"}],\"signals\":[{\"component\":\"upf-n6-path\",\"confidence\":0.91,\"evidence_ref\":\"log:log-44\"}]},\"ok\":true,\"tool\":\"query_logs\"}",
+    "payload_hash": "b40a510ed12f626d384448a83c9627bbfc51987fb14f2e9a875db5d42a85cde5",
+    "redacted": false,
+    "payload": {
+      "args": {
+        "tenant": "factory-a",
+        "time_window": "2026-08-13T00:00:00Z/2026-08-13T00:15:00Z"
+      },
+      "attempt": 1,
+      "data": {
+        "evidence_refs": [
+          "log:log-44"
+        ],
+        "matches": [
+          {
+            "id": "log-44",
+            "message": "UPF-01 N6 retransmit threshold exceeded before WMS latency rise"
+          }
+        ],
+        "signals": [
+          {
+            "component": "upf-n6-path",
+            "confidence": 0.91,
+            "evidence_ref": "log:log-44"
+          }
+        ]
+      },
+      "ok": true,
+      "tool": "query_logs"
+    }
+  },
+  {
+    "row_id": 904,
+    "event_id": "evt_4e7bac7f4900a8b8b83b",
+    "trial_id": "trial_bb0d68ef5028e30c5a05",
     "seq": 13,
-    "timestamp": "2026-08-12T20:09:44.528Z",
+    "timestamp": "2026-08-13T03:09:49.159Z",
     "kind": "model.decision",
     "actor": "contestant",
     "payload_json": "{\"action\":\"final\",\"rationale_summary\":\"Evidence spans the required independent sources and supports a stable causal hypothesis.\",\"test_double\":true,\"tool\":null,\"turn\":4}",
@@ -320,11 +320,11 @@
     }
   },
   {
-    "row_id": 674,
-    "event_id": "evt_c6e8530bbdbc7d5895f0",
-    "trial_id": "trial_8add9d54109616154152",
+    "row_id": 905,
+    "event_id": "evt_a07961ac735fa41bdeb8",
+    "trial_id": "trial_bb0d68ef5028e30c5a05",
     "seq": 14,
-    "timestamp": "2026-08-12T20:09:44.530Z",
+    "timestamp": "2026-08-13T03:09:49.160Z",
     "kind": "grader.result",
     "actor": "code-grader",
     "payload_json": "{\"score\":{\"dimensions\":{\"engineering_agility\":{\"normalized\":1,\"weight\":5,\"weighted\":5},\"evidence\":{\"normalized\":1,\"weight\":15,\"weighted\":15},\"open_world\":{\"normalized\":1,\"weight\":15,\"weighted\":15},\"proactive\":{\"normalized\":1,\"weight\":5,\"weighted\":5},\"rca\":{\"normalized\":1,\"weight\":15,\"weighted\":15},\"resource_cost\":{\"normalized\":1,\"weight\":5,\"weighted\":5},\"task_outcome\":{\"normalized\":1,\"weight\":25,\"weighted\":25},\"trajectory\":{\"normalized\":1,\"weight\":15,\"weighted\":15}},\"evidence_hits\":[\"alert:a-17\",\"metric:metric-n6-loss\",\"log:log-44\"],\"grader_version\":\"m1-code-grader-1.0.0\",\"hard_gates\":{\"evidence_traceable\":true,\"no_forbidden_claim\":true,\"recovery\":true,\"root_cause\":true},\"passed\":true,\"total\":100}}",
@@ -392,11 +392,11 @@
     }
   },
   {
-    "row_id": 675,
-    "event_id": "evt_0c35fdb0bd1e2e15cd11",
-    "trial_id": "trial_8add9d54109616154152",
+    "row_id": 906,
+    "event_id": "evt_9e684eb9be893dcadb3d",
+    "trial_id": "trial_bb0d68ef5028e30c5a05",
     "seq": 15,
-    "timestamp": "2026-08-12T20:09:44.531Z",
+    "timestamp": "2026-08-13T03:09:49.161Z",
     "kind": "trial.completed",
     "actor": "runner",
     "payload_json": "{\"outcome_status\":\"resolved\",\"score\":100,\"status\":\"COMPLETED\"}",

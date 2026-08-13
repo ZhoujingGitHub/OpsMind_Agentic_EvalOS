@@ -2,10 +2,10 @@
   "gate": "G1",
   "status": "PASSED",
   "accepted": true,
-  "run_id": "38cb1f7a42151c707dd6005ad78d5c004766a090",
-  "accepted_at": "2026-08-12T20:09:44.889Z",
-  "git_commit": "38cb1f7a42151c707dd6005ad78d5c004766a090",
-  "experiment_id": "exp_69cc71348cdbd0e9ba49",
+  "run_id": "6e7e5f91425a568bce7b2f111fc2cf768436c24c",
+  "accepted_at": "2026-08-13T03:09:49.474Z",
+  "git_commit": "6e7e5f91425a568bce7b2f111fc2cf768436c24c",
+  "experiment_id": "exp_86246db44e486c87ff02",
   "manifest_hash": "158e72409fcb6eba53990babf1658e43e4860be1ac17205ef37dffad32caab9b",
   "dataset_hash": "7d7174237eb508145444fb2993bf73d636017a36f6ee21271a09ca0e8a7a2d3c",
   "execution": {
@@ -23,25 +23,25 @@
       "orchestration": "model-driven-tool-loop",
       "graphFramework": null
     },
-    "acceptance_model_execution": "deterministic replay test double (no external API key available)"
+    "acceptance_model_execution": "确定性重放测试替身（未提供外部 API 密钥）"
   },
   "ledger": {
     "valid": true,
-    "entries": 61,
-    "head_hash": "cd133735707310b6e835285fbfdcee7de36a769af3dd2a13263bff93b43c351d",
+    "entries": 77,
+    "head_hash": "d478598014db83ca5419a2ccfe903ae4968fead45948629c8e64511bd98ad6f2",
     "errors": []
   },
   "replay_comparisons": [
     {
-      "replay_id": "replay_5354665bb0a1e913f07b",
-      "source_id": "trial_8add9d54109616154152",
+      "replay_id": "replay_d2648772e37541cf388d",
+      "source_id": "trial_bb0d68ef5028e30c5a05",
       "outcome_match": true,
       "score_match": true,
       "trajectory_match": true
     },
     {
-      "replay_id": "replay_f459acb292fc15a74108",
-      "source_id": "trial_0e5874a0240c9c7adcf8",
+      "replay_id": "replay_4a6a4a9ddb2909a38285",
+      "source_id": "trial_d682b2cbb08858398b98",
       "outcome_match": true,
       "score_match": true,
       "trajectory_match": true
@@ -51,66 +51,66 @@
     {
       "id": "required_trial_count",
       "passed": true,
-      "evidence": "2 cases x 2 contestants x 3 seeds",
+      "evidence": "2 个用例 × 2 个参评 Agent × 3 个随机种子",
       "actual": 12,
       "expected": 12
     },
     {
       "id": "all_trials_completed",
       "passed": true,
-      "evidence": "All original smoke Trials reached COMPLETED",
+      "evidence": "所有原始冒烟 Trial 均已进入 COMPLETED 状态",
       "actual": 12,
       "expected": 12
     },
     {
       "id": "all_code_grades_passed",
       "passed": true,
-      "evidence": "Every deterministic code grade passed",
+      "evidence": "每个确定性代码评分均已通过",
       "actual": 12,
       "expected": 12
     },
     {
       "id": "runner_restart_recovery",
       "passed": true,
-      "evidence": "Expired lease was requeued and the same Trial completed",
+      "evidence": "过期租约已重新入队，同一个 Trial 随后成功完成",
       "actual": 2,
       "expected": ">=2"
     },
     {
       "id": "idempotency",
       "passed": true,
-      "evidence": "Duplicate create returned the existing experiment",
+      "evidence": "重复创建请求返回了已存在的实验",
       "actual": false,
       "expected": false
     },
     {
       "id": "trial_isolation",
       "passed": true,
-      "evidence": "Every Trial has a dedicated namespace",
+      "evidence": "每个 Trial 都使用独立命名空间",
       "actual": 12,
       "expected": 12
     },
     {
       "id": "blind_identity",
       "passed": true,
-      "evidence": "Public Trial identity uses blind labels",
+      "evidence": "公开的 Trial 身份仅使用不暴露真实参评方的盲测标签",
       "actual": [
         "candidate-amber",
         "candidate-cobalt"
       ],
-      "expected": "2 non-revealing labels"
+      "expected": "2 个不暴露真实身份的标签"
     },
     {
       "id": "seeded_random_order",
       "passed": true,
-      "evidence": "A/B order is deterministic per seed and varies across pairs",
+      "evidence": "每个种子的 A/B 顺序可复现，且不同组合之间存在顺序变化",
       "actual": 2,
       "expected": ">=2"
     },
     {
       "id": "budget_soft_and_hard_limits",
       "passed": true,
-      "evidence": "80% warning emitted and 100% consumption blocked",
+      "evidence": "预算达到 80% 时发出预警，达到 100% 时阻止继续消耗",
       "actual": {
         "warnings": 1,
         "hardStopped": true
@@ -123,71 +123,71 @@
     {
       "id": "ledger_hash_chain",
       "passed": true,
-      "evidence": "Append-only ledger hash chain verifies",
-      "actual": 61,
+      "evidence": "只追加 Ledger 的哈希链校验通过",
+      "actual": 77,
       "expected": ">0"
     },
     {
       "id": "trace_first_event",
       "passed": true,
-      "evidence": "Maximum first Trace event latency",
+      "evidence": "所有原始 Trial 中首条 Trace 事件的最大时延",
       "actual": 7,
       "expected": "<=2000"
     },
     {
       "id": "trace_heartbeat",
       "passed": true,
-      "evidence": "Heartbeat policy and events present",
+      "evidence": "心跳策略符合要求，且每个 Trial 均有心跳事件",
       "actual": 5000,
       "expected": "<=10000"
     },
     {
       "id": "trace_cursor",
       "passed": true,
-      "evidence": "Cursor reads the next event without duplication",
+      "evidence": "游标能够无重复地读取下一条事件",
       "actual": 12,
       "expected": 12
     },
     {
       "id": "trace_redaction",
       "passed": true,
-      "evidence": "Injected smoke secret was redacted before persistence",
+      "evidence": "注入的冒烟测试密钥在持久化前已脱敏",
       "actual": 14,
       "expected": ">0"
     },
     {
       "id": "deterministic_replay",
       "passed": true,
-      "evidence": "Two replays match outcome, score, and model/tool trajectory",
+      "evidence": "两次重放的结果、得分以及模型/工具轨迹均与原 Trial 一致",
       "actual": [
         {
-          "replay_id": "replay_5354665bb0a1e913f07b",
-          "source_id": "trial_8add9d54109616154152",
+          "replay_id": "replay_d2648772e37541cf388d",
+          "source_id": "trial_bb0d68ef5028e30c5a05",
           "outcome_match": true,
           "score_match": true,
           "trajectory_match": true
         },
         {
-          "replay_id": "replay_f459acb292fc15a74108",
-          "source_id": "trial_0e5874a0240c9c7adcf8",
+          "replay_id": "replay_4a6a4a9ddb2909a38285",
+          "source_id": "trial_d682b2cbb08858398b98",
           "outcome_match": true,
           "score_match": true,
           "trajectory_match": true
         }
       ],
-      "expected": "all true"
+      "expected": "全部为 true"
     },
     {
       "id": "minimum_replay_rate",
       "passed": true,
-      "evidence": "Replay rate rounds 10% of 12 up to two Trials",
+      "evidence": "12 个 Trial 的 10% 向上取整为 2 个，实际已完成 2 个重放",
       "actual": 0.16666666666666666,
       "expected": ">=0.1"
     },
     {
       "id": "claude_sdk_deepseek_contract",
       "passed": true,
-      "evidence": "Live adapter contract uses Claude Agent SDK + DeepSeek V4 Flash without a graph framework",
+      "evidence": "生产适配器使用 Claude Agent SDK 与 DeepSeek V4 Flash，未引入图工作流框架",
       "actual": {
         "sdk": "@anthropic-ai/claude-agent-sdk",
         "baseUrl": "https://api.deepseek.com/anthropic",
@@ -195,7 +195,7 @@
         "orchestration": "model-driven-tool-loop",
         "graphFramework": null
       },
-      "expected": "Claude SDK + DeepSeek V4 Flash"
+      "expected": "Claude Agent SDK + DeepSeek V4 Flash"
     }
   ]
 }
