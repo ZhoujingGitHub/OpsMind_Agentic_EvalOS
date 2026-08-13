@@ -8,7 +8,12 @@ import {
   TrialRunner,
   createMockContestant,
 } from "../../../packages/kernel/src/index.mjs";
-import { DEEPSEEK_AGENT_RUNTIME, createDeepSeekClaudeAgentAdapter } from "../../../packages/agent-runtime/src/index.mjs";
+import {
+  DEEPSEEK_AGENT_RUNTIME,
+  LANGGRAPH_RUNTIME,
+  createDeepSeekClaudeAgentAdapter,
+  createLangGraphAdapter,
+} from "../../../packages/agent-runtime/src/index.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -44,6 +49,10 @@ export function createApp({
     process.env.DEEPSEEK_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN ?? process.env.ANTHROPIC_API_KEY,
   );
   if (liveDeepSeekAvailable) adapters["agent-harness-v2"] = createDeepSeekClaudeAgentAdapter();
+  const liveLangGraphAvailable = liveDeepSeekAvailable && Boolean(
+    process.env.OPSMIND_LANGGRAPH_PYTHON && process.env.OPSMIND_LANGGRAPH_ROOT,
+  );
+  if (liveLangGraphAvailable) adapters["langgraph-v1"] = createLangGraphAdapter();
   const runner = new TrialRunner({ store, ledger, adapters, cases: CASES });
 
   const handler = async (request) => {
@@ -61,7 +70,9 @@ export function createApp({
       if (request.method === "GET" && url.pathname === "/api/runtime/capabilities") {
         return json({
           live_deepseek_enabled: liveDeepSeekAvailable,
+          live_langgraph_enabled: liveLangGraphAvailable,
           runtime: DEEPSEEK_AGENT_RUNTIME,
+          runtimes: { agent_harness_v2: DEEPSEEK_AGENT_RUNTIME, langgraph_v1: LANGGRAPH_RUNTIME },
           adapters: Object.keys(adapters),
           secret_source: liveDeepSeekAvailable ? "environment-only" : null,
         }, 200, cors);
@@ -124,6 +135,24 @@ export function createApp({
       if (request.method === "GET" && trialMatch) {
         const trial = publicTrial(store.getTrial(decodeURIComponent(trialMatch[1])));
         return trial ? json({ trial }, 200, cors) : json({ error: "trial not found" }, 404, cors);
+      }
+      if (request.method === "GET" && url.pathname === "/api/reviews") {
+        return json({ items: store.listHumanReviewTasks() }, 200, cors);
+      }
+      const reviewMatch = url.pathname.match(/^\/api\/reviews\/([^/]+)\/decisions$/);
+      if (request.method === "POST" && reviewMatch) {
+        const body = await request.json();
+        if (!body.reviewer || !body.decision || !body.note) {
+          return json({ error: "reviewer, decision and note are required" }, 400, cors);
+        }
+        const decision = store.addHumanReviewDecision(decodeURIComponent(reviewMatch[1]), body);
+        ledger.append({
+          entityType: "human_review_decision",
+          entityId: decision.id,
+          action: "human_review.decision_recorded",
+          payload: { review_task_id: decision.review_task_id, reviewer: decision.reviewer, decision: decision.decision },
+        });
+        return json({ decision }, 201, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/ledger/verify") {
         return json(ledger.verify(), 200, cors);

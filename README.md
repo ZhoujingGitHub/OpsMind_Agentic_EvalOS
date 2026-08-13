@@ -1,11 +1,11 @@
 # OpsMind Agentic EvalOS
 
-OpsMind Agentic EvalOS 是一个独立的智能运维 Agent 评测控制平台，用于公平、可复现、可解释地比较不同运维 Agent。M1 已交付可信评测内核、Codex 风格的自主 Agent 运行框架、DeepSeek 与 Claude Agent SDK 的集成接口、控制 API、最小可用 Web 控制台，以及自动化 G1 验收套件。
+OpsMind Agentic EvalOS 是一个独立的智能运维 Agent 评测控制平台，用于公平、可复现、可解释地比较不同运维 Agent。M1 交付可信评测内核、Claude Agent SDK 自主 Agent 运行时、DeepSeek V4 Flash、真实 LangGraph V1 对照适配器、盲评 Judge、人工复核入口、控制 API、Web 控制台，以及自动化验收套件。
 
 ## M1 架构
 
 - `packages/kernel`：负责清单冻结、盲测身份映射、基于种子的调度、预算控制、Trial 隔离、Trace、代码评分，以及带哈希链的只追加 Ledger。
-- `packages/agent-runtime`：采用模型驱动的工具循环。运行框架不编码固定图结构或工具调用顺序；生产适配器使用 Claude Agent SDK 接入 DeepSeek V4 Flash，确定性重放模型仅用于离线 M1 验收。
+- `packages/agent-runtime`：V2 采用 Claude Agent SDK 的模型驱动工具循环，不编码固定图结构或工具顺序；保留 Bash、Read、Write、Edit、代码执行、Skill 和 MCP。另有真实 LangGraph V1 对照适配器及独立盲评 Judge。确定性重放模型只用于 G1 工程门禁并明确标记为模拟。
 - `services/control-api`：提供实验、Trial、Trace/SSE、Ledger 和验收结果接口。
 - `apps/console`：提供 M1 实验与 Trace 查看控制台。
 - `scripts/run-m1-acceptance.mjs`：运行 2 个冒烟用例 × 2 个模拟参评 Agent × 3 个随机种子，共 12 个 Trial；另重放 2 个 Trial，并生成 G1 验收证据包。
@@ -23,7 +23,7 @@ npm run api
 
 API 默认监听 `http://127.0.0.1:8787`。如需执行与代码版本绑定的验收，请先将 `M1_RUN_ID` 设置为冻结后的 Git 提交号，再运行 `npm run accept:m1`。验收证据写入 `artifacts/m1/`，运行数据库写入 `runtime/m1/evalos.sqlite`。
 
-## 使用 DeepSeek 实际执行
+## 使用 DeepSeek 真实执行
 
 先在 `packages/agent-runtime` 中安装锁定版本的依赖，然后只在运行时提供密钥：
 
@@ -33,7 +33,17 @@ ANTHROPIC_AUTH_TOKEN=<DeepSeek API 密钥>
 ANTHROPIC_MODEL=deepseek-v4-flash
 ```
 
-也可以提供 `DEEPSEEK_API_KEY`，运行时会在内存中将其映射为 `ANTHROPIC_AUTH_TOKEN`。任何密钥都不会被持久化。M1 验收特意使用确定性重放模型，因为可信内核的验收不应依赖外部 API 密钥。
+也可以提供 `DEEPSEEK_API_KEY`，运行时会在内存中将其映射为 `ANTHROPIC_AUTH_TOKEN`。任何密钥都不会被持久化。
+
+真实 M1 流程：
+
+```text
+npm run accept:m1:real:smoke   # 1 Case × 2 架构 × 1 Seed
+npm run accept:m1:real         # 12 Case × 2 架构 × 3 Seed = 72 Trial
+npm run accept:m1:judge        # 72 个盲评 Judge + 人工复核队列
+```
+
+`npm run accept:m1` 仍是无需外部密钥的 G1 模拟门禁；它不能冒充真实 M1 Pilot。
 
 ## G1 通过标准
 

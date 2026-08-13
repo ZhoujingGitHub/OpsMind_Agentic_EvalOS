@@ -9,6 +9,9 @@
   "scripts": {
     "test": "node --test packages/kernel/test/*.test.mjs packages/agent-runtime/test/*.test.mjs services/control-api/test/*.test.mjs",
     "accept:m1": "node scripts/run-m1-acceptance.mjs",
+    "accept:m1:real:smoke": "node scripts/run-real-m1.mjs --smoke",
+    "accept:m1:real": "node scripts/run-real-m1.mjs",
+    "accept:m1:judge": "node scripts/run-m1-judge.mjs",
     "api": "node services/control-api/src/server.mjs",
     "adapter:check": "node packages/agent-runtime/scripts/check-adapter.mjs",
     "console:lint": "npm --prefix apps/console run lint",

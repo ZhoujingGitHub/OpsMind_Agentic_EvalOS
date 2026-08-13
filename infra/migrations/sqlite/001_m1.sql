@@ -76,6 +76,36 @@ CREATE TABLE IF NOT EXISTS artifacts (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS judge_results (
+  id TEXT PRIMARY KEY,
+  trial_id TEXT NOT NULL UNIQUE REFERENCES trials(id),
+  blind_id TEXT NOT NULL,
+  judge_model TEXT NOT NULL,
+  judge_version TEXT NOT NULL,
+  prompt_hash TEXT NOT NULL,
+  result_json TEXT NOT NULL,
+  result_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS human_review_tasks (
+  id TEXT PRIMARY KEY,
+  trial_id TEXT NOT NULL UNIQUE REFERENCES trials(id),
+  reason TEXT NOT NULL,
+  priority TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS human_review_decisions (
+  id TEXT PRIMARY KEY,
+  review_task_id TEXT NOT NULL REFERENCES human_review_tasks(id),
+  reviewer TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  note TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_review_decisions_task ON human_review_decisions(review_task_id, created_at);
+
 CREATE TABLE IF NOT EXISTS ledger_entries (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   id TEXT NOT NULL UNIQUE,
@@ -98,3 +128,32 @@ BEFORE DELETE ON ledger_entries BEGIN
   SELECT RAISE(ABORT, 'evaluation ledger is append-only');
 END;
 
+CREATE TRIGGER IF NOT EXISTS judge_results_no_update
+BEFORE UPDATE ON judge_results BEGIN
+  SELECT RAISE(ABORT, 'judge results are append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS judge_results_no_delete
+BEFORE DELETE ON judge_results BEGIN
+  SELECT RAISE(ABORT, 'judge results are append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS human_review_tasks_no_update
+BEFORE UPDATE ON human_review_tasks BEGIN
+  SELECT RAISE(ABORT, 'human review tasks are append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS human_review_tasks_no_delete
+BEFORE DELETE ON human_review_tasks BEGIN
+  SELECT RAISE(ABORT, 'human review tasks are append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS human_review_decisions_no_update
+BEFORE UPDATE ON human_review_decisions BEGIN
+  SELECT RAISE(ABORT, 'human review decisions are append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS human_review_decisions_no_delete
+BEFORE DELETE ON human_review_decisions BEGIN
+  SELECT RAISE(ABORT, 'human review decisions are append-only');
+END;

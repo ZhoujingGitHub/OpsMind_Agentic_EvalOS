@@ -79,6 +79,39 @@ CREATE TABLE IF NOT EXISTS artifacts (
   CONSTRAINT fk_artifact_trial FOREIGN KEY (trial_id) REFERENCES trials(id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS judge_results (
+  id VARCHAR(64) PRIMARY KEY,
+  trial_id VARCHAR(64) NOT NULL UNIQUE,
+  blind_id VARCHAR(64) NOT NULL,
+  judge_model VARCHAR(128) NOT NULL,
+  judge_version VARCHAR(64) NOT NULL,
+  prompt_hash CHAR(64) NOT NULL,
+  result_json JSON NOT NULL,
+  result_hash CHAR(64) NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  CONSTRAINT fk_judge_trial FOREIGN KEY (trial_id) REFERENCES trials(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS human_review_tasks (
+  id VARCHAR(64) PRIMARY KEY,
+  trial_id VARCHAR(64) NOT NULL UNIQUE,
+  reason TEXT NOT NULL,
+  priority VARCHAR(16) NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  CONSTRAINT fk_review_trial FOREIGN KEY (trial_id) REFERENCES trials(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS human_review_decisions (
+  id VARCHAR(64) PRIMARY KEY,
+  review_task_id VARCHAR(64) NOT NULL,
+  reviewer VARCHAR(128) NOT NULL,
+  decision VARCHAR(32) NOT NULL,
+  note TEXT NOT NULL,
+  created_at DATETIME(6) NOT NULL,
+  KEY idx_review_decisions_task (review_task_id, created_at),
+  CONSTRAINT fk_review_task FOREIGN KEY (review_task_id) REFERENCES human_review_tasks(id)
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS ledger_entries (
   seq BIGINT AUTO_INCREMENT PRIMARY KEY,
   id VARCHAR(64) NOT NULL UNIQUE,

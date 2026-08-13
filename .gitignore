@@ -6,10 +6,14 @@ dist/
 .env.*
 !.env.example
 runtime/
+.deploy/
+artifacts/m1-real/
 coverage/
 _work/
 *.log
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+**/__pycache__/
+*.pyc
 ~$*.docx

@@ -37,10 +37,13 @@ flowchart LR
 
 ## M1 范围约束
 
-- M1 使用两个带版本的 L0 冒烟测试夹具和两个模拟参评 Agent 适配器，不代表已经执行任何真实 OpsMind 参评实现。
-- DeepSeek 实际调用链路已经接通，但 G1 不要求真实调用，因为密钥属于外部部署配置，不能进入代码仓库。
+- G1 工程门禁继续使用两个带版本的 L0 冒烟夹具和两个模拟参评适配器；它只证明可信内核，不冒充真实模型评测。
+- 真实 M1 Pilot 使用 12 个冻结 L1 Case、两个真实参评适配器和 3 个 Seed，共 72 个付费模型 Trial。V2 是 Claude Agent SDK + DeepSeek V4 Flash；V1 是实际 LangGraph StateGraph + 同一 DeepSeek V4 Flash。
+- Claude Agent SDK V2 保留 Bash、Read、Write、Edit、代码执行、Skill、MCP 等原生能力；写操作受 Trial 命名空间、预算和策略门禁约束。V2 不包含 LangGraph、静态状态图或固定工具顺序。
+- LangGraph 仅存在于被评的历史 V1 对照实现和它的评测适配器中，不进入 V2 核心 Agent 运行时。
+- 真实 Pilot 之后由独立盲评 Judge 复核最终 Outcome，并生成可追加人工决定的复核队列。Judge 不接收架构身份。
+- DeepSeek 凭据仅由部署环境变量提供，不进入代码、Trace、快照或交付材料。
 - SQLite 是 M1 可执行的本地数据存储；同时提供等价的 MySQL 迁移约定，供 ECS 部署使用。M1 的队列与租约抽象在 SQLite 中具备持久性，后续可以替换为 Redis，且无需改变 Runner 语义。
-- 项目不包含 LangGraph 依赖，也不存在图形化的固定工作流。
 
 ## 参考架构对齐
 

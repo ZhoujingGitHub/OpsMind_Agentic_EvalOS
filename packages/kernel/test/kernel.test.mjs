@@ -13,6 +13,7 @@ import {
   TrialRunner,
   containsSensitiveMaterial,
   createMockContestant,
+  gradeTrial,
   redact,
   seededShuffle,
   sha256,
@@ -57,6 +58,34 @@ test("redaction removes secrets from nested payloads", () => {
   assert.equal(output.changed, true);
   assert.equal(containsSensitiveMaterial(output.value), false);
   assert.match(JSON.stringify(output.value), /REDACTED/);
+});
+
+test("code grader maps a natural-language root cause to the frozen canonical label", () => {
+  const caseSpec = CASES["PILOT-REG-001"];
+  const score = gradeTrial(caseSpec, {
+    status: "resolved",
+    root_cause: "UDM subscriber provisioning fault after the batch import was skipped",
+    evidence_refs: [...caseSpec.ground_truth.required_evidence],
+    exclusions: ["RAN coverage is healthy"],
+    next_checks: ["re-test registration"],
+    summary: "The UDM subscriber provisioning batch was skipped.",
+  }, [], { tool_calls: 4 });
+  assert.equal(score.hard_gates.root_cause, true);
+  assert.equal(score.passed, true);
+});
+
+test("code grader does not treat an explicitly excluded alternative as a forbidden assertion", () => {
+  const caseSpec = CASES["PILOT-REG-001"];
+  const score = gradeTrial(caseSpec, {
+    status: "resolved",
+    root_cause: "udm-subscriber-provisioning",
+    evidence_refs: [...caseSpec.ground_truth.required_evidence],
+    exclusions: ["gnb-radio-outage is excluded by healthy RSRP"],
+    next_checks: ["verify after provisioning repair"],
+    summary: "UDM provisioning is the root cause; gnb-radio-outage is excluded.",
+  }, [], { tool_calls: 4 });
+  assert.equal(score.hard_gates.no_forbidden_claim, true);
+  assert.equal(score.passed, true);
 });
 
 test("experiment creation is idempotent, blinded, randomized, and creates 12 unique namespaces", () => {
@@ -111,6 +140,29 @@ test("ledger is hash-chained and database triggers reject mutation", () => {
     assert.deepEqual(ledger.verify().valid, true);
     assert.throws(() => store.db.prepare("UPDATE ledger_entries SET action='tampered' WHERE seq=1").run(), /append-only/);
     assert.throws(() => store.db.prepare("DELETE FROM ledger_entries WHERE seq=1").run(), /append-only/);
+  } finally {
+    store.close();
+  }
+});
+
+test("Judge results and human-review decisions are append-only audit records", () => {
+  const { store } = fixture();
+  try {
+    const { experiment } = store.createExperiment(manifest, "judge-review-1");
+    const trial = store.listTrials(experiment.id)[0];
+    const judge = store.addJudgeResult(trial.id, {
+      blindId: trial.blind_id,
+      judgeModel: "deepseek-v4-flash",
+      judgeVersion: "test-judge-1",
+      promptHash: "a".repeat(64),
+      result: { overall_score: 80 },
+    });
+    const task = store.createHumanReviewTask(trial.id, { reason: "disagreement", priority: "normal" });
+    const decision = store.addHumanReviewDecision(task.id, { reviewer: "expert-a", decision: "confirm", note: "evidence is sufficient" });
+    assert.equal(judge.result.overall_score, 80);
+    assert.equal(decision.review_task_id, task.id);
+    assert.throws(() => store.db.prepare("UPDATE judge_results SET judge_version='tampered'").run(), /append-only/);
+    assert.throws(() => store.db.prepare("DELETE FROM human_review_decisions").run(), /append-only/);
   } finally {
     store.close();
   }

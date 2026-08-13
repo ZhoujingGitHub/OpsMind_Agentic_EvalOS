@@ -9,13 +9,34 @@ const WEIGHTS = {
   engineering_agility: 5,
 };
 
+function normalizeClaim(value) {
+  return String(value ?? "")
+    .toLocaleLowerCase("en-US")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function claimContains(text, label) {
+  const normalizedText = normalizeClaim(text);
+  const normalizedLabel = normalizeClaim(label);
+  return Boolean(normalizedLabel) && normalizedText.includes(normalizedLabel);
+}
+
+function explicitlyExcluded(outcome, claim) {
+  return (outcome.exclusions ?? []).some((exclusion) => claimContains(exclusion, claim));
+}
+
 export function gradeTrial(caseSpec, outcome, trace, usage) {
-  const rootCauseHit = caseSpec.ground_truth.root_causes.includes(outcome.root_cause);
+  const expectedStatus = caseSpec.ground_truth.expected_status ?? "resolved";
+  const statusHit = outcome.status === expectedStatus;
+  const rootCauseHit = caseSpec.ground_truth.root_causes.some((rootCause) =>
+    claimContains(outcome.root_cause, rootCause) || claimContains(rootCause, outcome.root_cause),
+  );
   const evidence = new Set(outcome.evidence_refs ?? []);
   const requiredEvidenceHit = caseSpec.ground_truth.required_evidence.filter((item) => evidence.has(item));
-  const assertedClaims = `${outcome.root_cause ?? ""}\n${outcome.summary ?? ""}`.toLowerCase();
   const forbiddenClaim = caseSpec.ground_truth.forbidden_claims.some((claim) =>
-    assertedClaims.includes(claim.toLowerCase()),
+    claimContains(outcome.root_cause, claim) && !explicitlyExcluded(outcome, claim),
   );
   const toolErrors = trace.filter((event) => event.kind === "tool.result" && event.payload.ok === false);
   const laterSuccess = toolErrors.some((failure) =>
@@ -26,7 +47,7 @@ export function gradeTrial(caseSpec, outcome, trace, usage) {
   const resourceEfficiency = usage.tool_calls <= 6 ? 1 : Math.max(0, 1 - (usage.tool_calls - 6) / 10);
 
   const normalized = {
-    task_outcome: outcome.status === "resolved" && rootCauseHit ? 1 : 0,
+    task_outcome: statusHit && rootCauseHit ? 1 : 0,
     rca: rootCauseHit && hasAlternativeExclusion ? 1 : rootCauseHit ? 0.75 : 0,
     evidence: requiredEvidenceHit.length / caseSpec.ground_truth.required_evidence.length,
     trajectory: recoveryPassed ? 1 : 0.25,
@@ -40,13 +61,14 @@ export function gradeTrial(caseSpec, outcome, trace, usage) {
   );
   const total = Number(Object.values(dimensions).reduce((sum, item) => sum + item.weighted, 0).toFixed(2));
   const hardGates = {
+    expected_status: statusHit,
     root_cause: rootCauseHit,
     no_forbidden_claim: !forbiddenClaim,
     recovery: recoveryPassed,
     evidence_traceable: requiredEvidenceHit.length >= Math.min(2, caseSpec.ground_truth.required_evidence.length),
   };
   return {
-    grader_version: "m1-code-grader-1.0.0",
+    grader_version: "m1-code-grader-1.1.0",
     total,
     passed: Object.values(hardGates).every(Boolean) && total >= 75,
     dimensions,

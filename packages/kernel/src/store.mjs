@@ -258,12 +258,77 @@ export class EvalStore {
     `).run(String(error), usage ? stableStringify(usage) : null, isoNow(), trialId);
   }
 
+  retryFailedTrial(trialId, reason) {
+    const current = this.getTrial(trialId);
+    if (!current || current.status !== "FAILED") throw new Error(`only FAILED Trial can be retried: ${trialId}`);
+    if (current.attempt >= 3) throw new Error(`Trial retry limit reached: ${trialId}`);
+    this.db.prepare(`
+      UPDATE trials SET status='QUEUED', lease_owner=NULL, lease_expires_at=NULL,
+        error=?, completed_at=NULL WHERE id=? AND status='FAILED'
+    `).run(`approved infrastructure retry: ${reason}`, trialId);
+    return this.getTrial(trialId);
+  }
+
   addArtifact(trialId, kind, artifactPath, digest, sizeBytes) {
     const id = entityId("artifact", `${trialId}:${kind}:${digest}`);
     this.db.prepare(`
       INSERT OR IGNORE INTO artifacts(id,trial_id,kind,path,sha256,size_bytes,created_at) VALUES(?,?,?,?,?,?,?)
     `).run(id, trialId, kind, artifactPath, digest, sizeBytes, isoNow());
     return id;
+  }
+
+  addJudgeResult(trialId, { blindId, judgeModel, judgeVersion, promptHash, result }) {
+    const resultHash = sha256(result);
+    const id = entityId("judge", `${trialId}:${judgeVersion}:${promptHash}:${resultHash}`);
+    this.db.prepare(`
+      INSERT OR IGNORE INTO judge_results(
+        id,trial_id,blind_id,judge_model,judge_version,prompt_hash,result_json,result_hash,created_at
+      ) VALUES(?,?,?,?,?,?,?,?,?)
+    `).run(id, trialId, blindId, judgeModel, judgeVersion, promptHash, stableStringify(result), resultHash, isoNow());
+    return this.getJudgeResult(trialId);
+  }
+
+  getJudgeResult(trialId) {
+    const row = this.db.prepare("SELECT * FROM judge_results WHERE trial_id=?").get(trialId);
+    return row ? { ...row, result: parseJson(row.result_json, {}) } : null;
+  }
+
+  listJudgeResults() {
+    return this.db.prepare("SELECT * FROM judge_results ORDER BY created_at,id").all().map((row) => ({
+      ...row,
+      result: parseJson(row.result_json, {}),
+    }));
+  }
+
+  createHumanReviewTask(trialId, { reason, priority = "normal" }) {
+    const existing = this.db.prepare("SELECT * FROM human_review_tasks WHERE trial_id=?").get(trialId);
+    if (existing) return existing;
+    const id = entityId("review", `${trialId}:${reason}`);
+    this.db.prepare(`
+      INSERT INTO human_review_tasks(id,trial_id,reason,priority,created_at) VALUES(?,?,?,?,?)
+    `).run(id, trialId, reason, priority, isoNow());
+    return this.db.prepare("SELECT * FROM human_review_tasks WHERE id=?").get(id);
+  }
+
+  listHumanReviewTasks() {
+    return this.db.prepare(`
+      SELECT task.*, decision.id AS decision_id, decision.reviewer, decision.decision, decision.note,
+        decision.created_at AS decided_at
+      FROM human_review_tasks task
+      LEFT JOIN human_review_decisions decision ON decision.review_task_id=task.id
+      ORDER BY CASE task.priority WHEN 'high' THEN 0 ELSE 1 END, task.created_at
+    `).all();
+  }
+
+  addHumanReviewDecision(reviewTaskId, { reviewer, decision, note }) {
+    const task = this.db.prepare("SELECT id FROM human_review_tasks WHERE id=?").get(reviewTaskId);
+    if (!task) throw new Error(`review task not found: ${reviewTaskId}`);
+    const id = entityId("review_decision", `${reviewTaskId}:${reviewer}:${decision}:${note}:${isoNow()}`);
+    this.db.prepare(`
+      INSERT INTO human_review_decisions(id,review_task_id,reviewer,decision,note,created_at)
+      VALUES(?,?,?,?,?,?)
+    `).run(id, reviewTaskId, reviewer, decision, note, isoNow());
+    return this.db.prepare("SELECT * FROM human_review_decisions WHERE id=?").get(id);
   }
 
   createReplay(sourceTrialId, replayIndex = 1) {
@@ -317,4 +382,3 @@ export class EvalStore {
     };
   }
 }
-
