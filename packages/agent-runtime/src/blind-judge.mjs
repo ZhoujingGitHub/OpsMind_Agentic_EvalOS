@@ -59,9 +59,10 @@ export async function judgeBlindTrial({ caseSpec, outcome, namespace, apiKey, mo
   const [{ query }] = await Promise.all([import("@anthropic-ai/claude-agent-sdk")]);
   const prompt = JSON.stringify(blindJudgePromptMaterial(caseSpec, outcome));
   let lastError;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
     let finalResult = null;
     let usage = {};
+    const messageSummary = [];
     try {
       for await (const message of query({
         prompt,
@@ -72,7 +73,10 @@ export async function judgeBlindTrial({ caseSpec, outcome, namespace, apiKey, mo
             "严格依据给定 Ground Truth、允许证据编号和最终 Outcome 评分。",
             "只输出简短可审计理由，不输出隐式思维链。存在歧义、代码规则可能误判或结论越过证据时，recommend_human_review=true。",
           ].join(" "),
-          maxTurns: 2,
+          // Structured-output validation may consume a turn when an Anthropic-
+          // compatible provider repairs its first JSON response.  Four turns
+          // remain a bounded no-tool Judge call while allowing that repair.
+          maxTurns: 4,
           maxBudgetUsd: 0.1,
           thinking: { type: "disabled" },
           cwd: namespace,
@@ -88,6 +92,7 @@ export async function judgeBlindTrial({ caseSpec, outcome, namespace, apiKey, mo
           env: deepSeekEnvironment({ apiKey, model, trialNamespace: namespace }),
         },
       })) {
+        messageSummary.push({ type: message.type, subtype: message.subtype ?? null });
         if (message.type === "result") {
           finalResult = message.structured_output ?? message.result;
           usage = {
@@ -98,13 +103,13 @@ export async function judgeBlindTrial({ caseSpec, outcome, namespace, apiKey, mo
           };
         }
       }
-      if (!finalResult) throw new Error("blind Judge returned no final result");
+      if (!finalResult) throw new Error(`blind Judge returned no final result; messages=${JSON.stringify(messageSummary)}`);
       return { result: parseResult(finalResult), usage };
     } catch (error) {
       lastError = error;
     }
   }
-  throw new Error(`blind Judge failed after one bounded retry: ${lastError?.message ?? "unknown error"}`);
+  throw new Error(`blind Judge failed after two bounded retries: ${lastError?.message ?? "unknown error"}`);
 }
 
 export const BLIND_JUDGE_RUNTIME = Object.freeze({

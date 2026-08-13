@@ -12,6 +12,7 @@
     "accept:m1:real:smoke": "node scripts/run-real-m1.mjs --smoke",
     "accept:m1:real": "node scripts/run-real-m1.mjs",
     "accept:m1:judge": "node scripts/run-m1-judge.mjs",
+    "accept:m1:close": "node scripts/finalize-m1-closure.mjs",
     "api": "node services/control-api/src/server.mjs",
     "adapter:check": "node packages/agent-runtime/scripts/check-adapter.mjs",
     "console:lint": "npm --prefix apps/console run lint",
