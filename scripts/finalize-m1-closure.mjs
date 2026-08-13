@@ -142,12 +142,25 @@ try {
     source_hashes: Object.fromEntries(Object.entries(sourceHashes).map(([key, value]) => [key, value.sha256])),
     original_manifest_commit_note: "冻结 Manifest 在无 .git 的发布包内生成，因此 contestant.code_commit 原样保留 working-tree；本记录是追加式来源证明，不改写冻结 Manifest。",
   };
-  if (!findLedgerAction("release.provenance_attested")) {
+  const provenanceAttestation = findLedgerAction("release.provenance_attested");
+  const provenanceCorrection = findLedgerAction("release.provenance_corrected");
+  if (!provenanceAttestation) {
     ledger.append({
       entityType: "release",
       entityId: runId,
       action: "release.provenance_attested",
       payload: provenancePayload,
+    });
+  } else if (!provenanceCorrection && sha256(JSON.parse(provenanceAttestation.payload_json)) !== sha256(provenancePayload)) {
+    ledger.append({
+      entityType: "release",
+      entityId: runId,
+      action: "release.provenance_corrected",
+      payload: {
+        ...provenancePayload,
+        supersedes_ledger_seq: provenanceAttestation.seq,
+        correction_reason: "自动核对发现人工传入的来源 Commit 或发布 Hash 与当前正式收口参数不一致；保留原记录并追加更正。",
+      },
     });
   }
 
@@ -325,7 +338,7 @@ try {
       contestants: manifest.contestants,
     },
     trees: sourceHashes,
-    ledger_entry: findLedgerAction("release.provenance_attested"),
+    ledger_entry: findLedgerAction("release.provenance_corrected") ?? findLedgerAction("release.provenance_attested"),
   });
   writeJson("M1代表Case轨迹对比.json", traceSummary);
 
