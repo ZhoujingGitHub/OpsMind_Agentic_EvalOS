@@ -44,6 +44,7 @@ function walkFiles(root, relative = "") {
   const result = [];
   for (const entry of readdirSync(current, { withFileTypes: true })) {
     if (ignored.has(entry.name)) continue;
+    if (/^\.env(?:\.|$)|secret|credential|private[-_.]?key/i.test(entry.name)) continue;
     const child = path.join(relative, entry.name);
     if (entry.isDirectory()) result.push(...walkFiles(root, child));
     if (entry.isFile()) result.push(child.replaceAll("\\", "/"));
@@ -124,7 +125,8 @@ try {
   const v2PluginRoot = process.env.OPSMIND_PLUGIN_ROOT || null;
   const v1Root = process.env.OPSMIND_LANGGRAPH_ROOT || null;
   const sourceCommits = {
-    evalos: process.env.M1_EVALOS_COMMIT ?? "unknown",
+    evalos_pilot_execution: process.env.M1_EVALOS_PILOT_COMMIT ?? "unknown",
+    evalos_result_closure: process.env.M1_EVALOS_CLOSURE_COMMIT ?? "unknown",
     agent_harness_v2_upstream: process.env.M1_V2_COMMIT ?? "unknown",
     langgraph_v1_upstream: process.env.M1_V1_COMMIT ?? "unknown",
   };

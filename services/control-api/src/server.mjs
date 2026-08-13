@@ -4,7 +4,11 @@ import { createApp } from "./app.mjs";
 
 const port = Number(process.env.PORT ?? 8787);
 const host = process.env.HOST ?? "127.0.0.1";
-const app = createApp();
+const app = createApp({
+  databasePath: process.env.EVALOS_DATABASE_PATH || undefined,
+  runtimeRoot: process.env.EVALOS_RUNTIME_ROOT || undefined,
+  artifactsRoot: process.env.EVALOS_ARTIFACTS_ROOT || undefined,
+});
 
 const server = createServer(async (request, response) => {
   const origin = `http://${request.headers.host ?? `${host}:${port}`}`;
@@ -34,4 +38,3 @@ const shutdown = () => {
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
-

@@ -51,3 +51,10 @@ test("control API creates idempotent experiment, runs Trials, streams redacted T
     app.close();
   }
 });
+
+test("server entrypoint accepts environment-selected formal M1 storage", () => {
+  const source = readFileSync(path.join(ROOT, "services/control-api/src/server.mjs"), "utf8");
+  assert.match(source, /EVALOS_DATABASE_PATH/);
+  assert.match(source, /EVALOS_RUNTIME_ROOT/);
+  assert.match(source, /EVALOS_ARTIFACTS_ROOT/);
+});
