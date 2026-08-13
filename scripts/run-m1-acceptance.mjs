@@ -45,6 +45,53 @@ function check(id, passed, evidence, actual = null, expected = null) {
   return { id, passed: Boolean(passed), evidence, actual, expected };
 }
 
+const CHECK_NAMES_ZH = Object.freeze({
+  required_trial_count: "Trial 数量符合要求",
+  all_trials_completed: "所有 Trial 均已完成",
+  all_code_grades_passed: "所有确定性代码评分均通过",
+  runner_restart_recovery: "Runner 重启恢复",
+  idempotency: "实验创建幂等性",
+  trial_isolation: "Trial 独立隔离",
+  blind_identity: "盲测身份保护",
+  seeded_random_order: "基于种子的随机顺序",
+  budget_soft_and_hard_limits: "预算软限制与硬限制",
+  ledger_hash_chain: "Ledger 哈希链完整性",
+  trace_first_event: "首条 Trace 事件时延",
+  trace_heartbeat: "Trace 心跳",
+  trace_cursor: "Trace 游标连续性",
+  trace_redaction: "Trace 敏感信息脱敏",
+  deterministic_replay: "确定性重放一致性",
+  minimum_replay_rate: "最低重放比例",
+  claude_sdk_deepseek_contract: "Claude Agent SDK 与 DeepSeek 集成约定",
+});
+
+const TRACE_KIND_NAMES_ZH = Object.freeze({
+  "trial.started": "Trial 已启动",
+  "runner.heartbeat": "Runner 心跳",
+  "environment.snapshot": "环境快照",
+  "model.decision": "模型决策",
+  "tool.call": "工具调用",
+  "tool.result": "工具结果",
+  "grader.result": "评分结果",
+  "trial.completed": "Trial 已完成",
+});
+
+function markdownCell(value) {
+  return String(value ?? "—").replaceAll("|", "\\|").replaceAll("\n", " ");
+}
+
+function traceSummaryZh(event) {
+  if (event.kind === "trial.started") return `用例 ${event.payload.case_id}，种子 ${event.payload.seed}，盲测身份 ${event.payload.blind_id}`;
+  if (event.kind === "runner.heartbeat") return `心跳间隔 ${event.payload.heartbeat_ms} 毫秒`;
+  if (event.kind === "environment.snapshot") return `已记录独立命名空间，敏感配置已${event.redacted ? "脱敏" : "处理"}`;
+  if (event.kind === "model.decision") return event.payload.action === "final" ? "模型判断证据已充分，准备输出最终结论" : `模型自主选择工具 ${event.payload.tool}`;
+  if (event.kind === "tool.call") return `调用 ${event.payload.tool}`;
+  if (event.kind === "tool.result") return `${event.payload.tool} 返回${event.payload.ok ? "成功" : "失败"}`;
+  if (event.kind === "grader.result") return `确定性评分 ${event.payload.score?.total ?? "—"} 分，${event.payload.score?.passed ? "通过" : "未通过"}`;
+  if (event.kind === "trial.completed") return `Trial 状态 ${event.payload.status}，得分 ${event.payload.score}`;
+  return event.kind;
+}
+
 function traceFingerprint(trialId) {
   const events = store.getTrace(trialId)
     .filter((event) => ["model.decision", "tool.call", "tool.result"].includes(event.kind))
@@ -137,23 +184,23 @@ try {
   const recoveryTrial = store.getTrial(interrupted.id);
   const blindRows = store.listBlinds(experimentId);
   const checks = [
-    check("required_trial_count", completedOriginals.length === criteria.required_trials, "2 cases x 2 contestants x 3 seeds", completedOriginals.length, criteria.required_trials),
-    check("all_trials_completed", completedOriginals.every((trial) => trial.status === "COMPLETED"), "All original smoke Trials reached COMPLETED", summary.completed_trials, criteria.required_trials),
-    check("all_code_grades_passed", completedOriginals.every((trial) => trial.score?.passed), "Every deterministic code grade passed", completedOriginals.filter((trial) => trial.score?.passed).length, criteria.required_trials),
-    check("runner_restart_recovery", recoveredIds.includes(interrupted.id) && recoveryTrial.attempt >= 2, "Expired lease was requeued and the same Trial completed", recoveryTrial.attempt, ">=2"),
-    check("idempotency", created.created && !duplicate.created && created.experiment.id === duplicate.experiment.id, "Duplicate create returned the existing experiment", duplicate.created, false),
-    check("trial_isolation", uniqueNamespaces.size === criteria.required_trials && completedOriginals.every((trial) => trial.namespace.includes(trial.id)), "Every Trial has a dedicated namespace", uniqueNamespaces.size, criteria.required_trials),
-    check("blind_identity", blindRows.length === 2 && blindRows.every((row) => row.blind_id.startsWith("candidate-") && !row.blind_id.includes(row.contestant_id)), "Public Trial identity uses blind labels", blindRows.map((row) => row.blind_id), "2 non-revealing labels"),
-    check("seeded_random_order", orders.size === 6 && orderVariants.size >= 2, "A/B order is deterministic per seed and varies across pairs", orderVariants.size, ">=2"),
-    check("budget_soft_and_hard_limits", softWarnings.length === 1 && hardStopped, "80% warning emitted and 100% consumption blocked", { warnings: softWarnings.length, hardStopped }, { warnings: 1, hardStopped: true }),
-    check("ledger_hash_chain", ledgerStatus.valid, "Append-only ledger hash chain verifies", ledgerStatus.entries, ">0"),
-    check("trace_first_event", maxFirstEventMs <= criteria.first_trace_event_ms_max, "Maximum first Trace event latency", maxFirstEventMs, `<=${criteria.first_trace_event_ms_max}`),
-    check("trace_heartbeat", manifest.policy.heartbeat_ms <= criteria.heartbeat_ms_max && completedOriginals.every((trial) => store.getTrace(trial.id).some((event) => event.kind === "runner.heartbeat")), "Heartbeat policy and events present", manifest.policy.heartbeat_ms, `<=${criteria.heartbeat_ms_max}`),
-    check("trace_cursor", cursorChecks.every(Boolean), "Cursor reads the next event without duplication", cursorChecks.filter(Boolean).length, criteria.required_trials),
-    check("trace_redaction", !containsSensitiveMaterial(allTraces) && allTraces.some((event) => event.redacted), "Injected smoke secret was redacted before persistence", allTraces.filter((event) => event.redacted).length, ">0"),
-    check("deterministic_replay", completedReplays.length === 2 && replayComparisons.every((item) => item.outcome_match && item.score_match && item.trajectory_match), "Two replays match outcome, score, and model/tool trajectory", replayComparisons, "all true"),
-    check("minimum_replay_rate", summary.replay_rate >= criteria.minimum_replay_rate, "Replay rate rounds 10% of 12 up to two Trials", summary.replay_rate, `>=${criteria.minimum_replay_rate}`),
-    check("claude_sdk_deepseek_contract", DEEPSEEK_AGENT_RUNTIME.sdk === "@anthropic-ai/claude-agent-sdk" && DEEPSEEK_AGENT_RUNTIME.model === "deepseek-v4-flash" && DEEPSEEK_AGENT_RUNTIME.graphFramework === null, "Live adapter contract uses Claude Agent SDK + DeepSeek V4 Flash without a graph framework", DEEPSEEK_AGENT_RUNTIME, "Claude SDK + DeepSeek V4 Flash"),
+    check("required_trial_count", completedOriginals.length === criteria.required_trials, "2 个用例 × 2 个参评 Agent × 3 个随机种子", completedOriginals.length, criteria.required_trials),
+    check("all_trials_completed", completedOriginals.every((trial) => trial.status === "COMPLETED"), "所有原始冒烟 Trial 均已进入 COMPLETED 状态", summary.completed_trials, criteria.required_trials),
+    check("all_code_grades_passed", completedOriginals.every((trial) => trial.score?.passed), "每个确定性代码评分均已通过", completedOriginals.filter((trial) => trial.score?.passed).length, criteria.required_trials),
+    check("runner_restart_recovery", recoveredIds.includes(interrupted.id) && recoveryTrial.attempt >= 2, "过期租约已重新入队，同一个 Trial 随后成功完成", recoveryTrial.attempt, ">=2"),
+    check("idempotency", created.created && !duplicate.created && created.experiment.id === duplicate.experiment.id, "重复创建请求返回了已存在的实验", duplicate.created, false),
+    check("trial_isolation", uniqueNamespaces.size === criteria.required_trials && completedOriginals.every((trial) => trial.namespace.includes(trial.id)), "每个 Trial 都使用独立命名空间", uniqueNamespaces.size, criteria.required_trials),
+    check("blind_identity", blindRows.length === 2 && blindRows.every((row) => row.blind_id.startsWith("candidate-") && !row.blind_id.includes(row.contestant_id)), "公开的 Trial 身份仅使用不暴露真实参评方的盲测标签", blindRows.map((row) => row.blind_id), "2 个不暴露真实身份的标签"),
+    check("seeded_random_order", orders.size === 6 && orderVariants.size >= 2, "每个种子的 A/B 顺序可复现，且不同组合之间存在顺序变化", orderVariants.size, ">=2"),
+    check("budget_soft_and_hard_limits", softWarnings.length === 1 && hardStopped, "预算达到 80% 时发出预警，达到 100% 时阻止继续消耗", { warnings: softWarnings.length, hardStopped }, { warnings: 1, hardStopped: true }),
+    check("ledger_hash_chain", ledgerStatus.valid, "只追加 Ledger 的哈希链校验通过", ledgerStatus.entries, ">0"),
+    check("trace_first_event", maxFirstEventMs <= criteria.first_trace_event_ms_max, "所有原始 Trial 中首条 Trace 事件的最大时延", maxFirstEventMs, `<=${criteria.first_trace_event_ms_max}`),
+    check("trace_heartbeat", manifest.policy.heartbeat_ms <= criteria.heartbeat_ms_max && completedOriginals.every((trial) => store.getTrace(trial.id).some((event) => event.kind === "runner.heartbeat")), "心跳策略符合要求，且每个 Trial 均有心跳事件", manifest.policy.heartbeat_ms, `<=${criteria.heartbeat_ms_max}`),
+    check("trace_cursor", cursorChecks.every(Boolean), "游标能够无重复地读取下一条事件", cursorChecks.filter(Boolean).length, criteria.required_trials),
+    check("trace_redaction", !containsSensitiveMaterial(allTraces) && allTraces.some((event) => event.redacted), "注入的冒烟测试密钥在持久化前已脱敏", allTraces.filter((event) => event.redacted).length, ">0"),
+    check("deterministic_replay", completedReplays.length === 2 && replayComparisons.every((item) => item.outcome_match && item.score_match && item.trajectory_match), "两次重放的结果、得分以及模型/工具轨迹均与原 Trial 一致", replayComparisons, "全部为 true"),
+    check("minimum_replay_rate", summary.replay_rate >= criteria.minimum_replay_rate, "12 个 Trial 的 10% 向上取整为 2 个，实际已完成 2 个重放", summary.replay_rate, `>=${criteria.minimum_replay_rate}`),
+    check("claude_sdk_deepseek_contract", DEEPSEEK_AGENT_RUNTIME.sdk === "@anthropic-ai/claude-agent-sdk" && DEEPSEEK_AGENT_RUNTIME.model === "deepseek-v4-flash" && DEEPSEEK_AGENT_RUNTIME.graphFramework === null, "生产适配器使用 Claude Agent SDK 与 DeepSeek V4 Flash，未引入图工作流框架", DEEPSEEK_AGENT_RUNTIME, "Claude Agent SDK + DeepSeek V4 Flash"),
   ];
   const passed = checks.every((item) => item.passed);
   const verdict = {
@@ -175,7 +222,7 @@ try {
       average_score: Number(summary.average_score.toFixed(2)),
       maximum_first_trace_event_ms: maxFirstEventMs,
       model_contract: DEEPSEEK_AGENT_RUNTIME,
-      acceptance_model_execution: "deterministic replay test double (no external API key available)",
+      acceptance_model_execution: "确定性重放测试替身（未提供外部 API 密钥）",
     },
     ledger: ledgerStatus,
     replay_comparisons: replayComparisons,
@@ -185,36 +232,138 @@ try {
   writeFileSync(path.join(ARTIFACTS, "experiment-summary.json"), `${JSON.stringify(summary, null, 2)}\n`, "utf8");
   writeFileSync(path.join(ARTIFACTS, "ledger-verification.json"), `${JSON.stringify(ledgerStatus, null, 2)}\n`, "utf8");
   writeFileSync(path.join(ARTIFACTS, "replay-comparison.json"), `${JSON.stringify(replayComparisons, null, 2)}\n`, "utf8");
-  writeFileSync(path.join(ARTIFACTS, "trace-sample.json"), `${JSON.stringify(store.getTrace(completedOriginals[0].id), null, 2)}\n`, "utf8");
+  const sampleTrace = store.getTrace(completedOriginals[0].id);
+  writeFileSync(path.join(ARTIFACTS, "trace-sample.json"), `${JSON.stringify(sampleTrace, null, 2)}\n`, "utf8");
 
   const report = [
-    "# OpsMind Agentic EvalOS M1 / G1 acceptance report",
+    "# OpsMind Agentic EvalOS M1 / G1 验收报告",
     "",
-    `- Verdict: **${verdict.status}**`,
-    `- Run: \`${runId}\``,
-    `- Experiment: \`${experimentId}\``,
-    `- Completed: ${summary.completed_trials}/${criteria.required_trials} original Trials`,
-    `- Replay: ${summary.replay_count}/${criteria.required_trials} (${(summary.replay_rate * 100).toFixed(1)}%)`,
-    `- Average code score: ${verdict.execution.average_score}`,
-    `- Maximum first Trace event latency: ${maxFirstEventMs} ms`,
-    `- Ledger: ${ledgerStatus.valid ? "valid" : "invalid"}, ${ledgerStatus.entries} entries`,
+    `- 验收结论：**${verdict.accepted ? "通过" : "未通过"}**`,
+    `- 运行版本：\`${runId}\``,
+    `- 实验编号：\`${experimentId}\``,
+    `- 原始 Trial：${summary.completed_trials}/${criteria.required_trials} 个已完成`,
+    `- 确定性重放：${summary.replay_count}/${criteria.required_trials} 个（${(summary.replay_rate * 100).toFixed(1)}%）`,
+    `- 平均代码评分：${verdict.execution.average_score} 分`,
+    `- 首条 Trace 事件最大时延：${maxFirstEventMs} 毫秒`,
+    `- Ledger：${ledgerStatus.valid ? "有效" : "无效"}，共 ${ledgerStatus.entries} 条记录`,
     "",
-    "## Architecture assertion",
+    "## 架构符合性声明",
     "",
-    "The production adapter uses Claude Agent SDK with DeepSeek V4 Flash through DeepSeek's Anthropic-compatible endpoint. Agent behavior is a model-driven tool loop: the model forms hypotheses and chooses allowed MCP tools dynamically. There is no LangGraph dependency and no static node workflow. The deterministic kernel retains seeds, blind IDs, policy, budgets, isolation, grading, and Ledger control.",
+    "生产适配器通过 DeepSeek 的 Anthropic 兼容接口，使用 Claude Agent SDK 调用 DeepSeek V4 Flash。Agent 采用模型驱动的工具循环：模型自主形成假设，并动态选择已授权的 MCP 工具。项目不依赖 LangGraph，也不存在静态节点工作流。随机种子、盲测身份、策略、预算、隔离、评分与 Ledger 均由确定性内核控制。",
     "",
-    "M1 acceptance intentionally ran credential-free deterministic replay adapters that implement the same action contract. This validates the trusted kernel and does not claim a paid DeepSeek model call. A live API key remains an external deployment prerequisite, not an acceptance secret.",
+    "M1 验收特意运行了无需密钥、实现相同行动协议的确定性重放适配器。本次结果验证的是可信内核，不宣称发生了付费 DeepSeek 模型调用。真实 API 密钥仍属于外部部署前置条件，不属于验收材料。",
     "",
-    "## Checks",
+    "## 验收项",
     "",
-    "| Check | Result | Evidence |",
-    "|---|---:|---|",
-    ...checks.map((item) => `| ${item.id} | ${item.passed ? "PASS" : "FAIL"} | ${String(item.evidence).replaceAll("|", "\\|")} |`),
+    "| 验收项 | 技术标识 | 结果 | 证据 |",
+    "|---|---|---:|---|",
+    ...checks.map((item) => `| ${CHECK_NAMES_ZH[item.id] ?? item.id} | \`${item.id}\` | ${item.passed ? "通过" : "未通过"} | ${markdownCell(item.evidence)} |`),
     "",
-    `Ledger head: \`${ledgerStatus.head_hash}\``,
+    `Ledger 链头哈希：\`${ledgerStatus.head_hash}\``,
     "",
   ].join("\n");
   writeFileSync(path.join(ARTIFACTS, "M1_G1验收报告.md"), report, "utf8");
+
+  const verdictDocument = [
+    "# G1 机器判定结果（中文解读）",
+    "",
+    "> 本文档是 `g1-verdict.json` 的中文可读版。JSON 保留稳定字段名，供程序读取和自动复验。",
+    "",
+    `- 验收门禁：${verdict.gate}`,
+    `- 判定结果：**${verdict.accepted ? "通过" : "未通过"}**`,
+    `- 判定时间：${verdict.accepted_at}`,
+    `- 运行版本：\`${verdict.run_id}\``,
+    `- Git 提交：\`${verdict.git_commit}\``,
+    `- 实验编号：\`${verdict.experiment_id}\``,
+    `- 实验清单哈希：\`${verdict.manifest_hash}\``,
+    `- 数据集哈希：\`${verdict.dataset_hash}\``,
+    `- 验收执行方式：${verdict.execution.acceptance_model_execution}`,
+    "",
+    "## 自动检查结果",
+    "",
+    "| 验收项 | 技术标识 | 结果 | 证据 |",
+    "|---|---|---:|---|",
+    ...checks.map((item) => `| ${CHECK_NAMES_ZH[item.id] ?? item.id} | \`${item.id}\` | ${item.passed ? "通过" : "未通过"} | ${markdownCell(item.evidence)} |`),
+    "",
+  ].join("\n");
+  writeFileSync(path.join(ARTIFACTS, "G1机器判定结果.md"), verdictDocument, "utf8");
+
+  const summaryDocument = [
+    "# M1 实验汇总（中文解读）",
+    "",
+    "> 本文档是 `experiment-summary.json` 的中文可读版。",
+    "",
+    `- 实验编号：\`${experimentId}\``,
+    `- 实验名称：M1 可信内核冒烟测试（机器标识：\`${manifest.name}\`）`,
+    `- 实验状态：${summary.failed_trials === 0 ? "已完成" : "存在失败"}`,
+    `- 原始 Trial 总数：${summary.trial_count}`,
+    `- 已完成 Trial：${summary.completed_trials}`,
+    `- 失败 Trial：${summary.failed_trials}`,
+    `- 完成率：${(summary.completion_rate * 100).toFixed(1)}%`,
+    `- 重放数量：${summary.replay_count}`,
+    `- 重放比例：${(summary.replay_rate * 100).toFixed(1)}%`,
+    `- 平均得分：${Number(summary.average_score.toFixed(2))} 分`,
+    "",
+  ].join("\n");
+  writeFileSync(path.join(ARTIFACTS, "实验汇总.md"), summaryDocument, "utf8");
+
+  const ledgerDocument = [
+    "# M1 Ledger 校验结果（中文解读）",
+    "",
+    "> 本文档是 `ledger-verification.json` 的中文可读版。",
+    "",
+    `- 哈希链状态：**${ledgerStatus.valid ? "有效" : "无效"}**`,
+    `- Ledger 记录数：${ledgerStatus.entries}`,
+    `- 链头哈希：\`${ledgerStatus.head_hash}\``,
+    `- 校验错误：${ledgerStatus.errors.length === 0 ? "无" : ledgerStatus.errors.join("；")}`,
+    "",
+  ].join("\n");
+  writeFileSync(path.join(ARTIFACTS, "Ledger校验结果.md"), ledgerDocument, "utf8");
+
+  const replayDocument = [
+    "# M1 确定性重放对比（中文解读）",
+    "",
+    "> 本文档是 `replay-comparison.json` 的中文可读版。",
+    "",
+    "| 重放 Trial | 原始 Trial | 结果一致 | 得分一致 | 模型/工具轨迹一致 |",
+    "|---|---|---:|---:|---:|",
+    ...replayComparisons.map((item) => `| \`${item.replay_id}\` | \`${item.source_id}\` | ${item.outcome_match ? "是" : "否"} | ${item.score_match ? "是" : "否"} | ${item.trajectory_match ? "是" : "否"} |`),
+    "",
+    `结论：${replayComparisons.every((item) => item.outcome_match && item.score_match && item.trajectory_match) ? "两次重放均与原始 Trial 完全一致。" : "存在不一致项，需要复核。"}`,
+    "",
+  ].join("\n");
+  writeFileSync(path.join(ARTIFACTS, "确定性重放对比.md"), replayDocument, "utf8");
+
+  const traceDocument = [
+    "# M1 Trace 轨迹样例（中文解读）",
+    "",
+    "> 本文档是 `trace-sample.json` 的中文可读版。原始 JSON 保留完整事件载荷，本文档用于快速验收。",
+    "",
+    `- Trial 编号：\`${completedOriginals[0].id}\``,
+    `- 事件总数：${sampleTrace.length}`,
+    `- 已脱敏事件数：${sampleTrace.filter((event) => event.redacted).length}`,
+    "",
+    "| 序号 | 事件 | 执行方 | 时间 | 是否脱敏 | 中文摘要 |",
+    "|---:|---|---|---|---:|---|",
+    ...sampleTrace.map((event) => `| ${event.seq} | ${TRACE_KIND_NAMES_ZH[event.kind] ?? event.kind}（\`${event.kind}\`） | ${event.actor} | ${event.timestamp} | ${event.redacted ? "是" : "否"} | ${markdownCell(traceSummaryZh(event))} |`),
+    "",
+  ].join("\n");
+  writeFileSync(path.join(ARTIFACTS, "Trace轨迹样例.md"), traceDocument, "utf8");
+
+  const deliveryIndex = [
+    "# M1 中文交付材料索引",
+    "",
+    "以下 Markdown 文件均为中文交付材料，可直接阅读；同目录 JSON 文件是自动验收使用的原始机器证据，字段名保持稳定以保证程序兼容和可复验。",
+    "",
+    "- [M1 / G1 验收报告](M1_G1验收报告.md)",
+    "- [G1 机器判定结果](G1机器判定结果.md)",
+    "- [实验汇总](实验汇总.md)",
+    "- [Ledger 校验结果](Ledger校验结果.md)",
+    "- [确定性重放对比](确定性重放对比.md)",
+    "- [Trace 轨迹样例](Trace轨迹样例.md)",
+    "",
+  ].join("\n");
+  writeFileSync(path.join(ARTIFACTS, "交付材料索引.md"), deliveryIndex, "utf8");
 
   const snapshot = {
     generated_at: verdict.accepted_at,
