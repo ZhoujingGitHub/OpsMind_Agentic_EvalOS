@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsmind.local/contracts/trace-record.schema.json",
+  "title": "OpsMind EvalOS append-only Span Trace Record",
+  "type": "object",
+  "required": ["record_id", "trial_id", "trace_id", "seq", "timestamp", "record_type", "span_id", "name", "span_kind", "actor", "payload", "payload_hash", "redacted"],
+  "properties": {
+    "record_id": { "type": "string" }, "trial_id": { "type": "string" }, "trace_id": { "type": "string" },
+    "seq": { "type": "integer", "minimum": 1 }, "timestamp": { "type": "string", "format": "date-time" },
+    "record_type": { "enum": ["SPAN_START", "SPAN_EVENT", "SPAN_END"] },
+    "span_id": { "type": "string" }, "parent_span_id": { "type": ["string", "null"] },
+    "name": { "type": "string" }, "span_kind": { "enum": ["CHAIN", "AGENT", "TOOL", "EVALUATOR", "INTERNAL"] },
+    "actor": { "type": "string" }, "status": { "type": ["string", "null"] }, "payload": { "type": "object" },
+    "payload_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "redacted": { "type": "boolean" }
+  },
+  "additionalProperties": true
+}

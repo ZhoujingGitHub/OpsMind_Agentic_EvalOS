@@ -1,0 +1,48 @@
+{
+  "contract": "evalos-m25-ui-interaction-acceptance.1",
+  "milestone": "M2.5",
+  "status": "PASSED",
+  "generated_at": "2026-08-15T01:23:25.9257263+08:00",
+  "target": "http://121.40.223.202:3000",
+  "release": {
+    "path": "/opt/opsmind-evalos/releases/m25-20260815-6c295ec2",
+    "tree_digest": "sha256:6c295ec230199b6ed6eba873fce913638b2e7809c773a862f1627e7a12ebf92e"
+  },
+  "root_cause": "Vinext 生产服务中的 next/link 客户端拦截没有完成页面切换；Trial 内部原生按钮可用，因此早期抽查没有覆盖到全局导航失效。",
+  "checks": {
+    "native_navigation_replaces_broken_client_interception": true,
+    "homepage_four_metric_cards_open_real_pages": true,
+    "sidebar_six_navigation_entries_open_real_pages": true,
+    "trace_grader_and_analysis_have_independent_pages": true,
+    "experiment_case_and_center_table_rows_are_fully_clickable": true,
+    "dataset_filter_buttons_change_visible_case_set": true,
+    "trial_deep_links_open_trace_grader_and_analysis_tabs": true,
+    "trial_five_tabs_switch_content": true,
+    "trace_four_filters_switch_content": true,
+    "trace_record_expands": true,
+    "trace_pagination_loads_200_plus_1_records": true,
+    "source_file_button_opens_read_only_content": true,
+    "analysis_history_button_switches_run": true,
+    "json_detail_expands": true,
+    "back_brand_and_view_all_links_navigate": true,
+    "same_page_metric_anchors_reach_targets": true,
+    "paid_analysis_entry_is_enabled_but_not_triggered_during_ui_acceptance": true,
+    "cloud_services_healthy": true,
+    "m25_cloud_finalizer_passed": true
+  },
+  "browser_acceptance": {
+    "interaction_categories": 30,
+    "failed_categories": 0,
+    "trace_rows_initial": 200,
+    "trace_rows_after_load_more": 201,
+    "analysis_history_buttons_on_sample_trial": 8
+  },
+  "automated_acceptance": {
+    "core_tests": 57,
+    "console_tests": 4,
+    "public_routes_http_200": 6,
+    "trial_index_records": 7,
+    "security_findings": 0
+  },
+  "cost_boundary": "没有为了测试按钮而新建付费 AI 调查；入口启用状态、创建接口自动测试和 10 份既有运行记录均已验证。"
+}

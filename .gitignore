@@ -7,7 +7,11 @@ dist/
 !.env.example
 runtime/
 .deploy/
+memory.md
+config/eval-lab-cloud.psd1
 artifacts/m1-real/
+artifacts/m15/
+artifacts/m15-real/
 coverage/
 _work/
 *.log

@@ -1,0 +1,351 @@
+{
+  "contract": "evalos-m2-acceptance.1",
+  "gate": "M2",
+  "status": "PASSED",
+  "run_id": "m2-real-acceptance-20260814-v3",
+  "execution": "真实 Open5GS + MongoDB + UERANSIM；由 EvalLab 经受限 SSH 调用；非确定性回放替身",
+  "started_at": "2026-08-14T07:50:10.971Z",
+  "completed_at": "2026-08-14T08:01:30.890Z",
+  "checks": {
+    "real_components_ready": true,
+    "initial_baseline_clean": true,
+    "all_20_cases_executed": true,
+    "all_20_cases_passed": true,
+    "every_trial_has_pcap": true,
+    "every_trial_reset_clean": true,
+    "reset_hash_is_deterministic": true,
+    "final_baseline_clean": true,
+    "disk_capacity_safe": true
+  },
+  "components": {
+    "open5gs": "Open5GS v2.8.0",
+    "mongod": "db version v8.0.29",
+    "ueransim": "v3.2.7"
+  },
+  "case_count": 20,
+  "passed_cases": 20,
+  "reset_hash": "baf90fa1341b5c8e510e4e37319a037a90b460d1b0bf1066e5f84a288d335d26",
+  "maximum_disk_percent": 0.16,
+  "cases": [
+    {
+      "case_ref": "M2-REG-001@1.0.0",
+      "scenario_id": "subscriber-missing",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-AUTH-002@1.0.0",
+      "scenario_id": "subscriber-key-mismatch",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-PDU-003@1.0.0",
+      "scenario_id": "unknown-dnn",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-SLICE-004@1.0.0",
+      "scenario_id": "slice-mismatch",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-TAI-005@1.0.0",
+      "scenario_id": "tracking-area-mismatch",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-AMF-006@1.0.0",
+      "scenario_id": "amf-process-down",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-SMF-007@1.0.0",
+      "scenario_id": "smf-process-down",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-UPF-008@1.0.0",
+      "scenario_id": "upf-process-down",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-NRF-009@1.0.0",
+      "scenario_id": "nrf-process-down",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-DB-010@1.0.0",
+      "scenario_id": "mongodb-process-down",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 4,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-N2-011@1.0.0",
+      "scenario_id": "sctp-blocked",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-PFCP-012@1.0.0",
+      "scenario_id": "pfcp-blocked",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-N3-013@1.0.0",
+      "scenario_id": "gtpu-blocked",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-N6-014@1.0.0",
+      "scenario_id": "n6-route-missing",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-DNS-015@1.0.0",
+      "scenario_id": "dns-blocked",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-LAT-016@1.0.0",
+      "scenario_id": "user-plane-latency",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-GNB-017@1.0.0",
+      "scenario_id": "gnb-process-crash",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-GAP-018@1.0.0",
+      "scenario_id": "observability-gap",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 2,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-STALE-019@1.0.0",
+      "scenario_id": "stale-alarm",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    },
+    {
+      "case_ref": "M2-PROACTIVE-020@1.0.0",
+      "scenario_id": "pcap-capacity-risk",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "isolated_namespace": true,
+        "pcap_written": true,
+        "protocol_observed": true,
+        "required_evidence_observed": true,
+        "snapshot_written": true,
+        "reset_clean": true
+      },
+      "observed_evidence_count": 3,
+      "failure": null
+    }
+  ]
+}

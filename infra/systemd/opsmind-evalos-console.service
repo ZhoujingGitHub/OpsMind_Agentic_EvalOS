@@ -1,0 +1,25 @@
+[Unit]
+Description=OpsMind Agentic EvalOS operator workbench
+Wants=network-online.target
+After=network-online.target opsmind-evalos.service
+
+[Service]
+Type=simple
+User=opsmindeval
+Group=opsmindeval
+WorkingDirectory=/opt/opsmind-evalos/current/evalos/apps/console
+EnvironmentFile=-/etc/opsmind-evalos/evalos.env
+Environment=CONSOLE_HOST=127.0.0.1
+Environment=CONSOLE_PORT=3000
+Environment=EVALOS_API_ORIGIN=http://127.0.0.1:8787
+ExecStart=/usr/local/bin/node serve.mjs
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

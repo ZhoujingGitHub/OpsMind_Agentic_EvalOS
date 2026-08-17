@@ -1,0 +1,80 @@
+{
+  "contract": "evalos-m25-cloud-acceptance.1",
+  "milestone": "M2.5",
+  "status": "PASSED",
+  "execution": "云端真实 M2 Trial 证据 + Claude Agent SDK 通过 DeepSeek Anthropic 兼容端点执行的真实付费调查；非回放脑、非模拟模型调用",
+  "authority": "AI 调查结果仅用于解释和改进，不参与或改写确定性正式分数",
+  "checks": {
+    "real_m2_experiments_imported": true,
+    "seven_real_trials_imported": true,
+    "complete_trial_traces_imported": true,
+    "deterministic_grades_imported": true,
+    "every_trial_has_frozen_source": true,
+    "three_real_sdk_investigations_completed": true,
+    "investigator_reports_are_substantive": true,
+    "investigator_used_read_only_evidence_tools": true,
+    "authoritative_web_research_was_actually_fetched": true,
+    "analysis_did_not_replace_official_grades": true,
+    "append_only_ledger_valid": true,
+    "credential_material_absent": true,
+    "no_hidden_expert_dependency": true
+  },
+  "counts": {
+    "experiments": 2,
+    "trials": 7,
+    "completed_trials": 7,
+    "trace_records": 864,
+    "grader_runs": 7,
+    "source_snapshots": 2,
+    "source_bindings": 7,
+    "analysis_runs": 10,
+    "completed_analysis_runs": 3,
+    "analysis_events": 305,
+    "analysis_sources": 8
+  },
+  "analyses": [
+    {
+      "id": "analysis_038822836aaa2bb39e90",
+      "trial_id": "trial_c58d6fdf73235851d133",
+      "status": "COMPLETED",
+      "sdk": "@anthropic-ai/claude-agent-sdk",
+      "model": "deepseek-v4-flash",
+      "mode": "optimization_research",
+      "source_snapshot_ref": "source:agent-harness-v2:44e35fe6a8c27ac7257e80f737be5351515b3f2ada89907b6fca754f80ad8e09",
+      "result_hash": "ee1c01a98126d9ad711f04b666b638c46eaf51cfbc9d7b386796510f4c3ed530",
+      "issue_count": 4,
+      "optimization_count": 5,
+      "methodology_source_count": 3,
+      "confidence": 0.9
+    },
+    {
+      "id": "analysis_eb5fd0eb90261f3052bb",
+      "trial_id": "trial_884eeef6cd1d2fcf69eb",
+      "status": "COMPLETED",
+      "sdk": "@anthropic-ai/claude-agent-sdk",
+      "model": "deepseek-v4-flash",
+      "mode": "case_diagnosis",
+      "source_snapshot_ref": "source:langgraph-v1:a22e4b9a14b2851722b12e70ddca0d8b6276b2478e61fca3c95b00e3e9f653ce",
+      "result_hash": "b3914cbfe5b2ff646a0be984c27715b80cff0a1cce213d09d0eb052cf799ae9a",
+      "issue_count": 6,
+      "optimization_count": 5,
+      "methodology_source_count": 0,
+      "confidence": 0.88
+    },
+    {
+      "id": "analysis_ad430e2f0079f025237b",
+      "trial_id": "trial_cc123ff908b6a0315aa2",
+      "status": "COMPLETED",
+      "sdk": "@anthropic-ai/claude-agent-sdk",
+      "model": "deepseek-v4-flash",
+      "mode": "score_explanation",
+      "source_snapshot_ref": "source:agent-harness-v2:44e35fe6a8c27ac7257e80f737be5351515b3f2ada89907b6fca754f80ad8e09",
+      "result_hash": "4b5cfe58e0267ea38a4c6bd32bfc851f4b17f3f41a3d01e49e0b8822272f68cf",
+      "issue_count": 3,
+      "optimization_count": 5,
+      "methodology_source_count": 0,
+      "confidence": 0.86
+    }
+  ],
+  "generated_at": "2026-08-14T16:42:50.913Z"
+}

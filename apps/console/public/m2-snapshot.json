@@ -1,0 +1,12 @@
+{
+  "contract": "evalos-m2-summary.1",
+  "status": "IN_PROGRESS",
+  "ranking_produced": false,
+  "next_phase": "M3 正式盲测评测",
+  "gates": {
+    "protocol_twin": {"status": "PASSED"},
+    "change_executor": {"status": "NOT_RUN"},
+    "agent_e2e": {"status": "NOT_RUN"},
+    "adapter_qualification": {"status": "NOT_RUN"}
+  }
+}

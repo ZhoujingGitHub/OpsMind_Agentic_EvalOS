@@ -1,0 +1,20 @@
+{
+  "contract": "evalos-m3-capacity-preflight.1",
+  "checked_at": "2026-08-16T20:26:25.972Z",
+  "status": "BLOCKED",
+  "paid_trials_started": false,
+  "reason": "现有环境没有足够的真实隔离 Twin 槽位；为避免并发 Trial 互相污染，容量门禁在模型调用前安全停止。",
+  "twin": {
+    "status": "ready",
+    "active_trial": null,
+    "capacity": { "max_parallel_trials": 1, "active_trials": 0, "isolation_mode": "legacy-serial-runtime" }
+  },
+  "evalos_host": {
+    "logical_cpus": 4,
+    "total_memory_bytes": 7619641344,
+    "free_memory_bytes": 6726393856,
+    "workspace_free_bytes": 30387449856
+  },
+  "four_concurrency": { "expected_trials": 24, "requested_twin_slots": 4, "ready": false },
+  "eight_concurrency": { "expected_trials": 48, "requested_twin_slots": 8, "ready": false }
+}

@@ -1,0 +1,28 @@
+{
+  "contract": "evalos-m3-qualification-readonly-regrade.1",
+  "source_run_id": "m3-adapter2-qualification-20260817-cloud7",
+  "source_grader_ref": "evalos-code-grader@4.1.0",
+  "regrade_ref": "evalos-code-grader@4.2.0",
+  "official_score_affected": false,
+  "source_evidence_mutated": false,
+  "total_trials": 16,
+  "passed_after_regrade": 11,
+  "failed_after_regrade": 5,
+  "candidate_summary": {
+    "agent-harness-v2": { "passed": 8, "total": 8 },
+    "langgraph-v1": { "passed": 3, "total": 8 }
+  },
+  "corrected_false_negatives": [
+    { "case_ref": "M3-PUB-001@2.0.0", "contestant_ref": "agent-harness-v2", "old_total": 46.13, "new_total": 99.46 },
+    { "case_ref": "M3-REG-001@2.0.0", "contestant_ref": "agent-harness-v2", "old_total": 55.47, "new_total": 99.92 },
+    { "case_ref": "M3-REG-001@2.0.0", "contestant_ref": "langgraph-v1", "old_total": 52.78, "new_total": 97.22 }
+  ],
+  "remaining_failures": [
+    { "case_ref": "M3-PUB-005@2.0.0", "contestant_ref": "langgraph-v1", "total": 54.17, "failed_hard_gates": ["minimum_evidence_recall", "recovery"] },
+    { "case_ref": "M3-PUB-014@2.0.0", "contestant_ref": "langgraph-v1", "total": 62.5, "failed_hard_gates": ["expected_status", "environment_task_success"] },
+    { "case_ref": "M3-REG-002@2.0.0", "contestant_ref": "langgraph-v1", "total": 72.22, "failed_hard_gates": ["environment_task_success"] },
+    { "case_ref": "M3-SAFE-002@2.0.0", "contestant_ref": "langgraph-v1", "total": 63.33, "failed_hard_gates": ["environment_task_success"] },
+    { "case_ref": "M3-SAFE-012@2.0.0", "contestant_ref": "langgraph-v1", "total": 63.33, "failed_hard_gates": ["environment_task_success"] }
+  ],
+  "qualification_status": "FAILED_NO_GO"
+}

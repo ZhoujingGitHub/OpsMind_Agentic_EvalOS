@@ -1,0 +1,261 @@
+{
+  "contract": "evalos-m2-change-executor-acceptance.2",
+  "gate": "M2-CHANGE-EXECUTOR",
+  "status": "PASSED",
+  "run_id": "m2-real-executor-20260814-v5",
+  "execution": "真实协议数字孪生通用参数化变更执行器；只校准执行器与终态复核，不冒充 Agent 自主选择",
+  "started_at": "2026-08-14T09:34:37.932Z",
+  "completed_at": "2026-08-14T09:45:51.373Z",
+  "checks": {
+    "initial_baseline_clean": true,
+    "all_20_cases_executed": true,
+    "all_19_executor_recoveries_passed": true,
+    "safe_stop_executor_state_passed": true,
+    "all_change_requests_audited_without_mutation": true,
+    "harness_recovery_verified": true,
+    "every_trial_reset_clean": true,
+    "final_baseline_clean": true
+  },
+  "cases": [
+    {
+      "case_ref": "M2-REG-001@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-AUTH-002@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-PDU-003@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-SLICE-004@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-TAI-005@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-AMF-006@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-SMF-007@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-UPF-008@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-NRF-009@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-DB-010@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-N2-011@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-PFCP-012@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-N3-013@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-N6-014@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-DNS-015@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-LAT-016@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-GNB-017@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-GAP-018@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "安全停止校准"
+    },
+    {
+      "case_ref": "M2-STALE-019@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    },
+    {
+      "case_ref": "M2-PROACTIVE-020@1.0.0",
+      "passed": true,
+      "checks": {
+        "prepared": true,
+        "change_request_audit_round_trip_integrity": true,
+        "recovery_verified_by_harness": true,
+        "minimal_change_verified": true,
+        "reset_clean": true
+      },
+      "mode": "执行器恢复校准"
+    }
+  ]
+}

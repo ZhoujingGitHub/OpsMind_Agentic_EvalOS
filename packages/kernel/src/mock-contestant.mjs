@@ -84,6 +84,8 @@ export function createMockContestant(id, style = "context-first") {
   return {
     id,
     adapterVersion: "1.0.0",
+    adapterContractVersion: "2.0",
+    supportedEvaluationLanes: ["AGENT_CAPABILITY"],
     runtime: "deterministic-replay-brain",
     async execute({ caseSpec, toolExecutor, emit, maxTurns = 10 }) {
       const brain = new EvidenceSeekingReplayBrain(style);
@@ -107,4 +109,3 @@ export function createMockContestant(id, style = "context-first") {
     },
   };
 }
-

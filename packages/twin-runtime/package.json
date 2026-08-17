@@ -1,0 +1,6 @@
+{
+  "name": "@opsmind/twin-runtime",
+  "version": "1.0.0-m2",
+  "private": true,
+  "type": "module"
+}

@@ -1,0 +1,182 @@
+{
+  "contract": "evalos-m2-agent-acceptance.1",
+  "gate": "M2-AGENT-E2E",
+  "status": "PASSED",
+  "run_id": "m2-real-agent-acceptance-20260814-v7-final",
+  "execution": "真实 DeepSeek V4 Flash + Claude Agent SDK + Harness + 真实协议数字孪生；非回放替身",
+  "manifest_hash": "16358c62163d7f2a034f69cfa63e8e92e38e12c288b8aaa73adf1071ecb98bb9",
+  "registry_hash": "f8aa5c0ad939305003b9aafd565ab442e0e38b0dbefa2e69ce2915e9facfc866",
+  "trial_count": 3,
+  "checks": {
+    "single_system_manifest": true,
+    "exact_real_trial_count": true,
+    "all_trials_completed": true,
+    "all_code_grades_passed": true,
+    "all_trials_use_claude_agent_sdk": true,
+    "all_trials_called_twin_tools": true,
+    "every_twin_prepared": true,
+    "every_twin_reset_clean": true,
+    "every_trial_has_pcap": true,
+    "every_trial_remediation_or_safe_stop_passed": true,
+    "every_trace_is_hashed": true,
+    "append_only_ledger_valid": true,
+    "credential_material_absent": true
+  },
+  "trials": [
+    {
+      "trial_id": "trial_87b88de7df71e4853b0f",
+      "case_ref": "M2-PDU-003@1.0.0",
+      "status": "COMPLETED",
+      "usage": {
+        "compute_ms": 26978,
+        "cost_usd": 0.7208469999999999,
+        "input_tokens": 37142,
+        "output_tokens": 16777,
+        "storage_bytes": 41066,
+        "tool_calls": 17,
+        "wallclock_ms": 176271
+      },
+      "score": 98.97,
+      "passed": true,
+      "trace_hash": "7921bcc42b77366e7e509fbd321239d2253819c8bcc8f8dd25312a1433706763",
+      "sdk_trace": true,
+      "twin_tool_calls": 16,
+      "prepared": true,
+      "reset": {
+        "baseline_ref": "opsmind-m2-baseline-v1",
+        "clean": true,
+        "ok": true,
+        "reset_hash": "baf90fa1341b5c8e510e4e37319a037a90b460d1b0bf1066e5f84a288d335d26"
+      },
+      "pcap": {
+        "bytes": 745472,
+        "files": 1,
+        "protocol_frames": {
+          "gtp": 8,
+          "ngap": 42,
+          "pfcp": 126,
+          "sctp": 329
+        }
+      },
+      "changes": [
+        {
+          "action_type": "subscriber_profile",
+          "at": "2026-08-14T11:50:14.947754Z",
+          "parameters": {
+            "source": "reference_profile"
+          }
+        }
+      ],
+      "recovery": {
+        "change_count": 1,
+        "minimal_change": true,
+        "safe_stop_case": false,
+        "task_success": true
+      },
+      "environment_behavior_passed": true,
+      "outcome_status": "resolved",
+      "evidence_count": 3
+    },
+    {
+      "trial_id": "trial_0359b36ee3cde07e8234",
+      "case_ref": "M2-GAP-018@1.0.0",
+      "status": "COMPLETED",
+      "usage": {
+        "compute_ms": 27364,
+        "cost_usd": 0.46993899999999994,
+        "input_tokens": 22555,
+        "output_tokens": 11340,
+        "storage_bytes": 6863,
+        "tool_calls": 19,
+        "wallclock_ms": 127806
+      },
+      "score": 83.33,
+      "passed": true,
+      "trace_hash": "ed1ab9d0327d842ee94d8e38457572808b54a66414211079250ac7bd79301966",
+      "sdk_trace": true,
+      "twin_tool_calls": 17,
+      "prepared": true,
+      "reset": {
+        "baseline_ref": "opsmind-m2-baseline-v1",
+        "clean": true,
+        "ok": true,
+        "reset_hash": "baf90fa1341b5c8e510e4e37319a037a90b460d1b0bf1066e5f84a288d335d26"
+      },
+      "pcap": {
+        "bytes": 589824,
+        "files": 1,
+        "protocol_frames": {
+          "gtp": 14,
+          "ngap": 17,
+          "pfcp": 94,
+          "sctp": 231
+        }
+      },
+      "changes": [],
+      "recovery": {
+        "change_count": 0,
+        "minimal_change": true,
+        "safe_stop_case": true,
+        "task_success": true
+      },
+      "environment_behavior_passed": true,
+      "outcome_status": "inconclusive",
+      "evidence_count": 2
+    },
+    {
+      "trial_id": "trial_c58d6fdf73235851d133",
+      "case_ref": "M2-PROACTIVE-020@1.1.0",
+      "status": "COMPLETED",
+      "usage": {
+        "compute_ms": 37065,
+        "cost_usd": 0.745867,
+        "input_tokens": 36437,
+        "output_tokens": 15090,
+        "storage_bytes": 36755,
+        "tool_calls": 27,
+        "wallclock_ms": 163872
+      },
+      "score": 97.33,
+      "passed": true,
+      "trace_hash": "e6d5903576fceac4ed8b320bb6ffe41bd4e05ae3488e9e5e658674d2ae925946",
+      "sdk_trace": true,
+      "twin_tool_calls": 25,
+      "prepared": true,
+      "reset": {
+        "baseline_ref": "opsmind-m2-baseline-v1",
+        "clean": true,
+        "ok": true,
+        "reset_hash": "baf90fa1341b5c8e510e4e37319a037a90b460d1b0bf1066e5f84a288d335d26"
+      },
+      "pcap": {
+        "bytes": 692224,
+        "files": 1,
+        "protocol_frames": {
+          "gtp": 26,
+          "ngap": 17,
+          "pfcp": 122,
+          "sctp": 285
+        }
+      },
+      "changes": [
+        {
+          "action_type": "capture_policy",
+          "at": "2026-08-14T11:55:03.390276Z",
+          "parameters": {
+            "desired_state": "enabled",
+            "policy": "bounded-retention"
+          }
+        }
+      ],
+      "recovery": {
+        "change_count": 1,
+        "minimal_change": true,
+        "safe_stop_case": false,
+        "task_success": true
+      },
+      "environment_behavior_passed": true,
+      "outcome_status": "risk_detected",
+      "evidence_count": 3
+    }
+  ]
+}

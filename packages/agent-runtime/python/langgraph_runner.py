@@ -4,6 +4,7 @@ import asyncio
 from collections import defaultdict
 from datetime import UTC, datetime
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -14,7 +15,10 @@ import httpx
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 
+from opsmind_langgraph.actions import ActionHandler, ActionRuntime
 from opsmind_langgraph.contracts import (
+    BudgetPolicy,
+    BudgetUsage,
     EvidenceQuality,
     ExecutionMode,
     FreshnessClass,
@@ -74,7 +78,9 @@ class EvalCompatibleDeepSeekAgent(DeepSeekAnthropicAgent):
     """
 
     @staticmethod
-    def _parse_response(stage: Any, payload: dict[str, Any]) -> Any:
+    def _parse_response(
+        stage: Any, payload: dict[str, Any], *, latency_ms: int = 0
+    ) -> Any:
         texts: list[str] = []
         selections: list[ToolSelection] = []
         for item in payload.get("content") or []:
@@ -141,6 +147,8 @@ class EvalCompatibleDeepSeekAgent(DeepSeekAnthropicAgent):
                 return None
             return raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
         audit_summary = public_text(value.get("audit_summary")) or ("Agent selected authorized tools." if selections else combined)
+        raw_usage = payload.get("usage")
+        usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
         return AgentDecision(
             audit_summary=audit_summary[:4000],
             hypotheses=hypotheses,
@@ -150,6 +158,9 @@ class EvalCompatibleDeepSeekAgent(DeepSeekAnthropicAgent):
             conclusion=public_text(value.get("conclusion")),
             uncertainty=public_text(value.get("uncertainty")),
             proposed_action=proposed,
+            input_tokens=int(usage.get("input_tokens", 0) or 0),
+            output_tokens=int(usage.get("output_tokens", 0) or 0),
+            model_latency_ms=max(0, int(latency_ms)),
         )
 
     async def decide(self, turn: Any) -> Any:
@@ -178,6 +189,56 @@ def safe_case(case_spec: dict[str, Any]) -> dict[str, Any]:
         "goal": case_spec["goal"],
         "visible": case_spec["visible"],
         "tools": case_spec["tools"],
+    }
+
+
+def resource_scope_from_case(case_spec: dict[str, Any]) -> ResourceScope:
+    visible_scope = case_spec.get("visible", {}).get("scope") or {}
+    return ResourceScope(
+        resource_types=tuple(str(item) for item in visible_scope.get("resource_types") or ()),
+        resource_ids=tuple(str(item) for item in visible_scope.get("resource_ids") or ()),
+        network_profiles=tuple(str(item) for item in visible_scope.get("network_profiles") or ("PNI-NPN",)),
+        service_ids=tuple(str(item) for item in visible_scope.get("service_ids") or ()),
+    )
+
+
+def budget_policy_from_trial(trial: dict[str, Any]) -> BudgetPolicy:
+    budget = trial["budget"]
+    return BudgetPolicy(
+        max_duration_seconds=max(1, math.ceil(int(budget.get("wallclock_ms", 300_000)) / 1000)),
+        max_tool_calls=max(1, int(budget.get("tool_calls", 24))),
+        max_model_calls=max(1, int(budget.get("model_calls", budget.get("tool_calls", 24)))),
+        max_tokens=max(1, int(budget.get("input_tokens", 1)) + int(budget.get("output_tokens", 1))),
+        max_cost_microunits=max(1, round(float(budget.get("cost_usd", 1.0)) * 1_000_000)),
+        max_result_bytes=max(1, int(budget.get("storage_bytes", 8 * 1024 * 1024))),
+    )
+
+
+def tool_input_schema(definition: dict[str, Any]) -> dict[str, Any]:
+    schema = definition.get("input_schema")
+    if isinstance(schema, dict):
+        return schema
+    parameter_contract = definition.get("parameter_contract") or {}
+    if definition.get("read_only", True) is False:
+        return {
+            "type": "object",
+            "properties": {
+                name: {"enum": values}
+                for name, values in parameter_contract.items()
+            },
+            "required": list(parameter_contract),
+            "additionalProperties": False,
+        }
+    return {
+        "type": "object",
+        "properties": {
+            "tenant": {"type": "string"},
+            "time_window": {"type": "string"},
+            "query": {"type": "string"},
+            "resource_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": True},
+            "service_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": True},
+        },
+        "additionalProperties": False,
     }
 
 
@@ -285,6 +346,10 @@ def normalize_outcome(state: dict[str, Any], tool_results: list[dict[str, Any]],
 
 
 async def run(payload: dict[str, Any]) -> dict[str, Any]:
+    if payload.get("adapter_contract_version") != "2.0":
+        raise RuntimeError("LangGraph Eval Adapter 2.0 requires adapter_contract_version=2.0")
+    if payload.get("evaluation_lane") != "AGENT_CAPABILITY":
+        raise RuntimeError("The direct StateGraph adapter is only valid for the AGENT_CAPABILITY lane")
     case_spec = safe_case(payload["case_spec"])
     trial = payload["trial"]
     api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN") or os.getenv("DEEPSEEK_API_KEY")
@@ -293,16 +358,68 @@ async def run(payload: dict[str, Any]) -> dict[str, Any]:
 
     tenant_id = str(case_spec["visible"]["tenant"])
     scope = ScopeSnapshot(
-        scope_snapshot_id=f"scope-{case_spec['id'].lower()}",
+        scope_snapshot_id=f"scope-{str(trial['id']).lower()}",
         tenant_id=tenant_id,
-        scope=ResourceScope(network_profiles=("PNI-NPN",)),
-        policy_version="m1-policy-1.0.0",
+        scope=resource_scope_from_case(case_spec),
+        policy_version=str((payload.get("frozen_contract") or {}).get("dependencies", {}).get("scope_policy_ref") or "evalos-scope-policy:2.0.0"),
     )
     gateway = McpGateway()
+    bridge_url = os.getenv("EVALOS_TOOL_BRIDGE_URL")
+    bridge_token = os.getenv("EVALOS_TOOL_BRIDGE_TOKEN")
+    if not bridge_url or not bridge_token:
+        raise RuntimeError("EvalOS Harness tool bridge is not configured")
     calls: dict[str, int] = defaultdict(int)
     trace: list[dict[str, Any]] = []
 
+    async def call_harness_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=60.0) as bridge_client:
+            bridge_response = await bridge_client.post(
+                bridge_url,
+                headers={"authorization": f"Bearer {bridge_token}"},
+                json={"tool_name": tool_name, "arguments": arguments},
+            )
+            bridge_response.raise_for_status()
+            return dict(bridge_response.json())
+
+    action_definitions = {
+        name: definition
+        for name, definition in case_spec["tools"].items()
+        if definition.get("read_only", True) is False
+    }
+    action_runtime = ActionRuntime()
+    for action_name in action_definitions:
+        async def execute_action(proposal: Any, *, tool_name: str = action_name) -> dict[str, Any]:
+            calls[tool_name] += 1
+            trace.append({"kind": "action.call", "actor": "contestant", "payload": {
+                "tool": tool_name, "action_id": proposal.action_id,
+                "source_system": action_definitions[tool_name].get("source_system", "twin.harness.action-controller"),
+            }})
+            result = await call_harness_tool(tool_name, dict(proposal.parameters))
+            trace.append({"kind": "action.result", "actor": "environment", "payload": {
+                "tool": tool_name, "ok": bool(result.get("ok")), "data": result.get("data"),
+                "source_system": action_definitions[tool_name].get("source_system", "twin.harness.action-controller"),
+                **({"error": result.get("error")} if not result.get("ok") else {}),
+            }})
+            if not result.get("ok"):
+                raise RuntimeError(f"Harness action failed: {tool_name}")
+            return result
+
+        async def verify_action(_: Any, output: dict[str, Any]) -> bool:
+            return bool(output.get("ok") and output.get("data", {}).get("applied"))
+
+        async def rollback_action(_: Any, __: dict[str, Any]) -> dict[str, Any]:
+            return {"deferred_to_harness_trial_reset": True}
+
+        action_runtime.register(ActionHandler(
+            action_type=action_name,
+            execute=execute_action,
+            verify=verify_action,
+            rollback=rollback_action,
+        ))
+
     for name, definition in case_spec["tools"].items():
+        if definition.get("read_only", True) is False:
+            continue
         descriptor = McpToolDescriptor(
             name=name,
             version="1.0.0",
@@ -310,35 +427,42 @@ async def run(payload: dict[str, Any]) -> dict[str, Any]:
             effect=ToolEffect.READ_ONLY,
             required_permissions=(),
             description=str(definition["description"]),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "tenant": {"type": "string"},
-                    "time_window": {"type": "string"},
-                    "query": {"type": "string"},
-                },
-                "additionalProperties": False,
-            },
+            input_schema=tool_input_schema(definition),
+            output_schema=definition.get("output_schema") or {"type": "object"},
         )
 
-        async def handler(request: Any, request_scope: ScopeSnapshot, *, tool_name: str = name, tool_definition: dict[str, Any] = definition) -> McpToolResult:
+        async def handler(
+            request: Any,
+            request_scope: ScopeSnapshot,
+            *,
+            tool_name: str = name,
+            source_system: str = str(definition.get("source_system") or f"evalos.twin.{definition.get('capability', name)}"),
+        ) -> McpToolResult:
             calls[tool_name] += 1
             attempt = calls[tool_name]
-            trace.append({"kind": "tool.call", "actor": "contestant", "payload": {"tool": tool_name, "args": request.arguments}})
-            failed = bool(tool_definition.get("failures_before_success") and attempt <= int(tool_definition["failures_before_success"]))
-            record = (
-                {"ok": False, "tool": tool_name, "attempt": attempt, "error": tool_definition["failure"]}
-                if failed
-                else {"ok": True, "tool": tool_name, "attempt": attempt, "data": tool_definition["result"]}
-            )
+            trace.append({"kind": "tool.call", "actor": "contestant", "payload": {
+                "tool": tool_name, "args": request.arguments, "source_system": source_system,
+                "scope_snapshot_id": scope.scope_snapshot_id,
+            }})
+            harness_result = await call_harness_tool(tool_name, request.arguments)
+            failed = not bool(harness_result.get("ok"))
+            data = dict(harness_result.get("data") or {})
+            data["evidence_refs"] = list(harness_result.get("evidence_refs") or [])
+            record = {
+                "ok": not failed,
+                "tool": tool_name,
+                "attempt": int(harness_result.get("attempt") or attempt),
+                **({"error": harness_result.get("error") or {"code": "TOOL_FAILED"}} if failed else {"data": data}),
+            }
+            record["source_system"] = source_system
             trace.append({"kind": "tool.result", "actor": "environment", "payload": record})
             return McpToolResult(
                 tenant_id=tenant_id,
                 scope_snapshot_id=scope.scope_snapshot_id,
                 tool_call_id=request.tool_call_id,
                 scope=request_scope.scope,
-                observed_at=datetime(2026, 8, 13, 2, 5, tzinfo=UTC),
-                source_system="evalos-case",
+                observed_at=datetime.now(UTC),
+                source_system=source_system,
                 freshness=FreshnessClass.RECENT,
                 quality=EvidenceQuality.HIGH if not failed else EvidenceQuality.LOW,
                 execution_mode=ExecutionMode.REAL,
@@ -368,8 +492,12 @@ async def run(payload: dict[str, Any]) -> dict[str, Any]:
             hydrator=lambda _: {
                 "visible_context": case_spec["visible"],
                 "case_version": case_spec["version"],
-                "seed": trial["seed"],
+                "environment_seed": trial["environment_seed"],
+                "replicate_id": trial["replicate_id"],
+                "adapter_contract_version": "2.0",
+                "frozen_contract": payload.get("frozen_contract"),
             },
+            action_runtime=action_runtime,
         )
         graph = build_investigation_graph(services, checkpointer=InMemorySaver())
         investigation_id = f"inv-{uuid4().hex[:24]}"
@@ -382,11 +510,28 @@ async def run(payload: dict[str, Any]) -> dict[str, Any]:
             objective=(
                 case_spec["goal"]
                 + " 最终 conclusion 必须是 JSON 对象，字段为 status、root_cause、confidence、evidence_refs、"
-                "exclusions、next_checks、summary；证据不足时 status=inconclusive。证据编号必须逐字引用工具结果。"
+                "exclusions、next_checks、summary；证据不足时 status=inconclusive。证据编号必须逐字引用工具结果；"
+                "root_cause 或 summary 使用了某个观测或数据源失败来支撑结论时，必须同时引用该工具返回的对应证据编号。"
+                + " 这是隔离数字孪生考场。先用只读工具取得充分证据；确需处置时必须提出最小且有依据的参数化变更，"
+                "现场证据充分且授权动作能以最小变更消除故障或风险时，执行一次最小处置并复核；"
+                "变更后由 Harness 独立复核；证据不足、相互冲突或不能证明动作安全时必须安全停止，不得执行变更。"
+                "可用的通用参数化能力如下："
+                + json.dumps({name: item["description"] for name, item in action_definitions.items()}, ensure_ascii=False)
+                + "。提出动作时 proposed_action 必须包含 action_id、action_type、risk_level='L2'、"
+                "execution_mode='real'、target_ids=['twin-t1']、parameters={}、impact_summary、verification_plan、"
+                "rollback_plan='Harness deterministic Trial reset'、idempotency_key；action_type 必须逐字取自可用动作。"
             ),
-            candidate={"case_id": case_spec["id"], "visible": case_spec["visible"], "seed": trial["seed"]},
+            candidate={
+                "case_id": case_spec["id"],
+                "visible": case_spec["visible"],
+                "environment_seed": trial["environment_seed"],
+                "replicate_id": trial["replicate_id"],
+                "adapter_contract_version": "2.0",
+            },
             max_iterations=max(1, min(6, int(trial["budget"].get("tool_calls", 20)) // 2)),
         )
+        initial["budget"] = budget_policy_from_trial(trial).model_dump(mode="json")
+        initial["budget_usage"] = BudgetUsage().model_dump(mode="json")
         config: RunnableConfig = {"configurable": {"thread_id": initial["thread_id"]}}
         async with asyncio.timeout(float(trial["budget"].get("wallclock_ms", 300000)) / 1000):
             async for update in graph.astream(initial, config=config, stream_mode="updates"):
@@ -407,6 +552,7 @@ async def run(payload: dict[str, Any]) -> dict[str, Any]:
         )
         outcome = normalize_outcome(state, tool_results, recovered)
         return {
+            "adapter_contract_version": "2.0",
             "architecture": "LANGGRAPH_V1",
             "runtime": "real-langgraph-stategraph/deepseek-v4-flash",
             "outcome": outcome,

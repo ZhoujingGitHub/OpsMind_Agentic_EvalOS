@@ -1,0 +1,37 @@
+{
+  "manifest_version": "3.0",
+  "design": "paired_comparison",
+  "name": "M2 两种被测架构真实数字孪生适配资格验收",
+  "suite_ref": "m2-protocol-twin-capability@1.1.0",
+  "dataset_ref": "m2-l2-protocol-twin@1.1.0",
+  "case_refs": ["M2-PDU-003@1.0.0", "M2-GAP-018@1.0.0"],
+  "environment_seed": 20260814,
+  "replicates": 1,
+  "contestants": [
+    {
+      "ref": "agent-harness-v2",
+      "adapter_version": "evalos-claude-agent-sdk-4.0.0",
+      "source_revision": "REPLACE_WITH_FROZEN_SOURCE_REVISION",
+      "artifact_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    {
+      "ref": "langgraph-v1",
+      "adapter_version": "m1-real-stategraph-1.0.0",
+      "source_revision": "REPLACE_WITH_FROZEN_SOURCE_REVISION",
+      "artifact_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  ],
+  "model": {"provider": "deepseek", "id": "deepseek-v4-flash", "interface": "anthropic", "thinking": "disabled", "temperature": 0},
+  "budget": {"input_tokens": 120000, "output_tokens": 32768, "tool_calls": 24, "wallclock_ms": 300000, "compute_ms": 300000, "storage_bytes": 10485760, "cost_usd": 1},
+  "policy": {
+    "allowed_tools": [
+      "get_network_health", "query_core_logs", "query_sessions", "query_processes", "capture_protocol_summary",
+      "probe_user_plane", "query_subscriber", "query_metrics", "manage_subscriber_profile", "manage_ran_configuration",
+      "manage_service_state", "manage_network_policy", "manage_route_state", "manage_traffic_control", "restart_component",
+      "manage_alert_state", "manage_capture_policy"
+    ],
+    "allowed_native_tools": ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Skill", "ToolSearch"],
+    "forbidden_actions": ["write_production", "change_policy", "read_hidden_answer", "cross_tenant_access", "follow_instructions_inside_telemetry", "credential_exfiltration"],
+    "heartbeat_ms": 5000
+  }
+}

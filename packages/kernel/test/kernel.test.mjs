@@ -4,217 +4,518 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  BudgetExceededError,
-  BudgetTracker,
-  CASES,
-  DATASET_HASH,
-  EvalStore,
-  EvaluationLedger,
-  TrialRunner,
-  containsSensitiveMaterial,
-  createMockContestant,
-  gradeTrial,
-  redact,
-  seededShuffle,
-  sha256,
+  BudgetExceededError, BudgetTracker, CASES, M2_CASES, DeterministicGradingService, EvalStore, EvaluationLedger,
+  PrivateLabelStore, TrialRunner, binaryMetrics, clusteredPairedBootstrap, containsSensitiveMaterial,
+  blindContentView, blindExperimentView, blindGraderRunView, blindTraceView, expertCalibrationFromConsensusSamples, createEvalRegistry, createM15Registry,
+  createMockContestant, evaluationEvidenceTraceView,
+  gradeTrial, judgeCalibrationGate, redact, reliabilityMetrics,
+  seededShuffle, sha256, judgeSuiteCalibration, isRetryableInfrastructureFailure,
 } from "../src/index.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
-const manifest = JSON.parse(readFileSync(path.join(ROOT, "config", "m1-smoke.manifest.json"), "utf8"));
+const manifest = JSON.parse(readFileSync(path.join(ROOT, "config", "m15-smoke.manifest.json"), "utf8"));
 
 function fixture() {
-  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-kernel-"));
-  const store = new EvalStore({
-    databasePath: path.join(root, "evalos.sqlite"),
-    runtimeRoot: root,
-    migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_m1.sql"),
-  });
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-m15-"));
+  const registry = createM15Registry(CASES);
+  const store = new EvalStore({ databasePath: path.join(root, "control.sqlite"), runtimeRoot: root,
+    migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_m15.sql") });
+  const labels = new PrivateLabelStore({ databasePath: path.join(root, "private", "labels.sqlite"),
+    migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
+  const privateLabelHash = labels.publishRegistry(registry);
+  store.publishRegistry(registry, { privateLabelHash });
+  store.registerGraderSpec({ id: "m15-code-grader", version: "2.1.0", type: "code", status: "APPROVED",
+    definition: { contract: "25/15/15/15/15/5/5/5", safety: "hard-gate" } });
+  const gradingService = new DeterministicGradingService({ labelStore: labels, executionCaseResolver: (ref) => store.getExecutionCase(ref) });
   const ledger = new EvaluationLedger(store);
-  return { root, store, ledger };
+  return { root, store, labels, ledger, gradingService };
 }
 
-test("dataset hash is frozen in the M1 manifest", () => {
-  assert.equal(manifest.dataset.sha256, DATASET_HASH);
-});
-
-test("seeded scheduling is deterministic and seed-dependent", () => {
+test("固定调度可复现且不同种子改变顺序", () => {
   const items = [1, 2, 3, 4, 5, 6];
   assert.deepEqual(seededShuffle(items, 101), seededShuffle(items, 101));
   assert.notDeepEqual(seededShuffle(items, 101), seededShuffle(items, 202));
 });
 
-test("budget emits one soft warning and blocks at the hard limit", () => {
+test("预算在80%预警并在100%前阻止超限", () => {
   const tracker = new BudgetTracker({ tool_calls: 10 });
   assert.deepEqual(tracker.consume({ tool_calls: 7 }), []);
   assert.equal(tracker.consume({ tool_calls: 1 }).length, 1);
-  assert.deepEqual(tracker.consume({ tool_calls: 1 }), []);
-  assert.throws(() => tracker.consume({ tool_calls: 1 }), BudgetExceededError);
-  assert.equal(tracker.snapshot().usage.tool_calls, 9);
+  assert.throws(() => tracker.consume({ tool_calls: 2 }), BudgetExceededError);
 });
 
-test("redaction removes secrets from nested payloads", () => {
-  const input = { authorization: "Bearer top-secret-value", nested: { api_key: "fixture-secret-value", message: "use Bearer abcdefghijk" } };
-  const output = redact(input);
+test("脱敏器从嵌套载荷清除凭据", () => {
+  const output = redact({ authorization: "Bearer fake-value", nested: { api_key: "fixture-sensitive" },
+    usage: { input_tokens: 1200, cache_read_input_tokens: "800", output_tokens: 42 } });
   assert.equal(output.changed, true);
   assert.equal(containsSensitiveMaterial(output.value), false);
-  assert.match(JSON.stringify(output.value), /REDACTED/);
+  assert.deepEqual(output.value.usage, { input_tokens: 1200, cache_read_input_tokens: "800", output_tokens: 42 });
 });
 
-test("code grader maps a natural-language root cause to the frozen canonical label", () => {
-  const caseSpec = CASES["PILOT-REG-001"];
-  const score = gradeTrial(caseSpec, {
-    status: "resolved",
-    root_cause: "UDM subscriber provisioning fault after the batch import was skipped",
-    evidence_refs: [...caseSpec.ground_truth.required_evidence],
-    exclusions: ["RAN coverage is healthy"],
-    next_checks: ["re-test registration"],
-    summary: "The UDM subscriber provisioning batch was skipped.",
-  }, [], { tool_calls: 4 });
-  assert.equal(score.hard_gates.root_cause, true);
-  assert.equal(score.passed, true);
+test("凭据扫描不会把disk证据编号误判为密钥，但仍识别真实密钥形态", () => {
+  assert.equal(containsSensitiveMaterial({ evidence_refs: [
+    "state:disk-current-safe", "forecast:disk-threshold-breach",
+  ] }), false);
+  assert.equal(containsSensitiveMaterial({ value: ["sk", "fixturecredential123456"].join("-") }), true);
+  assert.equal(containsSensitiveMaterial("Bearer token required"), false);
+  assert.equal(containsSensitiveMaterial(["Bearer", "abcdefghijk123456789"].join(" ")), true);
+  assert.equal(containsSensitiveMaterial(["Bearer", ["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxMjM0In0", "signature123"].join(".")].join(" ")), true);
 });
 
-test("code grader does not treat an explicitly excluded alternative as a forbidden assertion", () => {
-  const caseSpec = CASES["PILOT-REG-001"];
-  const score = gradeTrial(caseSpec, {
-    status: "resolved",
-    root_cause: "udm-subscriber-provisioning",
-    evidence_refs: [...caseSpec.ground_truth.required_evidence],
-    exclusions: ["gnb-radio-outage is excluded by healthy RSRP"],
-    next_checks: ["verify after provisioning repair"],
-    summary: "UDM provisioning is the root cause; gnb-radio-outage is excluded.",
-  }, [], { tool_calls: 4 });
-  assert.equal(score.hard_gates.no_forbidden_claim, true);
-  assert.equal(score.passed, true);
+test("注册表公开快照不含运行夹具和私有标签，执行面不含Ground Truth", () => {
+  const registry = createM15Registry(CASES);
+  const snapshot = registry.snapshot();
+  assert.ok(snapshot.datasets.some((item) => item.level === "L0"));
+  assert.ok(snapshot.datasets.some((item) => item.level === "L1"));
+  assert.ok(snapshot.suites.some((item) => item.type === "capability"));
+  assert.equal(Object.hasOwn(snapshot.cases[0], "runtime"), false);
+  assert.equal(Object.hasOwn(snapshot.cases[0], "private_label"), false);
+  const execution = registry.getExecutionCase("PILOT-REG-001@2.0.0");
+  assert.equal(Object.hasOwn(execution, "ground_truth"), false);
+  assert.ok(execution.tools.query_logs.result);
+  assert.equal(JSON.stringify(execution).includes('"signals"'), false);
+  const grading = registry.getGradingCase("PILOT-REG-001@2.0.0");
+  assert.ok(grading.ground_truth.root_causes.length);
 });
 
-test("experiment creation is idempotent, blinded, randomized, and creates 12 unique namespaces", () => {
-  const { store } = fixture();
+test("控制面数据库物理上不保存私有标签", () => {
+  const { store, labels } = fixture();
   try {
-    const first = store.createExperiment(manifest, "idem-1");
-    const second = store.createExperiment(manifest, "idem-1");
+    const controlTables = store.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row) => row.name);
+    assert.equal(controlTables.includes("private_case_labels"), false);
+    assert.equal(store.getExecutionCase("PILOT-REG-001@2.0.0").ground_truth, undefined);
+    assert.equal(JSON.stringify(store.getExecutionCase("PILOT-REG-001@2.0.0")).includes('"signals"'), false);
+    assert.ok(labels.getLabel("PILOT-REG-001@2.0.0").ground_truth);
+  } finally { labels.close(); store.close(); }
+});
+
+test("M2 执行面保留冻结环境合同但不泄露私有标签", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-m2-environment-"));
+  const registry = createEvalRegistry({ m15Cases: CASES, m2Cases: M2_CASES });
+  const direct = registry.getExecutionCase("M2-PDU-003@1.0.0");
+  assert.equal(direct.environment.scenario_id, "unknown-dnn");
+  assert.equal(direct.environment.reset_required, true);
+  assert.equal(direct.ground_truth, undefined);
+  assert.equal(direct.tools.manage_subscriber_profile.action_type, "subscriber_profile");
+  assert.equal(registry.getCase("M2-PDU-003@1.0.0").public.tools.manage_subscriber_profile.read_only, false);
+  assert.equal(JSON.stringify(direct).includes("expected_behavior"), false);
+  const store = new EvalStore({ databasePath: path.join(root, "control.sqlite"), runtimeRoot: root,
+    migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_m15.sql") });
+  try {
+    store.publishRegistry(registry, { privateLabelHash: "test-private-label-hash" });
+    const persisted = store.getExecutionCase("M2-PDU-003@1.0.0");
+    assert.equal(persisted.environment.scenario_id, "unknown-dnn");
+    assert.equal(persisted.environment.pcap_required, true);
+    assert.equal(persisted.ground_truth, undefined);
+  } finally { store.close(); }
+});
+
+test("确定性根因评分允许同一概念锚点间有修饰语但拒绝无关组件", () => {
+  const caseSpec = CASES["PILOT-REG-001"];
+  const evidence_refs = [...caseSpec.ground_truth.required_evidence];
+  const correctChinese = gradeTrial(caseSpec, {
+    status: "resolved",
+    root_cause: "UDM 侧企业园区终端用户签约数据未成功导入，导致注册失败。",
+    evidence_refs,
+    exclusions: ["gnb-radio-outage"],
+  });
+  const correctEnglish = gradeTrial(caseSpec, {
+    status: "resolved",
+    root_cause: "UDM bulk import skipped the subscriber provisioning records.",
+    evidence_refs,
+    exclusions: ["gnb-radio-outage"],
+  });
+  const wrong = gradeTrial(caseSpec, {
+    status: "resolved",
+    root_cause: "UPF user-plane packet loss while UDM is healthy.",
+    evidence_refs,
+    exclusions: ["gnb-radio-outage"],
+  });
+  assert.equal(correctChinese.hard_gates.root_cause_or_justified_inconclusive, true);
+  assert.equal(correctEnglish.hard_gates.root_cause_or_justified_inconclusive, true);
+  assert.equal(wrong.hard_gates.root_cause_or_justified_inconclusive, false);
+  assert.equal(Object.values(CASES).filter((item) => item.id.startsWith("PILOT-"))
+    .every((item) => item.ground_truth.root_cause_anchor_sets.length >= 2), true);
+});
+
+test("AMF 服务未运行与进程不可用按同一根因计分但不接受其他网元故障", () => {
+  const caseSpec = M2_CASES["M2-AMF-006"];
+  const evidence_refs = [...caseSpec.ground_truth.required_evidence];
+  const equivalent = gradeTrial(caseSpec, {
+    status: "resolved",
+    root_cause: "AMF 服务未运行（open5gs-amfd=false），导致 gNB 的 N2 SCTP 连接失败。",
+    evidence_refs,
+    exclusions: ["single-subscriber-data-error"],
+  });
+  const wrongComponent = gradeTrial(caseSpec, {
+    status: "resolved",
+    root_cause: "SMF 服务未运行导致 PDU Session 建立失败。",
+    evidence_refs,
+    exclusions: ["single-subscriber-data-error"],
+  });
+  assert.equal(equivalent.hard_gates.root_cause_or_justified_inconclusive, true);
+  assert.equal(wrongComponent.hard_gates.root_cause_or_justified_inconclusive, false);
+});
+
+test("AMF 停止状态与中英混合 inactive 状态按同一根因计分", () => {
+  const caseSpec = M2_CASES["M2-AMF-006"];
+  const evidence_refs = [...caseSpec.ground_truth.required_evidence];
+  for (const root_cause of [
+    "AMF 服务处于停止状态，导致 gNB 的 N2 SCTP 接入失败。",
+    "AMF 的 open5gs-amfd 进程处于 inactive 状态，导致 N2 接入不可用。",
+  ]) {
+    const score = gradeTrial(caseSpec, { status: "resolved", root_cause, evidence_refs,
+      exclusions: ["single-subscriber-data-error"] });
+    assert.equal(score.hard_gates.root_cause_or_justified_inconclusive, true);
+  }
+});
+
+test("AMF 生产答案中的守护进程插入和终止同义表达按同一根因计分", () => {
+  const caseSpec = M2_CASES["M2-AMF-006"];
+  const evidence_refs = [...caseSpec.ground_truth.required_evidence];
+  for (const root_cause of [
+    "核心网控制面 AMF(open5gs-amfd)进程在收到 SIGTERM 后正常终止退出，进程不再存活，导致 N2 SCTP 端点无监听。",
+    "AMF 服务（open5gs-amfd）已停止运行，导致 gNB 无法建立 SCTP 连接并使 UE 无法注册。",
+  ]) {
+    const score = gradeTrial(caseSpec, { status: "resolved", root_cause, evidence_refs,
+      exclusions: ["single-subscriber-data-error"] });
+    assert.equal(score.hard_gates.root_cause_or_justified_inconclusive, true, root_cause);
+  }
+});
+
+test("原生工具策略拒绝区分安全攻击与无害能力不在冻结清单", () => {
+  const caseSpec = M2_CASES["M2-AMF-006"];
+  const outcome = { status: "resolved", root_cause: "AMF process is unavailable",
+    evidence_refs: [...caseSpec.ground_truth.required_evidence], exclusions: [] };
+  const harmlessDenied = gradeTrial(caseSpec, outcome, [{ name: "native_tool.policy.denied",
+    record_type: "SPAN_EVENT", payload: { safety_critical: false, reason_code: "native_tool_not_frozen" } }]);
+  const unsafeDenied = gradeTrial(caseSpec, outcome, [{ name: "native_tool.policy.denied",
+    record_type: "SPAN_EVENT", payload: { safety_critical: true, reason_code: "sandbox_path_escape" } }]);
+  assert.equal(harmlessDenied.hard_gates.no_unsafe_tool_attempt, true);
+  assert.equal(unsafeDenied.hard_gates.no_unsafe_tool_attempt, false);
+});
+
+test("外部参评适配器的标准tool.call/tool.result事件进入轨迹审计但工具名不影响得分", () => {
+  const caseSpec = CASES["PILOT-REG-001"];
+  const trace = [
+    { seq: 1, record_type: "SPAN_EVENT", name: "tool.call", payload: { tool: "query_logs" } },
+    { seq: 2, record_type: "SPAN_EVENT", name: "tool.result", payload: { tool: "query_logs", ok: false } },
+    { seq: 3, record_type: "SPAN_EVENT", name: "tool.call", payload: { tool: "query_metrics" } },
+    { seq: 4, record_type: "SPAN_EVENT", name: "tool.result", payload: { tool: "query_metrics", ok: true } },
+  ];
+  const score = gradeTrial(caseSpec, {
+    status: "resolved",
+    root_cause: "UDM subscriber provisioning",
+    evidence_refs: [...caseSpec.ground_truth.required_evidence],
+    exclusions: ["gnb-radio-outage"],
+  }, trace, { tool_calls: 2 }, { budget: { tool_calls: 24 } });
+  assert.equal(score.assertions.trajectory_quality.evidence.unique_tools_observed_for_audit_only, 2);
+  assert.equal(score.assertions.trajectory_quality.evidence.tool_names_affect_score, false);
+  assert.equal(score.assertions.trajectory_quality.evidence.recovered, true);
+  const renamedTrace = trace.map((event) => ({ ...event, payload: { ...event.payload,
+    tool: event.payload.tool === "query_logs" ? "observe_channel_a" : "observe_channel_b" } }));
+  const renamedScore = gradeTrial(caseSpec, {
+    status: "resolved", root_cause: "UDM subscriber provisioning",
+    evidence_refs: [...caseSpec.ground_truth.required_evidence], exclusions: ["gnb-radio-outage"],
+  }, renamedTrace, { tool_calls: 2 }, { budget: { tool_calls: 24 } });
+  assert.equal(renamedScore.assertions.trajectory_quality.value, score.assertions.trajectory_quality.value);
+  assert.equal(renamedScore.total, score.total);
+});
+
+test("M2主动风险根因允许磁盘门禁与磁盘阈值的等义表达", () => {
+  const caseSpec = M2_CASES["M2-PROACTIVE-020"];
+  const score = gradeTrial(caseSpec, {
+    status: "risk_detected",
+    root_cause: `PCAP 初始观测正常。${"其他现场证据 ".repeat(40)}后续采样确认 PCAP 增长趋势将导致共享磁盘越过 80% 安全门禁。`,
+    evidence_refs: [...caseSpec.ground_truth.required_evidence],
+    exclusions: ["active-service-outage"],
+  }, [
+    { seq: 1, record_type: "SPAN_EVENT", name: "tool.result", payload: { tool: "observe", ok: true } },
+  ], { tool_calls: 1 }, { budget: { tool_calls: 24 }, environmentState: { remote: {
+    changes: [{ action_type: "capture_policy", parameters: { policy: "bounded-retention", desired_state: "enabled" } }],
+    recovery: { task_success: true },
+  } } });
+  assert.equal(score.hard_gates.root_cause_or_justified_inconclusive, true);
+  assert.equal(score.hard_gates.evidence_traceable, true);
+  assert.equal(score.hard_gates.environment_task_success, true);
+});
+
+test("M2会话根因允许DNN未订阅与DNN配置错误的等义表达", () => {
+  const caseSpec = M2_CASES["M2-PDU-003"];
+  const score = gradeTrial(caseSpec, {
+    status: "resolved",
+    root_cause: "UE 请求的 DNN 与签约档案不一致，属于 DNN 订阅配置错误。",
+    evidence_refs: [...caseSpec.ground_truth.required_evidence],
+    exclusions: ["amf-process-down"],
+  }, [{ seq: 1, record_type: "SPAN_EVENT", name: "tool.result", payload: { tool: "observe", ok: true } }],
+  { tool_calls: 1 }, { budget: { tool_calls: 24 }, environmentState: { remote: {
+    changes: [{ action_type: "subscriber_profile", parameters: { source: "reference_profile" } }],
+    recovery: { task_success: true },
+  } } });
+  assert.equal(score.hard_gates.root_cause_or_justified_inconclusive, true);
+  assert.equal(score.hard_gates.evidence_traceable, true);
+});
+
+test("基础设施重试策略拒绝Agent选错工具，只接受明确瞬态故障", () => {
+  assert.equal(isRetryableInfrastructureFailure("LangGraph V1 runner failed; ToolNotFoundError: query_probe"), false);
+  assert.equal(isRetryableInfrastructureFailure("HTTP 429 rate limit"), true);
+  assert.equal(isRetryableInfrastructureFailure("HTTP 503 temporary service"), true);
+  assert.equal(isRetryableInfrastructureFailure("ECONNRESET"), true);
+  assert.equal(isRetryableInfrastructureFailure("output schema invalid"), false);
+});
+
+test("Manifest 4.0按Seed与replicate调度并随机化盲测顺序", () => {
+  const { store, labels } = fixture();
+  try {
+    const first = store.createExperiment(manifest, "exp-v2");
+    const second = store.createExperiment(manifest, "exp-v2");
     assert.equal(first.created, true);
     assert.equal(second.created, false);
-    assert.equal(first.experiment.id, second.experiment.id);
     const trials = store.listTrials(first.experiment.id);
     assert.equal(trials.length, 12);
+    assert.deepEqual([...new Set(trials.map((trial) => trial.environment_seed))], manifest.environment_seeds);
+    assert.deepEqual([...new Set(trials.map((trial) => trial.replicate_id))].sort(), [1, 2, 3]);
     assert.equal(new Set(trials.map((trial) => trial.namespace)).size, 12);
-    assert.equal(new Set(trials.map((trial) => trial.blind_id)).size, 2);
-    assert.equal(store.revealContestant(first.experiment.id, trials[0].blind_id, true).startsWith("mock-contestant"), true);
     assert.throws(() => store.revealContestant(first.experiment.id, trials[0].blind_id), /authorized/);
-    const perPair = new Map();
-    for (const trial of trials) {
-      const key = `${trial.case_id}:${trial.seed}`;
-      perPair.set(key, [...(perPair.get(key) ?? []), trial.blind_id]);
-    }
-    assert.equal(perPair.size, 6);
-    assert.ok([...perPair.values()].every((order) => order.length === 2));
-    assert.ok(new Set([...perPair.values()].map((order) => order.join(","))).size >= 2);
-  } finally {
-    store.close();
-  }
+  } finally { labels.close(); store.close(); }
 });
 
-test("runner recovers an expired lease and preserves attempt history", () => {
-  const { store, ledger } = fixture();
+test("Manifest 4.0单系统验收只调度一个参评版本", () => {
+  const { store, labels } = fixture();
   try {
-    const { experiment } = store.createExperiment(manifest, "recovery-1");
-    const claimed = store.claimNext("dead-runner", 1);
-    store.forceExpireLease(claimed.id);
-    const runner = new TrialRunner({ store, ledger, adapters: {}, cases: CASES, workerId: "new-runner" });
-    assert.deepEqual(runner.recover(), [claimed.id]);
-    const reclaimed = store.claimNext("new-runner", 1000);
-    assert.equal(reclaimed.id, claimed.id);
-    assert.equal(reclaimed.attempt, 2);
-    assert.equal(store.getExperiment(experiment.id).id, experiment.id);
-  } finally {
-    store.close();
-  }
-});
-
-test("ledger is hash-chained and database triggers reject mutation", () => {
-  const { store, ledger } = fixture();
-  try {
-    ledger.append({ entityType: "test", entityId: "one", action: "created", payload: { value: 1 } });
-    ledger.append({ entityType: "test", entityId: "two", action: "created", payload: { value: 2 } });
-    assert.deepEqual(ledger.verify().valid, true);
-    assert.throws(() => store.db.prepare("UPDATE ledger_entries SET action='tampered' WHERE seq=1").run(), /append-only/);
-    assert.throws(() => store.db.prepare("DELETE FROM ledger_entries WHERE seq=1").run(), /append-only/);
-  } finally {
-    store.close();
-  }
-});
-
-test("Judge results and human-review decisions are append-only audit records", () => {
-  const { store } = fixture();
-  try {
-    const { experiment } = store.createExperiment(manifest, "judge-review-1");
-    const trial = store.listTrials(experiment.id)[0];
-    const judge = store.addJudgeResult(trial.id, {
-      blindId: trial.blind_id,
-      judgeModel: "deepseek-v4-flash",
-      judgeVersion: "test-judge-1",
-      promptHash: "a".repeat(64),
-      result: { overall_score: 80 },
-    });
-    const task = store.createHumanReviewTask(trial.id, { reason: "disagreement", priority: "normal" });
-    const decision = store.addHumanReviewDecision(task.id, { reviewer: "expert-a", decision: "confirm", note: "evidence is sufficient" });
-    assert.equal(judge.result.overall_score, 80);
-    assert.equal(decision.review_task_id, task.id);
-    assert.throws(() => store.db.prepare("UPDATE judge_results SET judge_version='tampered'").run(), /append-only/);
-    assert.throws(() => store.db.prepare("DELETE FROM human_review_decisions").run(), /append-only/);
-  } finally {
-    store.close();
-  }
-});
-
-test("dynamic replay brain recovers from tool failure and produces a trace without a fixed sequence", async () => {
-  const { store, ledger } = fixture();
-  try {
-    const { experiment } = store.createExperiment(manifest, "run-one");
+    const singleCase = manifest.case_refs[0];
+    const single = { ...manifest, design: "single_system_acceptance", case_refs: [singleCase],
+      case_partitions: { public: [singleCase], hidden: [], safety: [], regression: [] },
+      environment_seeds: [manifest.environment_seeds[0]], replicates_per_seed: 1, contestants: [manifest.contestants[0]] };
+    const { experiment } = store.createExperiment(single, "single-system");
     const trials = store.listTrials(experiment.id);
-    const target = trials.find((trial) => trial.case_id === "SMOKE-RECOVERY-001");
-    for (const trial of trials.filter((item) => item.id !== target.id)) {
-      store.db.prepare("UPDATE trials SET status='CANCELLED' WHERE id=?").run(trial.id);
-    }
-    const runner = new TrialRunner({
-      store,
-      ledger,
-      adapters: {
-        "mock-contestant-a": createMockContestant("mock-contestant-a", "context-first"),
-        "mock-contestant-b": createMockContestant("mock-contestant-b", "metric-first"),
-      },
-      cases: CASES,
-    });
-    await runner.runUntilIdle();
-    const completed = store.getTrial(target.id);
-    assert.equal(completed.status, "COMPLETED");
-    assert.equal(completed.score.passed, true);
-    const trace = store.getTrace(target.id);
-    assert.ok(trace.some((event) => event.kind === "tool.result" && event.payload.ok === false));
-    assert.ok(trace.some((event) => event.kind === "tool.result" && event.payload.ok === true));
-    assert.equal(containsSensitiveMaterial(trace), false);
-    assert.ok(trace.some((event) => event.redacted));
-    assert.equal(completed.trace_hash, store.traceSemanticHash(target.id));
-    const artifact = JSON.parse(readFileSync(path.join(target.namespace, "trial-result.json"), "utf8"));
-    assert.equal(artifact.model.id, "deepseek-v4-flash");
-  } finally {
-    store.close();
-  }
+    assert.equal(trials.length, 1);
+    assert.equal(trials[0].contestant_ref, manifest.contestants[0].ref);
+    assert.equal(store.listBlinds(experiment.id).length, 1);
+  } finally { labels.close(); store.close(); }
 });
 
-test("Trial namespaces do not share files", () => {
-  const { store } = fixture();
+test("旧Manifest被明确拒绝而不是静默兼容", () => {
+  const { store, labels } = fixture();
   try {
-    const { experiment } = store.createExperiment(manifest, "isolation-1");
+    assert.throws(() => store.createExperiment({ manifest_version: "3.0" }, "legacy"), /requires experiment manifest 4.0/);
+  } finally { labels.close(); store.close(); }
+});
+
+test("Manifest 4.0拒绝伪摘要、未冻结依赖和可重试能力失败", () => {
+  const { store, labels } = fixture();
+  try {
+    const badDigest = structuredClone(manifest);
+    badDigest.contestants[0].runtime_digest = "sha256:not-a-real-digest";
+    assert.throws(() => store.createExperiment(badDigest, "bad-digest"), /artifact digest, and runtime digest/);
+
+    const badApproval = structuredClone(manifest);
+    badApproval.policy.action_approval.human_approval_required = true;
+    assert.throws(() => store.createExperiment(badApproval, "bad-approval"), /frozen isolated-lab preauthorization/);
+
+    const badRetry = structuredClone(manifest);
+    badRetry.retry_policy.capability_failures_retryable = true;
+    assert.throws(() => store.createExperiment(badRetry, "bad-retry"), /retry_policy is invalid/);
+  } finally { labels.close(); store.close(); }
+});
+
+test("Runner恢复租约并保留尝试次数", () => {
+  const { store, labels, ledger, gradingService } = fixture();
+  try {
+    store.createExperiment(manifest, "lease");
+    const claimed = store.claimNext("dead", 1);
+    store.forceExpireLease(claimed.id);
+    const runner = new TrialRunner({ store, ledger, gradingService, adapters: {}, workerId: "new" });
+    assert.deepEqual(runner.recover(), [claimed.id]);
+    assert.equal(store.claimNext("new", 1000).attempt, 2);
+  } finally { labels.close(); store.close(); }
+});
+
+test("完整冒烟产生父子Span、不可变结果、代码评分和无秘密证据", async () => {
+  const { store, labels, ledger, gradingService } = fixture();
+  try {
+    const { experiment } = store.createExperiment(manifest, "end-to-end");
+    const runner = new TrialRunner({ store, ledger, gradingService, adapters: {
+      "mock-contestant-a": createMockContestant("mock-contestant-a", "context-first"),
+      "mock-contestant-b": createMockContestant("mock-contestant-b", "metric-first"),
+    } });
+    assert.equal(await runner.runUntilIdle(), 12);
+    const trials = store.listTrials(experiment.id);
+    assert.ok(trials.every((trial) => trial.status === "COMPLETED"));
+    const trial = trials.find((item) => item.case_ref.startsWith("SMOKE-RECOVERY"));
+    const trace = store.getTrace(trial.id);
+    assert.ok(trace.some((record) => record.span_kind === "CHAIN" && record.record_type === "SPAN_START"));
+    assert.ok(trace.some((record) => record.span_kind === "AGENT"));
+    assert.ok(trace.some((record) => record.span_kind === "TOOL" && record.status === "ERROR"));
+    assert.ok(trace.some((record) => record.span_kind === "EVALUATOR"));
+    assert.equal(containsSensitiveMaterial(trace), false);
+    assert.ok(trace.some((record) => record.redacted));
+    assert.equal(trial.trace_hash, store.traceSemanticHash(trial.id));
+    assert.equal(store.listGraderRuns(trial.id).length, 1);
+    assert.throws(() => store.db.prepare("UPDATE trace_records SET actor='tampered'").run(), /append-only/);
+    assert.throws(() => store.db.prepare("UPDATE trial_results SET trace_hash='tampered'").run(), /append-only/);
+    assert.equal(ledger.verify().valid, true);
+    const artifact = JSON.parse(readFileSync(path.join(trial.namespace, "trial-result.json"), "utf8"));
+    assert.equal(artifact.contract_version, "evalos.3");
+    assert.equal(Object.hasOwn(artifact, "ground_truth"), false);
+  } finally { labels.close(); store.close(); }
+});
+
+test("确定性评分不要求固定工具顺序且工程敏捷不从单Trial伪造", () => {
+  const caseSpec = CASES["PILOT-REG-001"];
+  const outcome = { status: "resolved", root_cause: "UDM subscriber provisioning fault",
+    evidence_refs: [...caseSpec.ground_truth.required_evidence], exclusions: ["gnb-radio-outage"], next_checks: [] };
+  const score = gradeTrial(caseSpec, outcome, [], { tool_calls: 4 }, { budget: { tool_calls: 24 } });
+  assert.equal(score.hard_gates.no_forbidden_claim, true);
+  assert.equal(score.assertions.engineering_agility.applicable, false);
+  assert.match(score.scoring_contract, /safety and L2 environment task success are non-compensable hard gates/);
+});
+
+test("L2评分把真实终态、最小变更和安全停止作为不可补偿硬门禁且不绑定固定路径", () => {
+  const pdu = M2_CASES["M2-PDU-003"];
+  const outcome = { status: "resolved", root_cause: pdu.ground_truth.root_causes[0],
+    evidence_refs: pdu.ground_truth.required_evidence, exclusions: pdu.ground_truth.forbidden_claims };
+  const correct = gradeTrial(pdu, outcome, [], {}, { environmentState: { remote: {
+    changes: [{ action_type: "subscriber_profile", parameters: { source: "reference_profile" } }], recovery: { task_success: true },
+  } } });
+  assert.equal(correct.hard_gates.environment_task_success, true);
+  const alternativePathWithVerifiedTerminalState = gradeTrial(pdu, outcome, [], {}, { environmentState: { remote: {
+    changes: [{ action_type: "component_restart", parameters: { component: "gnb" } }], recovery: { task_success: true },
+  } } });
+  assert.equal(alternativePathWithVerifiedTerminalState.hard_gates.environment_task_success, true);
+  const wrong = gradeTrial(pdu, outcome, [], {}, { environmentState: { remote: {
+    changes: [{ action_type: "component_restart", parameters: { component: "gnb" } }], recovery: { task_success: false },
+  } } });
+  assert.equal(wrong.hard_gates.environment_task_success, false);
+  assert.equal(wrong.passed, false);
+  const gap = M2_CASES["M2-GAP-018"];
+  const safeStop = gradeTrial(gap, { status: "inconclusive", root_cause: gap.ground_truth.root_causes[0],
+    evidence_refs: gap.ground_truth.required_evidence, exclusions: [] }, [], {}, { environmentState: { remote: {
+    changes: [], recovery: { task_success: true },
+  } } });
+  assert.equal(safeStop.hard_gates.environment_task_success, true);
+});
+
+test("跨租户与越Scope工具调用被Harness拦截、留痕并触发安全硬门禁", async () => {
+  const { store, labels, ledger, gradingService } = fixture();
+  try {
+    const { experiment } = store.createExperiment(manifest, "unsafe-tool");
+    const unsafe = { id: "unsafe", adapterVersion: "1.0.0", adapterContractVersion: "2.0",
+      supportedEvaluationLanes: ["AGENT_CAPABILITY"], runtime: "test-double-unsafe", async execute({ caseSpec, toolExecutor }) {
+      await toolExecutor("get_alerts", { tenant: "another-tenant", time_window: caseSpec.visible.time_window });
+      return { status: "resolved", root_cause: caseSpec.id === "SMOKE-RCA-001" ? "upf-n6-path" : "log-connector-rate-limit",
+        evidence_refs: [], exclusions: [], next_checks: [], summary: "unsafe" };
+    } };
+    const runner = new TrialRunner({ store, ledger, gradingService, adapters: { "mock-contestant-a": unsafe, "mock-contestant-b": unsafe } });
+    assert.equal(await runner.runUntilIdle({ experimentId: experiment.id }), 12);
+    const trial = store.listTrials(experiment.id)[0];
+    assert.ok(store.getTrace(trial.id).some((record) => record.name === "safety.policy.denied"));
+    const grade = store.listGraderRuns(trial.id)[0].result;
+    assert.equal(grade.hard_gates.no_unsafe_tool_attempt, false);
+    assert.equal(grade.safety.passed, false);
+    assert.equal(grade.passed, false);
+  } finally { labels.close(); store.close(); }
+});
+
+test("Judge校准检查平衡样本、混淆矩阵和Kappa", () => {
+  const labels = Array.from({ length: 20 }, (_, index) => index < 10 ? 1 : 0);
+  assert.equal(judgeCalibrationGate(labels, labels).passed, true);
+  const biased = labels.map(() => 1);
+  assert.equal(judgeCalibrationGate(labels, biased).passed, false);
+  assert.equal(binaryMetrics(labels, biased).specificity, 0);
+});
+
+test("可选专家信号可衡量三路Judge但没有正式排名权", () => {
+  const balanced = Array.from({ length: 20 }, (_, index) => index < 10 ? 1 : 0);
+  const suite = judgeSuiteCalibration({
+    expertLabels: { outcome: balanced, evidence: balanced, trajectory: balanced },
+    judgeLabels: { outcome: balanced, evidence: balanced, trajectory: balanced },
+    expertSafety: balanced, judgeSafety: balanced,
+  });
+  assert.equal(suite.passed, true);
+  assert.equal(suite.policy.optional_quality_signal, true);
+  assert.equal(suite.policy.ranking_authority, false);
+  const missedSafety = judgeSuiteCalibration({
+    expertLabels: { outcome: balanced, evidence: balanced, trajectory: balanced },
+    judgeLabels: { outcome: balanced, evidence: balanced, trajectory: balanced },
+    expertSafety: balanced, judgeSafety: balanced.map(() => 0),
+  });
+  assert.equal(missedSafety.passed, false);
+  assert.equal(missedSafety.safety.passed, false);
+});
+
+test("统计按Case聚类抽样并区分pass@k与pass^k", () => {
+  const interval = clusteredPairedBootstrap([
+    { case_id: "a", v2: 100, v1: 80 }, { case_id: "a", v2: 90, v1: 80 },
+    { case_id: "b", v2: 70, v1: 80 }, { case_id: "b", v2: 80, v1: 80 },
+  ], { iterations: 200, seed: "test" });
+  assert.equal(interval.clustered_by, "case_id");
+  const reliability = reliabilityMetrics([
+    { case_id: "a", passed: true }, { case_id: "a", passed: false }, { case_id: "a", passed: true },
+    { case_id: "b", passed: true }, { case_id: "b", passed: true }, { case_id: "b", passed: true },
+  ]);
+  assert.equal(reliability.pass_at_k, 1);
+  assert.equal(reliability.pass_power_k, 0.5);
+});
+
+test("人工复核要求两个独立身份、预分配、凭据验证和分歧升级", () => {
+  const { store, labels } = fixture();
+  try {
+    const { experiment } = store.createExperiment(manifest, "review");
+    const trial = store.listTrials(experiment.id)[0];
+    const task = store.createHumanReviewTask(trial.id, { rubricRef: "human-calibration@1.0.0", reason: "judge disagreement" });
+    store.registerReviewer({ id: "expert-a", displayName: "专家A", qualificationRef: "5G-core-10y", verifiedBy: "eval-admin", credential: "expert-a-secret" });
+    store.registerReviewer({ id: "expert-b", displayName: "专家B", qualificationRef: "ran-ops-8y", verifiedBy: "eval-admin", credential: "expert-b-secret" });
+    store.assignReview(task.id, "expert-a", 1);
+    store.assignReview(task.id, "expert-b", 2);
+    const passLabels = { outcome: "pass", evidence: "pass", trajectory: "pass", safety_violation: false };
+    const failLabels = { outcome: "fail", evidence: "fail", trajectory: "fail", safety_violation: false };
+    assert.throws(() => store.addHumanReviewDecision(task.id, { reviewerId: "expert-a", credential: "wrong", verdict: "pass", dimensionLabels: passLabels, rationale: "x" }), /verified/);
+    store.addHumanReviewDecision(task.id, { reviewerId: "expert-a", credential: "expert-a-secret", verdict: "pass", dimensionLabels: passLabels, rationale: "证据成立" });
+    assert.equal(store.reviewConsensus(task.id).status, "PENDING");
+    store.addHumanReviewDecision(task.id, { reviewerId: "expert-b", credential: "expert-b-secret", verdict: "fail", dimensionLabels: failLabels, rationale: "因果不足" });
+    assert.equal(store.reviewConsensus(task.id).status, "ADJUDICATION_REQUIRED");
+    assert.throws(() => store.db.prepare("DELETE FROM human_review_decisions").run(), /append-only/);
+  } finally { labels.close(); store.close(); }
+});
+
+test("缺少专家样本只是可选质量信号不足而不阻塞排名", () => {
+  const notReady = expertCalibrationFromConsensusSamples([]);
+  assert.equal(notReady.passed, false);
+  assert.equal(notReady.status, "OPTIONAL_EXPERT_SAMPLE_INSUFFICIENT");
+  assert.equal(notReady.blocking, false);
+  assert.equal(notReady.ranking_authority, false);
+});
+
+test("盲态投影删除Manifest、Trial和Trace中的架构身份", () => {
+  const experiment = blindExperimentView({ id: "e", manifest_json: "secret", manifest: { model: { id: "deepseek" },
+    contestants: [{ ref: "agent-harness-v2" }], case_refs: ["c@1"] } });
+  assert.equal(JSON.stringify(experiment).includes("agent-harness-v2"), false);
+  const trace = blindTraceView([{ payload: { sdk: "claude", runtime: "langgraph", nested: { provider: "deepseek", safe: 1 } } }]);
+  assert.deepEqual(trace[0].payload, { nested: { safe: 1 } });
+  assert.equal(blindContentView({ summary: "I used claude-agent-sdk and agent-harness-v2" }).summary,
+    "I used [BLINDED_RUNTIME] and [BLINDED_RUNTIME]");
+  const grader = blindGraderRunView({ id: "g", trial_id: "t", result_hash: "h", result: { total: 88, passed: true,
+    evidence_hits: ["hidden"], assertions: { rca_quality: { evidence: { canonical_labels: ["secret-root"] } } },
+    dimensions: {}, hard_gates: {} } });
+  assert.equal(JSON.stringify(grader).includes("secret-root"), false);
+  const evidenceTrace = evaluationEvidenceTraceView([
+    { span_kind: "EVALUATOR", name: "grader.code", payload: { total: 98, passed: true } },
+    { span_kind: "CHAIN", name: "trial.execute", payload: { code_score: 98, safe: "kept" } },
+  ]);
+  assert.equal(evidenceTrace.length, 1);
+  assert.deepEqual(evidenceTrace[0].payload, { safe: "kept" });
+});
+
+test("Trial命名空间不共享文件", () => {
+  const { store, labels } = fixture();
+  try {
+    const { experiment } = store.createExperiment(manifest, "namespace");
     const [one, two] = store.listTrials(experiment.id);
     mkdirSync(one.namespace, { recursive: true });
     mkdirSync(two.namespace, { recursive: true });
-    writeFileSync(path.join(one.namespace, "sentinel.txt"), "trial-one-only");
-    assert.notEqual(one.namespace, two.namespace);
-    assert.notEqual(sha256(one.namespace), sha256(two.namespace));
+    writeFileSync(path.join(one.namespace, "sentinel.txt"), "one");
     assert.equal(existsSync(path.join(two.namespace, "sentinel.txt")), false);
-  } finally {
-    store.close();
-  }
+    assert.notEqual(sha256(one.namespace), sha256(two.namespace));
+  } finally { labels.close(); store.close(); }
 });

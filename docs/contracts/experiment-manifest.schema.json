@@ -1,85 +1,127 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://opsmind.local/contracts/experiment-manifest.schema.json",
-  "title": "OpsMind EvalOS Experiment Manifest",
+  "title": "OpsMind EvalOS Experiment Manifest 4.0",
   "type": "object",
-  "required": ["manifest_version", "name", "suite", "dataset", "contestants", "cases", "seeds", "model", "budget", "policy"],
+  "required": ["manifest_version", "milestone", "evaluation_mode", "evaluation_lane", "design", "name", "suite_ref", "dataset_ref", "case_refs", "case_partitions", "environment_seeds", "replicates_per_seed", "contestants", "model", "frozen_dependencies", "budget", "policy", "retry_policy", "capacity_policy", "statistics_policy"],
   "properties": {
-    "manifest_version": { "const": "1.0" },
+    "manifest_version": { "const": "4.0" },
+    "milestone": { "const": "M3.0" },
+    "evaluation_mode": { "enum": ["QUALIFICATION", "CAPACITY_REHEARSAL", "FORMAL"] },
+    "evaluation_lane": { "enum": ["AGENT_CAPABILITY", "PRODUCT_E2E"] },
+    "design": { "enum": ["single_system_acceptance", "paired_comparison"] },
     "name": { "type": "string", "minLength": 1 },
-    "suite": {
-      "type": "object",
-      "required": ["id", "version"],
-      "properties": { "id": { "type": "string" }, "version": { "type": "string" } },
-      "additionalProperties": false
-    },
-    "dataset": {
-      "type": "object",
-      "required": ["id", "version", "sha256"],
+    "suite_ref": { "type": "string", "pattern": "^.+@.+$" },
+    "dataset_ref": { "type": "string", "pattern": "^.+@.+$" },
+    "case_refs": { "$ref": "#/$defs/caseRefsNonEmpty" },
+    "case_partitions": {
+      "type": "object", "required": ["public", "hidden", "safety", "regression"],
       "properties": {
-        "id": { "type": "string" },
-        "version": { "type": "string" },
-        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
-      },
-      "additionalProperties": false
+        "public": { "$ref": "#/$defs/caseRefs" },
+        "hidden": { "$ref": "#/$defs/caseRefs" },
+        "safety": { "$ref": "#/$defs/caseRefs" },
+        "regression": { "$ref": "#/$defs/caseRefs" }
+      }, "additionalProperties": false
     },
+    "environment_seeds": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "type": "integer" }, "uniqueItems": true },
+    "replicates_per_seed": { "type": "integer", "minimum": 1, "maximum": 20 },
     "contestants": {
-      "type": "array",
-      "minItems": 2,
-      "maxItems": 2,
+      "type": "array", "minItems": 1, "maxItems": 2,
       "items": {
-        "type": "object",
-        "required": ["id", "adapter_version", "code_commit", "image_digest"],
+        "type": "object", "required": ["ref", "adapter_contract_version", "adapter_version", "source_revision", "artifact_digest", "runtime_digest"],
         "properties": {
-          "id": { "type": "string" },
-          "adapter_version": { "type": "string" },
-          "code_commit": { "type": "string" },
-          "image_digest": { "type": "string" }
-        },
-        "additionalProperties": false
+          "ref": { "type": "string", "minLength": 1 }, "adapter_contract_version": { "const": "2.0" },
+          "adapter_version": { "type": "string", "minLength": 1 }, "source_revision": { "type": "string", "minLength": 7 },
+          "artifact_digest": { "$ref": "#/$defs/digest" }, "runtime_digest": { "$ref": "#/$defs/digest" }
+        }, "additionalProperties": false
       }
     },
-    "cases": { "type": "array", "minItems": 1, "items": { "type": "string" }, "uniqueItems": true },
-    "seeds": { "type": "array", "minItems": 1, "items": { "type": "integer" }, "uniqueItems": true },
     "model": {
-      "type": "object",
-      "required": ["provider", "id", "interface", "thinking", "temperature"],
+      "type": "object", "required": ["provider", "id", "interface", "sdk", "thinking", "temperature", "max_turns"],
       "properties": {
-        "provider": { "const": "deepseek" },
-        "id": { "const": "deepseek-v4-flash" },
-        "interface": { "const": "anthropic" },
-        "thinking": { "enum": ["enabled", "disabled"] },
-        "temperature": { "type": "number" }
-      },
-      "additionalProperties": false
+        "provider": { "const": "deepseek" }, "id": { "const": "deepseek-v4-flash" }, "interface": { "const": "anthropic" },
+        "sdk": { "const": "@anthropic-ai/claude-agent-sdk" }, "thinking": { "enum": ["enabled", "disabled"] },
+        "temperature": { "type": "number" }, "max_turns": { "type": "integer", "minimum": 1, "maximum": 100 }
+      }, "additionalProperties": false
+    },
+    "frozen_dependencies": {
+      "type": "object", "required": ["mcp_catalog", "agent_harness_skill_pack", "langgraph_knowledge_pack", "scope_policy", "grader", "twin", "trace_schema", "product_adapter_contract"],
+      "properties": {
+        "mcp_catalog": { "$ref": "#/$defs/versionedArtifact" }, "agent_harness_skill_pack": { "$ref": "#/$defs/versionedArtifact" },
+        "langgraph_knowledge_pack": { "$ref": "#/$defs/versionedArtifact" }, "scope_policy": { "$ref": "#/$defs/versionedArtifact" },
+        "grader": { "$ref": "#/$defs/versionedArtifact" }, "twin": { "$ref": "#/$defs/versionedArtifact" },
+        "trace_schema": { "$ref": "#/$defs/versionedArtifact" },
+        "product_adapter_contract": { "$ref": "#/$defs/versionedArtifact" }
+      }, "additionalProperties": false
     },
     "budget": { "$ref": "#/$defs/budget" },
     "policy": {
-      "type": "object",
-      "required": ["allowed_tools", "forbidden_actions", "heartbeat_ms"],
+      "type": "object", "required": ["allowed_tools", "allowed_native_tools", "forbidden_actions", "heartbeat_ms", "result_contract", "action_approval"],
       "properties": {
         "allowed_tools": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "allowed_native_tools": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "forbidden_actions": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-        "heartbeat_ms": { "type": "integer", "minimum": 1000, "maximum": 10000 }
-      },
-      "additionalProperties": false
-    }
+        "heartbeat_ms": { "type": "integer", "minimum": 1000, "maximum": 10000 }, "result_contract": { "type": "string", "minLength": 1 },
+        "action_approval": {
+          "type": "object", "required": ["mode", "max_writes_per_trial", "human_approval_required"],
+          "properties": {
+            "mode": { "const": "frozen-lab-preauthorization" },
+            "max_writes_per_trial": { "type": "integer", "minimum": 0, "maximum": 10 },
+            "human_approval_required": { "const": false }
+          }, "additionalProperties": false
+        }
+      }, "additionalProperties": false
+    },
+    "retry_policy": {
+      "type": "object", "required": ["max_infrastructure_retries", "retryable_categories", "capability_failures_retryable"],
+      "properties": {
+        "max_infrastructure_retries": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "retryable_categories": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "capability_failures_retryable": { "const": false }
+      }, "additionalProperties": false
+    },
+    "capacity_policy": {
+      "type": "object", "required": ["runner_workers", "twin_slots", "max_queue_depth"],
+      "properties": {
+        "runner_workers": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "twin_slots": { "type": "integer", "minimum": 1, "maximum": 64 },
+        "max_queue_depth": { "type": "integer", "minimum": 1 }
+      }, "additionalProperties": false
+    },
+    "statistics_policy": {
+      "type": "object", "required": ["paired_by_case_seed", "confidence_level", "cluster_by_case", "report_failures"],
+      "properties": {
+        "paired_by_case_seed": { "const": true }, "confidence_level": { "const": 0.95 },
+        "cluster_by_case": { "const": true }, "report_failures": { "const": true }
+      }, "additionalProperties": false
+    },
+    "source_experiment_id": { "type": "string" },
+    "request_kind": { "enum": ["RERUN_FROZEN", "NEW_EVALUATION"] },
+    "evaluation_purpose": { "enum": ["RERUN_FROZEN", "PAIRED_COMPARISON", "SINGLE_SYSTEM_REGRESSION"] },
+    "operator_reason": { "type": "string" }
   },
   "$defs": {
-    "budget": {
-      "type": "object",
-      "required": ["input_tokens", "output_tokens", "tool_calls", "wallclock_ms", "compute_ms", "storage_bytes"],
-      "properties": {
-        "input_tokens": { "type": "integer", "minimum": 1 },
-        "output_tokens": { "type": "integer", "minimum": 1 },
-        "tool_calls": { "type": "integer", "minimum": 1 },
-        "wallclock_ms": { "type": "integer", "minimum": 1 },
-        "compute_ms": { "type": "integer", "minimum": 1 },
-        "storage_bytes": { "type": "integer", "minimum": 1 }
-      },
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "caseRefs": { "type": "array", "items": { "type": "string", "pattern": "^.+@.+$" }, "uniqueItems": true },
+    "caseRefsNonEmpty": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^.+@.+$" }, "uniqueItems": true },
+    "versionedArtifact": {
+      "type": "object", "required": ["ref", "digest"],
+      "properties": { "ref": { "type": "string", "minLength": 1 }, "digest": { "$ref": "#/$defs/digest" } },
       "additionalProperties": false
+    },
+    "budget": {
+      "type": "object", "required": ["input_tokens", "output_tokens", "model_calls", "tool_calls", "wallclock_ms", "compute_ms", "storage_bytes", "cost_usd"],
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 1 }, "output_tokens": { "type": "integer", "minimum": 1 },
+        "model_calls": { "type": "integer", "minimum": 1 }, "tool_calls": { "type": "integer", "minimum": 1 },
+        "wallclock_ms": { "type": "integer", "minimum": 1 }, "compute_ms": { "type": "integer", "minimum": 1 },
+        "storage_bytes": { "type": "integer", "minimum": 1 }, "cost_usd": { "type": "number", "exclusiveMinimum": 0 }
+      }, "additionalProperties": false
     }
   },
+  "allOf": [
+    { "if": { "properties": { "design": { "const": "single_system_acceptance" } } }, "then": { "properties": { "contestants": { "minItems": 1, "maxItems": 1 } } } },
+    { "if": { "properties": { "design": { "const": "paired_comparison" } } }, "then": { "properties": { "contestants": { "minItems": 2, "maxItems": 2 } } } }
+  ],
   "additionalProperties": false
 }
-

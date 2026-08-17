@@ -1,0 +1,30 @@
+{
+  "contract": "evalos-m25-acceptance.1",
+  "gate": "M2.5",
+  "status": "PASSED",
+  "execution": "L0 确定性平台测试替身；只验工作台合同，不代表 DeepSeek 能力或付费模型调用",
+  "checks": {
+    "api_contract_evalos_4": true,
+    "dynamic_overview_uses_database": true,
+    "trial_detail_has_outcome_and_environment": true,
+    "complete_trace_visible": true,
+    "grader_detail_visible_without_hidden_label": true,
+    "frozen_source_bound_and_readable": true,
+    "analysis_is_separate_and_completed": true,
+    "official_grade_unchanged": true,
+    "append_only_ledger_valid": true,
+    "credential_material_absent": true,
+    "l0_test_double_labeled_not_paid_call": true
+  },
+  "counts": {
+    "datasets": 3,
+    "cases": 37,
+    "experiments": 1,
+    "trials": 1,
+    "completed_trials": 1,
+    "analysis_runs": 1
+  },
+  "trial_id": "trial_315137f8954741b83de8",
+  "analysis_run_id": "analysis_2d02e89de005f4a51be0",
+  "source_snapshot_ref": "source:mock-contestant-a:8ebfcb44166e6ae36674c829baaaac4c8f60cc753a421ed8e369d5c6fb8930bf"
+}

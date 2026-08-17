@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsmind.local/contracts/evaluation-adapter-v2.schema.json",
+  "title": "OpsMind Evaluation Adapter Contract 2.0",
+  "type": "object",
+  "required": ["adapter_contract_version", "evaluation_lane", "experiment_id", "trial", "contestant", "case", "scope", "tools", "model", "frozen_dependencies", "budget", "policy", "retry_policy", "contract_digest"],
+  "properties": {
+    "adapter_contract_version": { "const": "2.0" },
+    "evaluation_lane": { "enum": ["AGENT_CAPABILITY", "PRODUCT_E2E"] },
+    "experiment_id": { "type": "string", "minLength": 1 },
+    "trial": { "type": "object", "required": ["id", "case_ref", "environment_seed", "replicate_id", "blind_id"], "properties": {
+      "id": { "type": "string" }, "case_ref": { "type": "string" }, "environment_seed": { "type": "integer" },
+      "replicate_id": { "type": "integer", "minimum": 1 }, "blind_id": { "type": "string" }
+    }, "additionalProperties": false },
+    "contestant": { "type": "object", "required": ["ref", "adapter_version", "source_revision", "artifact_digest", "runtime_digest"], "properties": {
+      "ref": { "type": "string" }, "adapter_version": { "type": "string" }, "source_revision": { "type": "string" },
+      "artifact_digest": { "$ref": "#/$defs/digest" }, "runtime_digest": { "$ref": "#/$defs/digest" }
+    }, "additionalProperties": false },
+    "case": { "type": "object" }, "scope": { "type": "object" },
+    "tools": { "type": "array", "items": { "type": "object", "required": ["name", "version", "description", "effect", "source_system", "input_schema", "output_schema"], "properties": {
+      "name": { "type": "string" }, "version": { "type": "string" }, "description": { "type": "string" },
+      "effect": { "enum": ["READ_ONLY", "CONTROLLED_WRITE"] }, "source_system": { "type": "string" },
+      "input_schema": { "type": "object" }, "output_schema": { "type": "object" }
+    }, "additionalProperties": false } },
+    "model": { "type": "object" }, "frozen_dependencies": { "type": "object" }, "budget": { "type": "object" },
+    "policy": { "type": "object" }, "retry_policy": { "type": "object" }, "contract_digest": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": { "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } },
+  "additionalProperties": false
+}

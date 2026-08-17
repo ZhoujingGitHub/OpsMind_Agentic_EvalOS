@@ -6,8 +6,16 @@ const port = Number(process.env.PORT ?? 8787);
 const host = process.env.HOST ?? "127.0.0.1";
 const app = createApp({
   databasePath: process.env.EVALOS_DATABASE_PATH || undefined,
+  privateLabelDatabasePath: process.env.EVALOS_PRIVATE_LABEL_DATABASE_PATH || undefined,
   runtimeRoot: process.env.EVALOS_RUNTIME_ROOT || undefined,
   artifactsRoot: process.env.EVALOS_ARTIFACTS_ROOT || undefined,
+  m2ArtifactsRoot: process.env.EVALOS_M2_ARTIFACTS_ROOT || undefined,
+  m2ExecutorArtifactsRoot: process.env.EVALOS_M2_EXECUTOR_ARTIFACTS_ROOT || undefined,
+  m2AgentArtifactsRoot: process.env.EVALOS_M2_AGENT_ARTIFACTS_ROOT || undefined,
+  m2QualificationArtifactsRoot: process.env.EVALOS_M2_QUALIFICATION_ARTIFACTS_ROOT || undefined,
+  apiToken: process.env.EVALOS_API_TOKEN || undefined,
+  allowedOrigin: process.env.EVALOS_ALLOWED_ORIGIN || undefined,
+  bootstrapM3Design: true,
 });
 
 const server = createServer(async (request, response) => {

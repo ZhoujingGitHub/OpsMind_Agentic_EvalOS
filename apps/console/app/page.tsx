@@ -1,14 +1,11 @@
 import type { Metadata } from "next";
-import { M1Console } from "./m1-console";
+import { Workbench } from "./workbench-client";
 
 export const metadata: Metadata = {
-  title: "M1 Control Console · OpsMind EvalOS",
-  description: "实验、Trial、Trace 与不可变 Ledger 的统一可信视图。",
-  other: {
-    "codex-preview": "development",
-  },
+  title: "实验概览 · OpsMind EvalOS",
+  description: "从数据集、实验、Trial 轨迹、评分、冻结源码到 AI 深度调查的 Agent 评测工作台。",
 };
 
 export default function Home() {
-  return <M1Console />;
+  return <Workbench view="dashboard" />;
 }

@@ -1,0 +1,22 @@
+{
+  "manifest_version": "1.0",
+  "baseline_ref": "opsmind-m2-baseline-v1",
+  "serial_trials": true,
+  "components": {
+    "open5gs": { "version": "2.8.0~jammy5", "source": "ppa:open5gs/latest" },
+    "mongodb": { "version": "8.0.29", "source": "https://repo.mongodb.org/apt/ubuntu" },
+    "open5gs-dbctl": {
+      "version": "0.10.3",
+      "source": "https://raw.githubusercontent.com/open5gs/open5gs/main/misc/db/open5gs-dbctl",
+      "sha256": "7a4cc2df9c8fa882b81e27f5e8c41eee8bade11daaa85bf1803330b26ad3752e"
+    },
+    "ueransim": {
+      "version": "3.2.7",
+      "source": "https://codeload.github.com/aligungr/UERANSIM/tar.gz/refs/tags/v3.2.7",
+      "sha256": "e99a783d4b95cecf4c65a159ded7e7071ce46cb52d98e18f313eb5a3d220646b"
+    }
+  },
+  "topology": { "gnb": 1, "ue": 1, "plmn": "999-70", "tac": 1, "sst": 1, "sd": null, "dnn": "internet" },
+  "storage": { "root": "/srv/opsmind-twin", "pcap_ring_mib": 100, "trial_artifacts_append_only": true },
+  "safety": { "production": false, "public_business_ports": [], "destructive_agent_tools": false }
+}

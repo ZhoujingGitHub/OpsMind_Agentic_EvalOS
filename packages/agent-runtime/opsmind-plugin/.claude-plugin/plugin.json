@@ -1,0 +1,5 @@
+{
+  "name": "opsmind-agent-skills",
+  "version": "1.0.0",
+  "description": "OpsMind 5G运维Agent的方法知识。只提供可版本化判断原则，不规定固定工具顺序。"
+}

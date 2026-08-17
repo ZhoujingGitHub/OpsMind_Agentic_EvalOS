@@ -1,0 +1,66 @@
+{
+  "contract": "evalos-m26-acceptance.1",
+  "milestone": "M2.6",
+  "status": "PASSED",
+  "accepted_at": "2026-08-15T13:18:21+08:00",
+  "architecture": {
+    "core": "Claude Agent SDK + DeepSeek V4 Flash + MCP + Skills + Harness",
+    "orchestration": "model-driven-perceive-reason-tool-observe-loop",
+    "graph_framework_in_core": null
+  },
+  "release": {
+    "path": "/opt/opsmind-evalos/releases/m26-20260815-b188c16c",
+    "source_tree_sha256": "b188c16c60c905dc8edc05555c6043e8b41e3980e31e7b9818a06897af542d2a",
+    "archive_sha256": "585092fd7dc40aba3450dba0ecde913cd35aed5f3434c77763e9eec8381567ba",
+    "database_backup": "/var/lib/opsmind-evalos/backups/m26-20260815-b188c16c"
+  },
+  "automated_checks": {
+    "node_tests": { "passed": 60, "failed": 0 },
+    "console_render_tests": { "passed": 5, "failed": 0 },
+    "architecture_checks": "PASSED",
+    "security_checks": "PASSED",
+    "secret_scan": { "files": 203, "findings": 0 },
+    "production_build": "PASSED"
+  },
+  "browser_acceptance": {
+    "case_selection": "PASSED",
+    "new_single_system_evaluation": { "status": "PASSED", "trials": 1 },
+    "frozen_paired_rerun": { "status": "PASSED", "trials": 2 },
+    "raw_machine_record_expand": "PASSED",
+    "preflight": "PASSED",
+    "async_task_center": "PASSED",
+    "old_new_comparison": "PASSED",
+    "case_grouping": "PASSED",
+    "machine_log_translation": "PASSED",
+    "grader_filter": "PASSED",
+    "regrade_without_official_score_mutation": "PASSED",
+    "console_errors": 0
+  },
+  "cloud_acceptance": {
+    "api_service": "active",
+    "console_service": "active",
+    "ledger_valid": true,
+    "routes_http_200": ["/", "/datasets", "/experiments", "/run-requests", "/traces", "/graders", "/analyses", "/experiments/exp_000fd60135491b2966b0", "/trials/trial_87b88de7df71e4853b0f"],
+    "counts": { "datasets": 4, "cases": 38, "experiments": 2, "trials": 7, "completed_trials": 7, "analysis_runs": 10, "evaluation_tasks": 0 },
+    "preflight_contract": {
+      "frozen_rerun": { "status": "PASSED", "trials": 2 },
+      "new_single_system": { "status": "PASSED", "trials": 1 },
+      "illegal_partial_frozen_rerun_rejected": true,
+      "ledger_unchanged": true
+    },
+    "real_trace_translation_sample": {
+      "raw": "environment.prepared",
+      "zh": "准备并隔离考试环境",
+      "en": "Prepare and isolate evaluation environment"
+    },
+    "error_logs": 0
+  },
+  "truthfulness": {
+    "interactive_rerun_used_test_doubles": true,
+    "interactive_new_evaluation_used_test_doubles": true,
+    "interactive_rerun_was_paid_model_call": false,
+    "cloud_acceptance_triggered_model_call": false,
+    "cloud_existing_trials_are_real_m2_evidence": true,
+    "official_scores_mutated": false
+  }
+}

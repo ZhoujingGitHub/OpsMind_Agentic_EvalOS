@@ -1,0 +1,56 @@
+{
+  "contract": "evalos-m2-closure.1",
+  "milestone": "M2 协议级数字孪生",
+  "status": "PASSED",
+  "completed_at": "2026-08-14T12:08:16.273Z",
+  "ranking_produced": false,
+  "conclusion_boundary": "M2 只证明真实协议考场、通用变更执行器、核心 Agent 端到端和双架构接入资格可信；不比较两套 OpsMind 强弱。",
+  "next_phase": "M3 正式独立盲测与 A/B 统计比较",
+  "checks": {
+    "protocol_twin_passed": true,
+    "change_executor_passed": true,
+    "agent_e2e_passed": true,
+    "adapter_qualification_passed": true,
+    "no_m2_ranking_produced": true
+  },
+  "gates": {
+    "protocol_twin": {
+      "gate": "M2",
+      "status": "PASSED",
+      "run_id": "m2-real-acceptance-20260814-v3"
+    },
+    "change_executor": {
+      "gate": "M2-CHANGE-EXECUTOR",
+      "status": "PASSED",
+      "run_id": "m2-real-executor-20260814-v5"
+    },
+    "agent_e2e": {
+      "gate": "M2-AGENT-E2E",
+      "status": "PASSED",
+      "run_id": "m2-real-agent-acceptance-20260814-v7-final"
+    },
+    "adapter_qualification": {
+      "gate": "M2-ADAPTER-QUALIFICATION",
+      "status": "PASSED",
+      "run_id": "m2-adapter-qualification-20260814-v4-final"
+    }
+  },
+  "evidence": {
+    "protocol_twin": {
+      "file": "M2验收结论.json",
+      "sha256": "56ecf409542fe3ce4c7b10b67f5436338bb7525f4d67602938e2fdf74eab8b8c"
+    },
+    "change_executor": {
+      "file": "M2变更执行器验收结论.json",
+      "sha256": "db28b6ec015e7358d6c333556f63b1fdad3ce5e274a41997c35870cf7e4c0c3f"
+    },
+    "agent_e2e": {
+      "file": "M2-Agent端到端验收结论.json",
+      "sha256": "90ee964472f39378afe249bf050f8cd8bc5f1c68b65b847ac44721e0167b3077"
+    },
+    "adapter_qualification": {
+      "file": "M2双架构适配资格验收结论.json",
+      "sha256": "0e0c68ad6da0d5b1001c44bf0423cfc83a64a3c5573962653c1b3e3bbc56bd56"
+    }
+  }
+}

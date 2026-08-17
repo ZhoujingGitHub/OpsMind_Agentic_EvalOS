@@ -1,6 +1,8 @@
 const SENSITIVE_KEY = /(api[_-]?key|access[_-]?key|secret|password|passwd|token|authorization|cookie|private[_-]?key)/i;
 const VALUE_PATTERNS = [
-  /Bearer\s+[A-Za-z0-9._~+\/-]+=*/gi,
+  // Require credential-like entropy/length. Human-facing source strings such
+  // as "Bearer token required" are protocol documentation, not credentials.
+  /\bBearer\s+(?:(?=[A-Za-z0-9._~+\/-]{16,}={0,2}(?:\s|["'`,;)}\]]|$))(?=[A-Za-z0-9._~+\/-]*[0-9._~+\/-])[A-Za-z0-9._~+\/-]+={0,2}|[A-Za-z]{32,})/gi,
   /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{8,}\b/g,
   /\bAKID[A-Za-z0-9]{12,}\b/g,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
@@ -15,7 +17,9 @@ function redactString(value) {
 export function redact(value) {
   let changed = false;
   const visit = (input, key = "") => {
-    if (SENSITIVE_KEY.test(key)) {
+    const safeUsageCounter = /(?:^|_)input_tokens$|(?:^|_)output_tokens$/i.test(key)
+      && (typeof input === "number" || (typeof input === "string" && /^\d+(?:\.\d+)?$/.test(input)));
+    if (SENSITIVE_KEY.test(key) && !safeUsageCounter) {
       changed = true;
       return "[REDACTED]";
     }
@@ -40,4 +44,3 @@ export function containsSensitiveMaterial(value) {
     return pattern.test(serialized);
   });
 }
-

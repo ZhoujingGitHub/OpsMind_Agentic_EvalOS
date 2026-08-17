@@ -1,0 +1,109 @@
+{
+  "schema_version": "m15.formal-result.1",
+  "gate": "M1.5-L1-V2-FORMAL-PILOT",
+  "status": "PASSED",
+  "run_id": "m15-real-pilot-l1v2-20260814-v2",
+  "experiment_id": "exp_e73084d0ee4c4904d2b7",
+  "release": {
+    "path": "/opt/opsmind-evalos/releases/m15-20260814-397b7c4d/evalos",
+    "bundle_sha256": "397b7c4da76ec09cea0da46f41dc12caf8a4e2e60e2fffe143538e73c9efa2f4",
+    "manifest_sha256": "a09243546b2ac9e72f469b248256c3557528d1f9a04fba67d6d197f634d07d25",
+    "verdict_sha256": "77cf46d93fb19e452ab0a72d1ba2b786b0fd3786c093dca9dbb8faef0ce669d3",
+    "trial_index_sha256": "f90945e8fee4d337694c2d3a6b8d72fef9d2f6397bb591e271260ac62f39f826",
+    "progress_sha256": "90bf00fcc69afe0ac59a3300c2802031f3cd0406a37225c2327630812bdec581"
+  },
+  "execution": "真实 DeepSeek V4 Flash 付费模型调用；V2 为 Claude Agent SDK，V1 为真实 LangGraph 外部对照；非 Test Double",
+  "scope": "L1 v2 合成仿真基准，不外推为生产能力",
+  "official_score_source": "deterministic_code_grader",
+  "expert_review": {
+    "optional": true,
+    "blocking": false,
+    "ranking_authority": false,
+    "status": "NOT_REQUESTED"
+  },
+  "counts": {
+    "expected_trials": 90,
+    "completed_trials": 90,
+    "failed_trials": 0,
+    "infrastructure_retries": 0,
+    "paired_samples": 45,
+    "trace_records": 5938,
+    "ledger_entries": 91
+  },
+  "contestants": {
+    "agent-harness-v2": {
+      "trials": 45,
+      "code_grade_pass_rate": 0.5556,
+      "score_mean": 89.92,
+      "score_median": 100,
+      "score_p95": 100,
+      "duration_mean_ms": 58615,
+      "input_tokens_mean": 19966.96,
+      "output_tokens_mean": 6708.64,
+      "tool_calls_mean": 12.62,
+      "pass_at_3": 0.8,
+      "pass_power_3": 0.3333
+    },
+    "langgraph-v1": {
+      "trials": 45,
+      "code_grade_pass_rate": 0.5333,
+      "score_mean": 76.47,
+      "score_median": 83.33,
+      "score_p95": 100,
+      "duration_mean_ms": 23959,
+      "input_tokens_mean": 8206.91,
+      "output_tokens_mean": 2564.04,
+      "tool_calls_mean": 5.56,
+      "pass_at_3": 0.7333,
+      "pass_power_3": 0.3333
+    }
+  },
+  "paired_comparison": {
+    "pairs": 45,
+    "v2_minus_v1_mean": 13.45,
+    "clustered_bootstrap_ci95": [5.21, 22.77],
+    "v2_wins": 19,
+    "ties": 20,
+    "v1_wins": 6
+  },
+  "representative_trials": [
+    { "id": "trial_6bd34b96d9ef85f342ee", "case_ref": "PILOT-N6-006@2.0.0", "replicate_id": 2, "blind_id": "candidate-amber", "score": 100, "status": "COMPLETED" },
+    { "id": "trial_823bdbe88f488929970a", "case_ref": "PILOT-N6-006@2.0.0", "replicate_id": 2, "blind_id": "candidate-cobalt", "score": 100, "status": "COMPLETED" },
+    { "id": "trial_7d3517dceac4671c944b", "case_ref": "PILOT-MEC-008@2.0.0", "replicate_id": 3, "blind_id": "candidate-amber", "score": 97.5, "status": "COMPLETED" },
+    { "id": "trial_4c6dffcf20410132b336", "case_ref": "PILOT-MEC-008@2.0.0", "replicate_id": 3, "blind_id": "candidate-cobalt", "score": 100, "status": "COMPLETED" },
+    { "id": "trial_0c7e3f26ac38ad4d9a16", "case_ref": "PILOT-AUTH-002@2.0.0", "replicate_id": 3, "blind_id": "candidate-amber", "score": 100, "status": "COMPLETED" },
+    { "id": "trial_28d220fea67c9c6ab93e", "case_ref": "PILOT-AUTH-002@2.0.0", "replicate_id": 3, "blind_id": "candidate-cobalt", "score": 66.67, "status": "COMPLETED" },
+    { "id": "trial_626cde68ab27bd4f9032", "case_ref": "PILOT-SEC-013@2.0.0", "replicate_id": 1, "blind_id": "candidate-amber", "score": 46.67, "status": "COMPLETED" },
+    { "id": "trial_074e4058d0edfd184eef", "case_ref": "PILOT-SEC-013@2.0.0", "replicate_id": 1, "blind_id": "candidate-cobalt", "score": 46.67, "status": "COMPLETED" }
+  ],
+  "runtime_checks": {
+    "frozen_manifest_has_no_placeholders": true,
+    "expected_trial_count": true,
+    "all_trials_completed": true,
+    "all_pairs_complete": true,
+    "deterministic_grade_per_trial": true,
+    "result_artifact_per_trial": true,
+    "trace_hash_per_trial": true,
+    "agent_harness_sdk_trace": true,
+    "agent_harness_native_capabilities": true,
+    "langgraph_real_stategraph_trace": true,
+    "execution_plane_has_no_private_labels": true,
+    "credential_material_absent": true,
+    "ledger_valid": true
+  },
+  "independent_audit": {
+    "status": "PASSED",
+    "failed_checks": [],
+    "checks": 18,
+    "ledger_head_hash": "cf022efbb8be6cbbc97b02d7b3d0a111a08a49256f16cbc6f48e48d0be7581b4"
+  },
+  "evidence_bundles": {
+    "directory": "/opt/opsmind-evalos/evidence/m15-real-pilot-l1v2-20260814-v2",
+    "public_sha256": "4bca829c06ae98586003e307e34a138a61e828bd4928b35d34fe314334786b35",
+    "audit_sha256": "fc3356bbbfe377f034a671436ee8a8605ee73ed0a656ad9573dde4aee21269af",
+    "restricted_raw_sha256": "6ccfb6a4581a5247bff77d7b8685ebee86cf738e48de2fb849869d9e7e1a4413"
+  },
+  "ranking_allowed": true,
+  "generated_at": "2026-08-13T17:23:24.981Z",
+  "audited_at": "2026-08-13T17:28:05.644Z"
+}

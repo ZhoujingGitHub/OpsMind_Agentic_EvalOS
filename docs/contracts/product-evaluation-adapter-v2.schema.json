@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsmind.local/contracts/product-evaluation-adapter-v2.schema.json",
+  "title": "OpsMind Product Evaluation Adapter 2.0 Result",
+  "type": "object",
+  "required": ["adapter_contract_version", "evaluation_lane", "eval_run_id", "status"],
+  "properties": {
+    "adapter_contract_version": { "const": "2.0" },
+    "evaluation_lane": { "const": "PRODUCT_E2E" },
+    "eval_run_id": { "type": "string", "minLength": 1 },
+    "product_run_ref": { "type": "string" },
+    "status": { "enum": ["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"] },
+    "status_url": { "type": "string" },
+    "outcome": { "type": "object" },
+    "usage": { "type": "object" },
+    "trace_events": { "type": "array", "items": { "type": "object" } },
+    "artifact_refs": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "product_evidence": {
+      "type": "object",
+      "required": ["queue", "worker", "recovery", "persistence", "audit", "archive"],
+      "properties": {
+        "queue": { "$ref": "#/$defs/evidence" },
+        "worker": { "$ref": "#/$defs/evidence" },
+        "recovery": { "$ref": "#/$defs/evidence" },
+        "persistence": { "$ref": "#/$defs/evidence" },
+        "audit": { "$ref": "#/$defs/evidence" },
+        "archive": { "$ref": "#/$defs/evidence" }
+      },
+      "additionalProperties": false
+    },
+    "error": { "type": "object" }
+  },
+  "$defs": {
+    "evidence": {
+      "type": "object",
+      "required": ["recorded", "ref"],
+      "properties": { "recorded": { "const": true }, "ref": { "type": "string", "minLength": 1 } },
+      "additionalProperties": true
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "COMPLETED" } }, "required": ["status"] },
+      "then": { "required": ["outcome", "product_evidence"] }
+    }
+  ],
+  "additionalProperties": true
+}

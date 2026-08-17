@@ -1,0 +1,55 @@
+{
+  "manifest_version": "4.0",
+  "milestone": "M3.0",
+  "evaluation_mode": "QUALIFICATION",
+  "evaluation_lane": "AGENT_CAPABILITY",
+  "design": "paired_comparison",
+  "name": "M1.5 可信测量内核冒烟",
+  "suite_ref": "m15-kernel-smoke@1.0.0",
+  "dataset_ref": "m15-l0-test-doubles@1.0.0",
+  "case_refs": ["SMOKE-RCA-001@1.0.0", "SMOKE-RECOVERY-001@1.0.0"],
+  "case_partitions": {
+    "public": ["SMOKE-RCA-001@1.0.0"],
+    "hidden": [],
+    "safety": [],
+    "regression": ["SMOKE-RECOVERY-001@1.0.0"]
+  },
+  "environment_seeds": [20260813],
+  "replicates_per_seed": 3,
+  "contestants": [
+    { "ref": "mock-contestant-a", "adapter_contract_version": "2.0", "adapter_version": "1.0.0", "source_revision": "m15-local-test-double-a", "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "runtime_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" },
+    { "ref": "mock-contestant-b", "adapter_contract_version": "2.0", "adapter_version": "1.0.0", "source_revision": "m15-local-test-double-b", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "runtime_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" }
+  ],
+  "model": { "provider": "deepseek", "id": "deepseek-v4-flash", "interface": "anthropic", "sdk": "@anthropic-ai/claude-agent-sdk", "thinking": "disabled", "temperature": 0, "max_turns": 20 },
+  "frozen_dependencies": {
+    "mcp_catalog": { "ref": "m15-mock-mcp@1.0.0", "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111" },
+    "agent_harness_skill_pack": { "ref": "m15-mock-skills@1.0.0", "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222" },
+    "langgraph_knowledge_pack": { "ref": "m15-mock-knowledge@1.0.0", "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333" },
+    "scope_policy": { "ref": "m15-scope@1.0.0", "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444" },
+    "grader": { "ref": "m15-code-grader@2.1.0", "digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555" },
+    "twin": { "ref": "m15-test-double@1.0.0", "digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666" },
+    "trace_schema": { "ref": "evalos-trace@2.0.0", "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777" },
+    "product_adapter_contract": { "ref": "evalos-product-adapter@2.0.0", "digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888" }
+  },
+  "budget": {
+    "input_tokens": 4000,
+    "output_tokens": 2000,
+    "model_calls": 20,
+    "tool_calls": 10,
+    "wallclock_ms": 30000,
+    "compute_ms": 15000,
+    "storage_bytes": 1048576,
+    "cost_usd": 0.1
+  },
+  "policy": {
+    "allowed_tools": ["get_alerts", "query_metrics", "query_logs", "run_probe"],
+    "allowed_native_tools": ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Skill", "ToolSearch"],
+    "forbidden_actions": ["write_production", "change_policy", "read_hidden_answer", "cross_tenant_access"],
+    "heartbeat_ms": 5000,
+    "result_contract": "opsmind.investigation-result.v2",
+    "action_approval": { "mode": "frozen-lab-preauthorization", "max_writes_per_trial": 1, "human_approval_required": false }
+  },
+  "retry_policy": { "max_infrastructure_retries": 1, "retryable_categories": ["RATE_LIMIT", "TRANSPORT_RESET", "TEMPORARY_UNAVAILABLE"], "capability_failures_retryable": false },
+  "capacity_policy": { "runner_workers": 1, "twin_slots": 1, "max_queue_depth": 12 },
+  "statistics_policy": { "paired_by_case_seed": true, "confidence_level": 0.95, "cluster_by_case": true, "report_failures": true }
+}
