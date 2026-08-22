@@ -82,6 +82,7 @@ export class TrialRunner {
     const emitWarnings = (warnings) => warnings.forEach((warning) => event("budget.warning", "kernel", warning));
     let environment = null;
     let environmentReset = null;
+    let environmentBeforeReset = null;
     let approvedWriteCount = 0;
 
     try {
@@ -175,7 +176,7 @@ export class TrialRunner {
       this.store.endSpan(trial.id, agentSpan, "agent.invoke", "AGENT", "contestant", "OK", { outcome });
       emitWarnings(budget.consume({ wallclock_ms: Math.max(1, Math.round(performance.now() - start)) }));
       const usage = budget.snapshot().usage;
-      const environmentBeforeReset = typeof environment.snapshot === "function" ? await environment.snapshot() : {};
+      environmentBeforeReset = typeof environment.snapshot === "function" ? await environment.snapshot() : {};
       if (typeof environment.reset === "function") {
         environmentReset = await environment.reset();
         event("environment.reset", "environment", environmentReset ?? { ok: true });
@@ -251,20 +252,62 @@ export class TrialRunner {
       });
       return this.store.getTrial(trial.id);
     } catch (error) {
-      if (environment && environmentReset === null && typeof environment.reset === "function") {
+      let resetErrorMessage = null;
+      let snapshotErrorMessage = null;
+      const keepQuarantined = error.keepEnvironmentQuarantined === true;
+      const quarantineStarted = error.quarantineStarted === true || keepQuarantined;
+      if (environment && environmentReset === null && typeof environment.reset === "function" && !keepQuarantined) {
+        if (typeof environment.snapshot === "function") {
+          try {
+            environmentBeforeReset = await environment.snapshot();
+          } catch (snapshotError) {
+            snapshotErrorMessage = snapshotError.message;
+            event("environment.snapshot_failed_after_failure", "environment", { error: snapshotError.message });
+          }
+        }
         try {
           environmentReset = await environment.reset();
           event("environment.reset_after_failure", "environment", environmentReset ?? { ok: true });
+          if (environmentReset?.ok === false) resetErrorMessage = environmentReset.error ?? "environment reset returned ok=false";
         } catch (resetError) {
+          resetErrorMessage = resetError.message;
           event("environment.reset_failed", "environment", { error: resetError.message });
         }
+      } else if (keepQuarantined) {
+        event("environment.quarantined", "kernel", {
+          reason: "external_candidate_not_terminal", candidate_run_ref: error.runRef ?? null,
+        });
       }
       const category = error instanceof BudgetExceededError ? "budget.exceeded" : "trial.failed";
       event(category, "kernel", { error: error.message, dimension: error.dimension ?? null });
       try { this.store.endSpan(trial.id, agentSpan, "agent.invoke", "AGENT", "contestant", "ERROR", { error: error.message }); } catch {}
       try { this.store.endSpan(trial.id, rootSpan, "trial.execute", "CHAIN", "runner", "ERROR", { error: error.message }); } catch {}
-      this.store.failTrial(trial.id, error.message);
-      this.ledger.append({ entityType: "trial", entityId: trial.id, action: "trial.failed", payload: { error: error.message, usage: budget.snapshot().usage } });
+      const usage = budget.snapshot().usage;
+      const traceHash = this.store.traceSemanticHash(trial.id);
+      const finalState = {
+        before_reset: environmentBeforeReset,
+        reset: environmentReset,
+        quarantine: {
+          required: quarantineStarted,
+          released: quarantineStarted ? error.quarantineReleased === true : true,
+          candidate_run_ref: error.runRef ?? null,
+        },
+        snapshot_error: snapshotErrorMessage,
+        reset_error: resetErrorMessage,
+      };
+      this.store.failTrial(trial.id, error.message, { usage, finalState, traceHash });
+      this.ledger.append({ entityType: "trial", entityId: trial.id, action: "trial.failed", payload: {
+        error: error.message, usage, trace_hash: traceHash, environment_reset: environmentReset,
+        quarantine: finalState.quarantine,
+        snapshot_error: snapshotErrorMessage,
+        reset_error: resetErrorMessage,
+      } });
+      if (error.haltQueue === true || resetErrorMessage || environmentReset?.ok === false) {
+        const haltError = error.haltQueue === true ? error
+          : new Error(`trial cleanup failed; evaluation queue halted: ${resetErrorMessage ?? environmentReset?.error ?? "unknown"}`);
+        haltError.haltQueue = true;
+        throw haltError;
+      }
       return this.store.getTrial(trial.id);
     }
   }

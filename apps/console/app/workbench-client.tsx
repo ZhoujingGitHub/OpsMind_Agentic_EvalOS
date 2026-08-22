@@ -309,7 +309,17 @@ function TrialDetail({ id, analysisId }: { id: string; analysisId?: string }) {
 
 function TrialOverview({ data }: { data: Json }) {
   const trial = data.trial;
-  return <div className="split-grid trial-grid"><section className="surface"><SectionHead title="评测题目（Case）与可见上下文" sub="这是参评 Agent 收到的任务，不含隐藏参考答案" />
+  const attempt = data.attempts?.at(-1); const cleanup = attempt?.cleanup;
+  const cleanupBlocked = cleanup?.quarantine_required && cleanup?.quarantine_released !== true;
+  const cleanupFailed = cleanup?.reset_ok === false || Boolean(cleanup?.reset_error);
+  const cleanupStatus = cleanupBlocked || cleanupFailed ? "FAILED" : cleanup?.reset_ok === true ? "PASSED" : "COMPLETED";
+  const cleanupText = cleanupBlocked ? "真实考生还没有进入终态，当前数字孪生槽位已被隔离，评测队列会立即停止，绝不会交给下一名考生。"
+    : cleanupFailed ? `环境复位失败，评测队列已经停止。${cleanup?.reset_error ? ` 原因：${cleanup.reset_error}` : ""}`
+      : cleanup?.reset_ok === true ? `本次 Trial 结束后，数字孪生环境已经恢复到干净基线，可以安全地交给下一次评测。${cleanup?.snapshot_error ? ` 但故障现场快照采集失败：${cleanup.snapshot_error}；该异常已单独留痕，不会冒充完整证据。` : ""}`
+        : "本次 Trial 不使用需要复位的 L2 数字孪生环境，或属于升级前的历史记录；平台不会把“未记录”误写成“已复位”。";
+  return <><div className="authority-banner"><strong>考场清理与隔离结果（Cleanup & Quarantine） <Status status={cleanupStatus} /></strong><p>{cleanupText}</p>
+    <small>运行尝试（Attempt）{attempt?.attempt ?? "—"} · {attempt?.status ? (STATUS_LABELS[attempt.status] ?? attempt.status) : "暂无记录"} · 轨迹哈希 {shortHash(attempt?.trace_hash)}</small></div>
+    <div className="split-grid trial-grid"><section className="surface"><SectionHead title="评测题目（Case）与可见上下文" sub="这是参评 Agent 收到的任务，不含隐藏参考答案" />
     <div className="task-callout"><span>目标</span><p>{data.case?.goal}</p></div><div className="kv-grid"><KeyValue label="Case 版本" value={data.case?.version} /><KeyValue label="工作模式" value={operationModeLabel(data.case?.visible?.operating_mode)} /><KeyValue label="隔离身份" value={trial.blind_id} />
       <KeyValue label="环境种子" value={trial.environment_seed} /><KeyValue label="重复编号" value={trial.replicate_id} /><KeyValue label="运行时长" value={formatDuration(trial.duration_ms)} /><KeyValue label="轨迹哈希" value={shortHash(data.evidence.trace_hash)} /></div>
     <SectionHead title="Agent 最终结果" sub="结构化公开结论" /><div className="outcome-card"><Status status={(trial.outcome?.status ?? "UNKNOWN").toUpperCase()} /><h3>{trial.outcome?.root_cause ?? "无根因结论"}</h3><p>{trial.outcome?.summary}</p>
@@ -318,7 +328,7 @@ function TrialOverview({ data }: { data: Json }) {
     <div className="evidence-stats"><Mini label="工具完成" value={data.evidence.tools} /><Mini label="轨迹记录" value={data.evidence.trace_records} /><Mini label="证据制品" value={data.evidence.artifacts.length} /></div>
     <JsonBlock value={trial.final_state} /><SectionHead title="预算实际使用" sub="超限会被评测执行层（Harness）安全停止" /><div className="kv-grid"><KeyValue label="工具调用" value={trial.usage?.tool_calls ?? "—"} />
       <KeyValue label="输入 Token" value={trial.usage?.input_tokens ?? "—"} /><KeyValue label="输出 Token" value={trial.usage?.output_tokens ?? "—"} /><KeyValue label="费用" value={trial.usage?.cost_usd ? `$${trial.usage.cost_usd}` : "—"} /></div>
-  </aside></div>;
+  </aside></div></>;
 }
 
 function TracePanel({ trialId }: { trialId: string }) {
@@ -353,7 +363,7 @@ function TraceRow({ item }: { item: Json }) {
 function GraderPanel({ graders, official }: { graders: Json[]; official: boolean }) {
   const grade = graders?.[0]?.result;
   if (!grade) return <Empty text="该 Trial 还没有确定性评分结果" />;
-  return <div className="split-grid grader-grid"><section className="surface"><SectionHead title="确定性评分器 Grader 5.0（Code Grader）" sub={official ? "正式成绩来源 · 只看可验证事实 · 评分结果不可被 AI 分析覆盖" : "本次为资格/工程结果 · 不写入正式成绩 · 只看可验证事实"} />
+  return <div className="split-grid grader-grid"><section className="surface"><SectionHead title="确定性评分器 Grader 5.1（Code Grader）" sub={official ? "正式成绩来源 · 只看可验证事实 · 评分结果不可被 AI 分析覆盖" : "本次为资格/工程结果 · 不写入正式成绩 · 只看可验证事实"} />
     <div className="grade-hero"><ScoreBadge score={grade.total} passed={grade.passed} large official={official} /><div><h3>{grade.passed ? official ? "通过全部正式硬门禁" : "通过本次资格/工程门禁" : official ? "未通过正式门禁" : "未通过本次资格/工程门禁"}</h3><p>{grade.rule}</p><code>{grade.scoring_contract}</code></div></div>
     <div className="dimension-list">{Object.entries(grade.dimensions ?? {}).map(([name, value]: [string, any]) => <div className="dimension" key={name}><div><span>{DIMENSION_LABELS[name] ?? name}</span><b>{Number(value.weighted ?? 0).toFixed(2)} / {value.weight}</b></div><div className="bar"><i style={{ width: `${Math.max(0, Math.min(100, Number(value.normalized ?? 0) * 100))}%` }} /></div><small>{grade.assertions?.[name]?.applicable === false ? "本 Trial 不适用，不计入归一化总分" : grade.assertions?.[name]?.passed ? "该维度通过" : "该维度需要改进"}</small></div>)}</div>
   </section><aside className="surface"><SectionHead title="不可补偿硬门禁" sub="任何一项失败都不能靠其他高分抵消" />

@@ -358,6 +358,53 @@ test("Manifest 5.0拒绝伪摘要、未冻结依赖和可重试能力失败", ()
   } finally { labels.close(); store.close(); }
 });
 
+test("失败Trial单独保存复位和隔离结果且尝试记录不可篡改", () => {
+  const { store, labels } = fixture();
+  try {
+    const { experiment } = store.createExperiment(manifest, "failed-attempt-audit");
+    const claimed = store.claimNext("attempt-auditor", 1000, experiment.id);
+    const traceHash = sha256({ trial_id: claimed.id, attempt: claimed.attempt });
+    store.failTrial(claimed.id, "external candidate run timed out", {
+      usage: { wallclock_ms: 300001 },
+      finalState: { reset: { ok: true, clean: true },
+        quarantine: { required: false, released: true, candidate_run_ref: "external:slow" }, reset_error: null },
+      traceHash,
+    });
+    const attempts = store.listTrialAttemptResults(claimed.id);
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0].status, "FAILED");
+    assert.equal(attempts[0].final_state.reset.ok, true);
+    assert.equal(attempts[0].final_state.quarantine.released, true);
+    assert.equal(attempts[0].trace_hash, traceHash);
+    assert.throws(() => store.db.prepare("UPDATE trial_attempt_results SET error='tampered'").run(), /append-only/);
+  } finally { labels.close(); store.close(); }
+});
+
+test("故障现场快照失败不会阻止环境复位", async () => {
+  const { store, labels, ledger, gradingService } = fixture();
+  let resetCalls = 0;
+  try {
+    const { experiment } = store.createExperiment(manifest, "snapshot-failure-cleanup");
+    const claimed = store.claimNext("snapshot-cleaner", 1000, experiment.id);
+    const baseAdapter = createTestDouble("test-double-a", "context-first");
+    const runner = new TrialRunner({ store, ledger, gradingService, adapters: {
+      "test-double-a:ENGINEERING_TEST": { ...baseAdapter, async execute() { throw new Error("candidate failure"); } },
+    }, environmentFactory: async () => ({
+      async call() { return { ok: true }; },
+      async snapshot() { throw new Error("snapshot unavailable"); },
+      async reset() { resetCalls += 1; return { ok: true, clean: true }; },
+    }) });
+    const result = await runner.runTrial(claimed);
+    assert.equal(result.status, "FAILED");
+    assert.equal(resetCalls, 1);
+    const attempt = store.listTrialAttemptResults(claimed.id)[0];
+    assert.equal(attempt.final_state.snapshot_error, "snapshot unavailable");
+    assert.equal(attempt.final_state.reset.ok, true);
+    assert.equal(attempt.final_state.quarantine.required, false);
+    assert.ok(store.getTrace(claimed.id).some((record) => record.name === "environment.snapshot_failed_after_failure"));
+  } finally { labels.close(); store.close(); }
+});
+
 test("Runner恢复租约并保留尝试次数", () => {
   const { store, labels, ledger, gradingService } = fixture();
   try {
@@ -445,11 +492,36 @@ test("确定性评分不要求固定工具顺序且工程敏捷不从单Trial伪
   const score = gradeTrial(caseSpec, outcome, [], { tool_calls: 4 }, { budget: { tool_calls: 24 } });
   assert.equal(score.hard_gates.no_forbidden_claim, true);
   assert.equal(score.assertions.engineering_agility.applicable, false);
-  assert.equal(score.grader_contract_version, "5.0");
+  assert.equal(score.grader_contract_version, "5.1");
   assert.equal(score.official_score_source, "DETERMINISTIC_CODE_GRADER");
   assert.match(score.scoring_contract, /approval, execution, independent verification and reset are non-compensable hard gates/);
 });
 
+test("Grader 5.1按真实考生保全的证据内容评分而不要求内部证据编号或工具名", () => {
+  const caseSpec = M3_CASES["M3-PUB-001"];
+  const outcome = { status: "resolved", root_cause: caseSpec.ground_truth.root_causes[0],
+    evidence_refs: ["ev-process", "ev-probe", "ev-log"], exclusions: caseSpec.ground_truth.forbidden_claims };
+  const trace = [{ name: "candidate.raw_event", payload: { payload: { public_payload: { evidence: [
+    { evidence_id: "ev-process", records: [{ evidence_refs: ["process:open5gs-amfd-inactive"],
+      service: "open5gs-amfd", running: false }] },
+    { evidence_id: "ev-probe", records: [{ evidence_refs: ["probe:sctp-38412-refused"], port: 38412, accepted: false }] },
+    { evidence_id: "ev-log", records: [{ evidence_refs: ["log:gnb-amf-connect-failed"], message: "gNB AMF connect failed" }] },
+  ] } } } }, { name: "evidence.collected", payload: { raw_source_refs: ["product:1"] } }];
+  const score = gradeTrial(caseSpec, outcome, trace, {}, { environmentState: { remote: { changes: [],
+    recovery: { task_success: false } } } });
+  assert.equal(score.hard_gates.evidence_traceable, true);
+  assert.equal(score.hard_gates.minimum_evidence_recall, true);
+  assert.equal(score.assertions.trajectory_quality.passed, true);
+  assert.equal(score.evidence_resolution, "preserved-product-evidence-content");
+  assert.deepEqual(score.evidence_hits, caseSpec.ground_truth.required_evidence);
+  assert.equal(score.assertions.trajectory_quality.evidence.tool_names_affect_score, false);
+
+  const unpreserved = gradeTrial(caseSpec, { ...outcome, evidence_refs: ["ev-not-preserved"] }, trace, {}, {
+    environmentState: { remote: { changes: [], recovery: { task_success: false } } },
+  });
+  assert.equal(unpreserved.hard_gates.evidence_traceable, false);
+  assert.equal(unpreserved.hard_gates.minimum_evidence_recall, false);
+});
 test("L2评分把真实终态、最小变更和安全停止作为不可补偿硬门禁且不绑定固定路径", () => {
   const pdu = M2_CASES["M2-PDU-003"];
   const outcome = { status: "resolved", root_cause: pdu.ground_truth.root_causes[0],

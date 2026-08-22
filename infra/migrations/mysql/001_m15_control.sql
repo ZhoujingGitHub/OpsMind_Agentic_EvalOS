@@ -67,6 +67,14 @@ CREATE TABLE IF NOT EXISTS trial_results (
   CONSTRAINT fk_result_trial FOREIGN KEY(trial_id) REFERENCES trials(id)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS trial_attempt_results (
+  id VARCHAR(64) PRIMARY KEY, trial_id VARCHAR(64) NOT NULL, attempt INT NOT NULL,
+  status ENUM('COMPLETED','FAILED') NOT NULL, error TEXT, outcome_json JSON,
+  usage_json JSON NOT NULL, final_state_json JSON NOT NULL, trace_hash CHAR(64) NOT NULL,
+  result_hash CHAR(64) NOT NULL, created_at DATETIME(6) NOT NULL,
+  UNIQUE KEY uq_trial_attempt(trial_id,attempt), KEY idx_trial_attempt_results_trial(trial_id,attempt),
+  CONSTRAINT fk_attempt_result_trial FOREIGN KEY(trial_id) REFERENCES trials(id)
+) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS trace_records (
   row_id BIGINT AUTO_INCREMENT PRIMARY KEY, record_id VARCHAR(64) NOT NULL UNIQUE, trial_id VARCHAR(64) NOT NULL,
   trace_id VARCHAR(64) NOT NULL, seq INT NOT NULL, timestamp DATETIME(6) NOT NULL,

@@ -70,16 +70,17 @@ export function createApp({
     migrationPaths: [path.join(ROOT, "infra", "migrations", "sqlite", "002_m25_workbench.sql"),
       path.join(ROOT, "infra", "migrations", "sqlite", "003_m26_run_control.sql"),
       path.join(ROOT, "infra", "migrations", "sqlite", "004_m31_candidate_relay.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "005_m31_seed_identity.sql")] });
+      path.join(ROOT, "infra", "migrations", "sqlite", "005_m31_seed_identity.sql"),
+      path.join(ROOT, "infra", "migrations", "sqlite", "006_m31_trial_attempt_audit.sql")] });
   const labels = new PrivateLabelStore({ databasePath: privateLabelDatabasePath,
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const privateLabelHash = labels.publishRegistry(registry);
   store.publishRegistry(registry, { privateLabelHash });
-  store.registerGraderSpec({ id: "evalos-code-grader", version: "5.0.0", type: "code", status: "APPROVED",
+  store.registerGraderSpec({ id: "evalos-code-grader", version: "5.1.0", type: "code", status: "APPROVED",
     definition: { weights: "25/15/15/15/15/5/5/5", safety: "non-compensable-hard-gate",
-      l2_environment_task: "non-compensable-hard-gate" } });
+      l2_environment_task: "non-compensable-hard-gate", evidence_resolution: "preserved-product-evidence-content" } });
   const gradingService = new DeterministicGradingService({ labelStore: labels,
-    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@5.0.0" });
+    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@5.1.0" });
   const approvalOracle = new FrozenApprovalOracle({ labelStore: labels });
   const ledger = new EvaluationLedger(store);
   const loadRelayConfig = () => {
@@ -184,6 +185,19 @@ export function createApp({
       budget: trial.budget, duration_ms: trial.started_at && trial.completed_at
         ? Math.max(0, new Date(trial.completed_at).getTime() - new Date(trial.started_at).getTime()) : null };
   };
+  const attemptView = (attempt) => ({
+    id: attempt.id, attempt: attempt.attempt, status: attempt.status, error: attempt.error,
+    usage: attempt.usage, trace_hash: attempt.trace_hash, result_hash: attempt.result_hash,
+    cleanup: {
+      reset_ok: attempt.final_state?.reset?.ok ?? null,
+      reset_clean: attempt.final_state?.reset?.clean ?? null,
+      quarantine_required: attempt.final_state?.quarantine?.required === true,
+      quarantine_released: attempt.final_state?.quarantine?.released ?? null,
+      snapshot_error: attempt.final_state?.snapshot_error ?? null,
+      reset_error: attempt.final_state?.reset_error ?? null,
+    },
+    created_at: attempt.created_at,
+  });
   const gradeFor = (trialId) => store.listGraderRuns(trialId).find((item) => item.dimension === "overall") ?? null;
   const evaluationMode = (experiment) => experiment?.manifest?.evaluation_mode ?? "FORMAL";
   const workbenchExperiments = () => store.listExperiments().map((experiment) => {
@@ -244,6 +258,7 @@ export function createApp({
     const grade = gradeFor(trial.id);
     const trace = store.getTrace(trial.id);
     const snapshot = store.getTrialSourceSnapshot(trial.id);
+    const attempts = store.listTrialAttemptResults(trial.id).map(attemptView);
     return {
       id: trial.id,
       experiment_id: trial.experiment_id,
@@ -266,6 +281,8 @@ export function createApp({
         id: item.id, status: item.status, mode: item.mode, created_at: item.created_at, completed_at: item.completed_at,
       })),
       source_snapshot: safeSnapshot(snapshot),
+      attempts,
+      latest_cleanup: attempts.at(-1)?.cleanup ?? null,
       completed_at: trial.completed_at,
     };
   });
@@ -867,7 +884,7 @@ export function createApp({
           core: "Claude Agent SDK + DeepSeek + MCP + Skills + Harness", workflow_graph: null,
           official_score_source: "deterministic_code_grader", ai_analysis_authority: "diagnostic_only",
           candidate_execution: "external-real-products-only", candidate_adapter_contract: "3.0",
-          trace_contract: "3.0", grader_contract: "5.0", formal_480_enabled: false,
+          trace_contract: "3.0", grader_contract: "5.1", formal_480_enabled: false,
         }, counts: { datasets: store.listDatasets().length, cases: store.listCases().length,
           experiments: experiments.length, trials: trials.length, completed_trials: trials.filter((item) => item.status === "COMPLETED").length,
           analysis_runs: store.listAnalysisRuns().length, evaluation_tasks: store.listEvaluationRunRequests().length }, score: {
@@ -954,7 +971,7 @@ export function createApp({
           graders: store.listGraderRuns(trial.id).map(auditableGraderRunView), judges: store.listJudgeRuns(trial.id).map((item) => ({
             id: item.id, role: item.judge_role, result: item.result, authority: "advisory_only", created_at: item.created_at })),
           source_snapshot: safeSnapshot(store.getTrialSourceSnapshot(trial.id)), analyses: store.listAnalysisRuns(trial.id),
-          regrades: store.listRegradeRequests(trial.id),
+          regrades: store.listRegradeRequests(trial.id), attempts: store.listTrialAttemptResults(trial.id).map(attemptView),
         }, 200, cors);
       }
 

@@ -467,15 +467,44 @@ export class EvalStore {
     const result = { outcome, usage, final_state: finalState, trace_hash: traceHash };
     const resultHash = sha256(result);
     this.transaction(() => {
+      const attempt = Number(this.db.prepare("SELECT attempt FROM trials WHERE id=?").get(trialId)?.attempt ?? 0);
+      const now = isoNow();
       this.db.prepare(`INSERT INTO trial_results(id,trial_id,outcome_json,usage_json,final_state_json,trace_hash,result_hash,created_at)
         VALUES(?,?,?,?,?,?,?,?)`).run(entityId("result", `${trialId}:${resultHash}`), trialId, stableStringify(outcome), stableStringify(usage),
-        stableStringify(finalState), traceHash, resultHash, isoNow());
-      this.db.prepare("UPDATE trials SET status='COMPLETED',completed_at=?,lease_owner=NULL,lease_expires_at=NULL WHERE id=?").run(isoNow(), trialId);
+        stableStringify(finalState), traceHash, resultHash, now);
+      this.db.prepare(`INSERT INTO trial_attempt_results(
+        id,trial_id,attempt,status,error,outcome_json,usage_json,final_state_json,trace_hash,result_hash,created_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+        entityId("attempt-result", `${trialId}:${attempt}:${resultHash}`), trialId, attempt, "COMPLETED", null,
+        stableStringify(outcome), stableStringify(usage), stableStringify(finalState), traceHash, resultHash, now,
+      );
+      this.db.prepare("UPDATE trials SET status='COMPLETED',completed_at=?,lease_owner=NULL,lease_expires_at=NULL WHERE id=?").run(now, trialId);
     });
   }
 
-  failTrial(trialId, error) {
-    this.db.prepare("UPDATE trials SET status='FAILED',error=?,completed_at=?,lease_owner=NULL,lease_expires_at=NULL WHERE id=?").run(String(error), isoNow(), trialId);
+  failTrial(trialId, error, { usage = {}, finalState = {}, traceHash = null } = {}) {
+    const normalizedError = String(error);
+    const stableTraceHash = traceHash ?? sha256([]);
+    const result = { status: "FAILED", error: normalizedError, usage, final_state: finalState, trace_hash: stableTraceHash };
+    const resultHash = sha256(result);
+    this.transaction(() => {
+      const attempt = Number(this.db.prepare("SELECT attempt FROM trials WHERE id=?").get(trialId)?.attempt ?? 0);
+      const now = isoNow();
+      this.db.prepare(`INSERT INTO trial_attempt_results(
+        id,trial_id,attempt,status,error,outcome_json,usage_json,final_state_json,trace_hash,result_hash,created_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+        entityId("attempt-result", `${trialId}:${attempt}:${resultHash}`), trialId, attempt, "FAILED", normalizedError,
+        null, stableStringify(usage), stableStringify(finalState), stableTraceHash, resultHash, now,
+      );
+      this.db.prepare("UPDATE trials SET status='FAILED',error=?,completed_at=?,lease_owner=NULL,lease_expires_at=NULL WHERE id=?")
+        .run(normalizedError, now, trialId);
+    });
+  }
+
+  listTrialAttemptResults(trialId) {
+    return this.db.prepare("SELECT * FROM trial_attempt_results WHERE trial_id=? ORDER BY attempt,created_at").all(trialId)
+      .map((row) => ({ ...row, outcome: parseJson(row.outcome_json, null), usage: parseJson(row.usage_json, {}),
+        final_state: parseJson(row.final_state_json, {}) }));
   }
 
   retryFailedTrial(trialId, reason) {

@@ -94,11 +94,14 @@ test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏
     assert.equal(workbenchTrials.items.some((item) => item.id === trialId && item.trace_records > 1 && item.grade?.total), true);
     assert.equal(workbenchTrials.items.every((item) => item.evaluation_mode === "QUALIFICATION"), true);
     assert.equal(workbenchTrials.items.every((item) => item.affects_official_score === false), true);
+    assert.equal(workbenchTrials.items.every((item) => item.attempts.length === 1 && Object.hasOwn(item.latest_cleanup, "reset_ok")), true);
     assert.equal(JSON.stringify(workbenchTrials).includes("canonical_labels"), false);
     const workbenchTrial = await (await app.handler(new Request(`http://local/api/workbench/trials/${trialId}`, {
       headers: { authorization: "Bearer admin-secret" } }))).json();
     assert.equal(workbenchTrial.graders[0].result.rule.includes("工具名称"), true);
     assert.equal(JSON.stringify(workbenchTrial.graders).includes("canonical_labels"), false);
+    assert.equal(workbenchTrial.attempts.length, 1);
+    assert.equal(Object.hasOwn(workbenchTrial.attempts[0].cleanup, "reset_ok"), true);
     const workbenchTrace = await (await app.handler(new Request(`http://local/api/workbench/trials/${trialId}/trace?limit=1`, {
       headers: { authorization: "Bearer admin-secret" } }))).json();
     assert.equal(workbenchTrace.items.length, 1);

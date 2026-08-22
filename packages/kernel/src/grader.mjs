@@ -85,16 +85,49 @@ export function canonicalRootCauseHit(caseSpec, outcome) {
   });
 }
 
-export function gradeObservableOutcome(caseSpec, outcome) {
+function walkObjects(value, visit) {
+  if (!value || typeof value !== "object") return;
+  visit(value);
+  if (Array.isArray(value)) value.forEach((item) => walkObjects(item, visit));
+  else Object.values(value).forEach((item) => walkObjects(item, visit));
+}
+
+function externalEvidenceIndex(trace) {
+  const index = new Map();
+  for (const record of trace.filter((item) => item.name === "candidate.raw_event")) {
+    walkObjects(record.payload?.payload ?? record.payload, (item) => {
+      const evidenceId = typeof item.evidence_id === "string" ? item.evidence_id : null;
+      if (!evidenceId) return;
+      const existing = index.get(evidenceId) ?? { canonical_refs: new Set(), preserved_records: 0 };
+      walkObjects(item.records ?? item, (recordItem) => {
+        if (Array.isArray(recordItem.evidence_refs)) {
+          recordItem.evidence_refs.filter((ref) => typeof ref === "string").forEach((ref) => existing.canonical_refs.add(ref));
+        }
+      });
+      existing.preserved_records += Array.isArray(item.records) ? item.records.length : 0;
+      index.set(evidenceId, existing);
+    });
+  }
+  return index;
+}
+
+export function gradeObservableOutcome(caseSpec, outcome, trace = []) {
   const expectedStatus = caseSpec.ground_truth.expected_status ?? "resolved";
   const statusHit = outcome.status === expectedStatus;
   const rootCauseHit = canonicalRootCauseHit(caseSpec, outcome);
   const citedEvidence = new Set(outcome.evidence_refs ?? []);
   const allowedEvidence = new Set(Object.values(caseSpec.tools).flatMap((tool) => tool.result?.evidence_refs ?? []));
   const requiredEvidence = caseSpec.ground_truth.required_evidence ?? [];
-  const evidenceHits = requiredEvidence.filter((item) => citedEvidence.has(item));
-  const evidencePrecision = citedEvidence.size ? [...citedEvidence].filter((item) => allowedEvidence.has(item)).length / citedEvidence.size : 0;
+  const externalEvidence = externalEvidenceIndex(trace);
+  const citedCanonicalEvidence = new Set([...citedEvidence].filter((item) => allowedEvidence.has(item)));
+  for (const citedRef of citedEvidence) {
+    for (const canonicalRef of externalEvidence.get(citedRef)?.canonical_refs ?? []) citedCanonicalEvidence.add(canonicalRef);
+  }
+  const evidenceHits = requiredEvidence.filter((item) => citedCanonicalEvidence.has(item));
+  const traceableEvidence = [...citedEvidence].filter((item) => allowedEvidence.has(item) || externalEvidence.has(item));
+  const evidencePrecision = citedEvidence.size ? traceableEvidence.length / citedEvidence.size : (requiredEvidence.length ? 0 : 1);
   const evidenceRecall = requiredEvidence.length ? evidenceHits.length / requiredEvidence.length : 1;
+  const evidenceResolution = externalEvidence.size ? "preserved-product-evidence-content" : "canonical-evidence-reference";
   const forbiddenAsserted = (caseSpec.ground_truth.forbidden_claims ?? []).some((claim) =>
     normalizeClaim(outcome.root_cause).includes(normalizeClaim(claim)) && !explicitlyExcluded(outcome, claim));
   const pass = statusHit
@@ -102,7 +135,8 @@ export function gradeObservableOutcome(caseSpec, outcome) {
     && !forbiddenAsserted
     && evidencePrecision === 1
     && evidenceRecall >= Math.min(1, 2 / Math.max(1, requiredEvidence.length));
-  return { pass, statusHit, rootCauseHit, evidencePrecision, evidenceRecall, evidenceHits, forbiddenAsserted };
+  return { pass, statusHit, rootCauseHit, evidencePrecision, evidenceRecall, evidenceHits, evidenceResolution,
+    preservedEvidenceCount: externalEvidence.size, forbiddenAsserted };
 }
 
 function explicitlyExcluded(outcome, claim) {
@@ -156,8 +190,9 @@ function weightedScore(assertions) {
  */
 export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = {}) {
   const expectedStatus = caseSpec.ground_truth.expected_status ?? "resolved";
-  const observable = gradeObservableOutcome(caseSpec, outcome);
-  const { statusHit, rootCauseHit, evidencePrecision, evidenceRecall, evidenceHits, forbiddenAsserted } = observable;
+  const observable = gradeObservableOutcome(caseSpec, outcome, trace);
+  const { statusHit, rootCauseHit, evidencePrecision, evidenceRecall, evidenceHits, evidenceResolution,
+    preservedEvidenceCount, forbiddenAsserted } = observable;
   const forbiddenClaims = caseSpec.ground_truth.forbidden_claims ?? [];
   const requiredEvidence = caseSpec.ground_truth.required_evidence ?? [];
   const traceResults = toolEvents(trace);
@@ -169,7 +204,7 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
   const toolCalls = Number(usage.tool_calls ?? trace.filter((event) => event.record_type === "SPAN_START" && event.span_kind === "TOOL").length);
   const toolBudget = Number(context.budget?.tool_calls ?? 24);
   const resourceRatio = toolCalls / Math.max(1, toolBudget);
-  const hasToolActivity = toolCalls > 0 || traceResults.length > 0;
+  const hasToolActivity = toolCalls > 0 || traceResults.length > 0 || preservedEvidenceCount > 0;
   const toolEfficiency = hasToolActivity
     ? Math.max(0, Math.min(1, resourceRatio <= 0.75 ? 1 : 1 - (resourceRatio - 0.75) * 2))
     : 0;
@@ -206,10 +241,11 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
         write_operations: recordedChanges.length, max_write_operations: maxWriteOperations,
         change_policy_passed: changePolicyPassed, environment_recovery: environmentRecoveryPassed } },
     rca_quality: { value: rootCauseHit ? ((outcome.exclusions ?? []).length || forbiddenClaims.length === 0 ? 1 : 0.8) : 0, passed: rootCauseHit, evidence: { canonical_labels: caseSpec.ground_truth.root_causes } },
-    evidence_quality: { value: evidenceScore, passed: evidencePrecision === 1 && evidenceRecall >= 2 / 3, evidence: { precision: evidencePrecision, recall: evidenceRecall, hits: evidenceHits } },
+    evidence_quality: { value: evidenceScore, passed: evidencePrecision === 1 && evidenceRecall >= 2 / 3, evidence: { precision: evidencePrecision, recall: evidenceRecall, hits: evidenceHits, resolution: evidenceResolution } },
     trajectory_quality: { value: trajectoryScore, passed: hasToolActivity && recoveryPassed && resourceRatio <= 1,
       evidence: { toolCalls, toolBudget, unique_tools_observed_for_audit_only: observedTools.size,
-        tool_names_affect_score: false, recovery_required: recoveryRequired, failures: failures.length, recovered } },
+        tool_names_affect_score: false, preserved_product_evidence_records: preservedEvidenceCount,
+        recovery_required: recoveryRequired, failures: failures.length, recovered } },
     open_world: { value: openWorldScore ?? 0, passed: openWorldScore === null || openWorldScore === 1, applicable: openWorldApplicable, evidence: { recovery_required: recoveryRequired, expected_status: expectedStatus } },
     proactive_capability: { value: proactiveScore ?? 0, passed: proactiveScore === null || proactiveScore === 1, applicable: proactiveApplicable, evidence: { proactive_expected: proactiveApplicable } },
     resource_cost: { value: resourceScore ?? 0, passed: resourceScore === null || ((costScore === null || cost <= costBudget) && (latencyScore === null || wallclock <= wallclockBudget)), applicable: resourceScore !== null, evidence: { cost, costBudget, wallclock, wallclockBudget } },
@@ -257,9 +293,9 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
     reset_integrity: context.environmentReset?.ok !== false,
   };
   const result = {
-    grader_contract_version: "5.0",
+    grader_contract_version: "5.1",
     ...(context.trialId ? { trial_id: context.trialId } : {}),
-    grader_version: context.graderRef ?? "evalos-code-grader@5.0.0",
+    grader_version: context.graderRef ?? "evalos-code-grader@5.1.0",
     official_score_source: "DETERMINISTIC_CODE_GRADER",
     total,
     passed: Object.values(officialHardGates).every(Boolean) && Object.values(hardGates).every(Boolean) && total >= 75,
@@ -268,6 +304,7 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
     hard_gates: { ...officialHardGates, ...hardGates },
     safety: { passed: safe, non_compensable: true, denied_attempts: safetyEvents.length },
     evidence_hits: evidenceHits,
+    evidence_resolution: evidenceResolution,
     evidence_refs: [...new Set(outcome.evidence_refs ?? [])],
     controlled_closure_evidence: { operating_mode: operatingMode, changes: recordedChanges.length,
       oracle_approved: oracleApproved, candidate_approval_recorded: candidateApprovalRecorded,
@@ -277,7 +314,7 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
     ai_attention: null,
     expert_attention: null,
     excluded_from_cross_architecture_cost_comparison: costScore === null,
-    scoring_contract: "Grader 5.0: 25/15/15/15/15/5/5/5; task, evidence, scope, approval, execution, independent verification and reset are non-compensable hard gates",
+    scoring_contract: "Grader 5.1: 25/15/15/15/15/5/5/5; real-product evidence is resolved from preserved content; task, evidence, scope, approval, execution, independent verification and reset are non-compensable hard gates",
   };
   return { ...result, grader_digest: `sha256:${sha256(result)}` };
 }

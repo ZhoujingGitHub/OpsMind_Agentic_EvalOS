@@ -87,6 +87,58 @@ test("Candidate Adapter 3.0只做外部提交、事件翻译和证据保全，�
     ["invoke-candidate-internal-tools", "synthesize-missing-evidence", "change-official-score"]);
 });
 
+test("Candidate Adapter超时后等待真实考生终态再释放隔离槽", async () => {
+  const fingerprints = {
+    source_revision: "abcdef1234567", artifact_digest: `sha256:${"1".repeat(64)}`,
+    runtime_digest: `sha256:${"2".repeat(64)}`, runtime_manifest_digest: `sha256:${"3".repeat(64)}`,
+    capability_contract_digest: `sha256:${"4".repeat(64)}`,
+  };
+  let observations = 0;
+  const connector = {
+    kind: "fixture-external-product",
+    discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "CLAUDE_AGENT_SDK_HARNESS",
+      production_writes_available: false, ...fingerprints }),
+    start: async () => ({ run_ref: "external:slow-terminal", status: "RUNNING" }),
+    observe: async ({ runRef }) => ({ run_ref: runRef, status: ++observations >= 3 ? "FAILED" : "RUNNING",
+      raw_events: [], normalized_events: [] }),
+    cancel: async () => ({ supported: false, reason: "candidate_api_has_no_cancel" }),
+  };
+  const emitted = [];
+  const adapter = createCandidateAdapterV3({ id: "agent-harness-v2", connector, pollIntervalMs: 1,
+    timeoutMs: 1, quarantineTimeoutMs: 50 });
+  await assert.rejects(adapter.execute({ trial: { id: "trial-slow-terminal" }, executionContract: {
+    run_class: "REAL_CANDIDATE", evaluation_lane: "CONTROLLED_CLOSURE", trial: { id: "trial-slow-terminal" },
+    contestant: { ref: "agent-harness-v2", kind: "REAL_PRODUCT", architecture: "CLAUDE_AGENT_SDK_HARNESS", ...fingerprints },
+    budget: { wallclock_ms: 1000 },
+  }, emit: async (...args) => emitted.push(args) }), /external candidate run timed out/);
+  assert.ok(emitted.some(([name]) => name === "candidate.run.quarantine_started"));
+  assert.ok(emitted.some(([name]) => name === "candidate.run.quarantine_released"));
+});
+
+test("Candidate Adapter在真实考生始终未终止时封锁环境并要求停止队列", async () => {
+  const fingerprints = {
+    source_revision: "abcdef1234567", artifact_digest: `sha256:${"1".repeat(64)}`,
+    runtime_digest: `sha256:${"2".repeat(64)}`, runtime_manifest_digest: `sha256:${"3".repeat(64)}`,
+    capability_contract_digest: `sha256:${"4".repeat(64)}`,
+  };
+  const connector = {
+    kind: "fixture-external-product",
+    discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "LANGGRAPH_PRODUCT",
+      production_writes_available: false, ...fingerprints }),
+    start: async () => ({ run_ref: "external:never-terminal", status: "RUNNING" }),
+    observe: async ({ runRef }) => ({ run_ref: runRef, status: "RUNNING", raw_events: [], normalized_events: [] }),
+    cancel: async () => ({ supported: false }),
+  };
+  const adapter = createCandidateAdapterV3({ id: "langgraph-v1", connector, pollIntervalMs: 1,
+    timeoutMs: 1, quarantineTimeoutMs: 4 });
+  await assert.rejects(adapter.execute({ trial: { id: "trial-never-terminal" }, executionContract: {
+    run_class: "REAL_CANDIDATE", evaluation_lane: "CONTROLLED_CLOSURE", trial: { id: "trial-never-terminal" },
+    contestant: { ref: "langgraph-v1", kind: "REAL_PRODUCT", architecture: "LANGGRAPH_PRODUCT", ...fingerprints },
+    budget: { wallclock_ms: 1000 },
+  }, emit: async () => {} }), (error) => error.name === "CandidateIsolationError"
+    && error.haltQueue === true && error.keepEnvironmentQuarantined === true
+    && error.runRef === "external:never-terminal");
+});
 test("DeepSeek environment keeps credentials in memory and maps the exact model", () => {
   const env = deepSeekEnvironment({ apiKey: "test-runtime-only", model: "deepseek-v4-flash" });
   assert.equal(env.ANTHROPIC_BASE_URL, "https://api.deepseek.com/anthropic");

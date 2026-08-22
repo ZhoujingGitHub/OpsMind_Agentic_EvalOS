@@ -33,7 +33,7 @@ assert.match(app, /createLangGraphProductConnector/);
 assert.match(app, /createTestDouble\("test-double-a"/);
 assert.match(app, /test-double-a:ENGINEERING_TEST/);
 assert.match(runner, /buildEvaluationContract/);
-assert.match(grader, /grader_contract_version:\s*"5\.0"/);
+assert.match(grader, /grader_contract_version:\s*"5\.1"/);
 assert.match(grader, /DETERMINISTIC_CODE_GRADER/);
 assert.match(twinEnvironment, /ExternalProductTwinEnvironment/);
 assert.match(twinEnvironment, /real candidate product must invoke its own MCP tools/i);

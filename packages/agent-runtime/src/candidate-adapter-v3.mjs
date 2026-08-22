@@ -56,7 +56,8 @@ function assertProductEvidence(productEvidence) {
   }
 }
 
-export function createCandidateAdapterV3({ id, connector, pollIntervalMs = 500, timeoutMs = 300000 } = {}) {
+export function createCandidateAdapterV3({ id, connector, pollIntervalMs = 500, timeoutMs = 300000,
+  quarantineTimeoutMs = 300000 } = {}) {
   requiredString(id, "candidate id");
   if (!connector || typeof connector.discover !== "function" || typeof connector.start !== "function" ||
       typeof connector.observe !== "function" || typeof connector.cancel !== "function") {
@@ -165,8 +166,43 @@ export function createCandidateAdapterV3({ id, connector, pollIntervalMs = 500, 
           if (!TERMINAL.has(status)) await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
         }
       } catch (error) {
-        await connector.cancel({ runRef, reason: "evalos_adapter_failure" }).catch(() => {});
-        throw error;
+        const cancellation = await connector.cancel({ runRef, reason: "evalos_adapter_failure" })
+          .catch((cancelError) => ({ supported: false, error: cancelError?.message ?? String(cancelError) }));
+        await emit("candidate.run.quarantine_started", "candidate-adapter", {
+          run_ref: runRef, cause: error.message, cancellation_supported: cancellation?.supported === true,
+          cancellation_reason: cancellation?.reason ?? cancellation?.error ?? null,
+        });
+        const quarantineDeadline = Date.now() + Math.max(1, quarantineTimeoutMs);
+        let lastObservationError = null;
+        while (!TERMINAL.has(status) && Date.now() < quarantineDeadline) {
+          try {
+            const observation = assertObservation(await connector.observe({ runRef, cursor, executionContract }), runRef);
+            cursor = observation.next_cursor ?? cursor;
+            status = observation.status;
+            lastObservationError = null;
+          } catch (observeError) {
+            lastObservationError = observeError;
+          }
+          if (!TERMINAL.has(status)) await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+        }
+        if (TERMINAL.has(status)) {
+          await emit("candidate.run.quarantine_released", "candidate-adapter", {
+            run_ref: runRef, terminal_status: status, original_error: error.message,
+          });
+          error.quarantineStarted = true;
+          error.quarantineReleased = true;
+          error.runRef = runRef;
+          throw error;
+        }
+        const isolationError = new Error(`external candidate quarantine unresolved: ${error.message}`);
+        isolationError.name = "CandidateIsolationError";
+        isolationError.haltQueue = true;
+        isolationError.keepEnvironmentQuarantined = true;
+        isolationError.quarantineStarted = true;
+        isolationError.quarantineReleased = false;
+        isolationError.runRef = runRef;
+        isolationError.observationError = lastObservationError?.message ?? null;
+        throw isolationError;
       }
       if (status !== "COMPLETED" && status !== "INCONCLUSIVE") {
         throw new Error(`external candidate run ended with ${status}: ${finalObservation?.error?.code ?? "unknown"}`);

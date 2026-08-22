@@ -516,7 +516,7 @@ Hook只负责护栏和记录，不负责控制Agent的推理路线。
 - Candidate Adapter 3.0；
 - Case Contract 3.0；
 - Trace Contract 3.0；
-- Grader Contract 5.0。
+- Grader Contract 5.1。
 
 不继续维护旧运行合同的兼容逻辑。旧结果只做只读归档，统一标记为`LEGACY_M3_20260817`。
 
@@ -1046,7 +1046,7 @@ graded_at          评分时间
 
 ### 9.9 Grader自身怎样验收
 
-在启动480个正式Trial之前，Grader 5.0必须先通过自己的“阅卷老师考试”：
+在启动480个正式Trial之前，Grader 5.1必须先通过自己的“阅卷老师考试”：
 
 1. 使用人工构造的正面、负面和边界证据验证每条断言；
 2. 把工具名称全部改掉，业务事实不变，分数应保持不变；
@@ -1318,7 +1318,7 @@ evidence.archived             证据已经归档
 - 没有固定工具顺序或固定修复脚本；
 - 真实生产写始终关闭。
 
-### M3.1-D：Grader 5.0
+### M3.1-D：Grader 5.1
 
 工作内容：
 
@@ -1421,7 +1421,7 @@ evidence.archived             证据已经归档
 | 真实考生绑定 | 两名考生均为真实冻结构建，不是EvalOS内部复刻版本 |
 | Adapter资格 | Adapter 3.0合同、事件和证据完整通过 |
 | Case冻结 | 80个Case完成评审、版本化和污染检查 |
-| Grader冻结 | Grader 5.0完成正负样本验收和硬门禁验证 |
+| Grader冻结 | Grader 5.1完成正负样本验收和硬门禁验证 |
 | 自动审批裁判 | 批准、拒绝、超时、篡改、职责分离全部通过 |
 | Twin | 4并发和8并发下隔离、加载、复位稳定 |
 | Runner恢复 | API/Worker中断后可恢复，且没有重复动作 |
