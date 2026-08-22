@@ -216,8 +216,8 @@
       "adapter_version": "candidate-adapter-3.0.0",
       "source_revision": "990c9b50d15b9ae15164e253a2a8de579e6e6a1f",
       "artifact_digest": "sha256:4cdd404bad016301c86fa580c48b866b87c0b6513799169b8b92b56ae980ae2e",
-      "runtime_digest": "sha256:88c5bf99e92b8f86b5c8f77925696f3d9f5edf062fe69e8d95bab3ebc243da0e",
-      "runtime_manifest_digest": "sha256:d65891af3aeb7535f37bc3e4a867010a240876a9baa63628fb1893ba736ffb07",
+      "runtime_digest": "sha256:180658f75800118b6db26fe803282e42749baa3c2a6fb3a810753a00f5d38740",
+      "runtime_manifest_digest": "sha256:4bc6f0d460429ba15e3aa0da6b72855979ada5d6f8dbfa65da667266ec568861",
       "capability_contract_digest": "sha256:eb50cd6cf29d0590dd8c1c35469dd1a0a30d9130c014b7868f63370a95bfa3f9"
     }
   ],

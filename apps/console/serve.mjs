@@ -31,9 +31,11 @@ async function assetFetch(request) {
 
 export async function handleRequest(request) {
   const url = new URL(request.url);
+  const relayPath = url.pathname.startsWith("/api/candidate-relay/");
   const proxied = url.pathname === "/health" || url.pathname === "/api/runtime/capabilities"
     || url.pathname.startsWith("/api/m2/") || url.pathname.startsWith("/api/workbench/")
-    || url.pathname === "/api/analysis-runs" || url.pathname.startsWith("/api/analysis-runs/");
+    || url.pathname === "/api/analysis-runs" || url.pathname.startsWith("/api/analysis-runs/")
+    || relayPath;
   if (["GET", "POST"].includes(request.method) && proxied) {
     const protectedPath = url.pathname.startsWith("/api/workbench/") || url.pathname.startsWith("/api/analysis-runs");
     if (protectedPath && !API_TOKEN) return new Response(JSON.stringify({ error: "工作台服务端认证尚未配置" }), {
@@ -52,6 +54,12 @@ export async function handleRequest(request) {
     const idempotencyKey = request.headers.get("idempotency-key");
     if (contentType) headers.set("content-type", contentType);
     if (idempotencyKey) headers.set("idempotency-key", idempotencyKey);
+    if (relayPath) {
+      for (const name of ["x-evalos-relay-timestamp", "x-evalos-relay-nonce", "x-evalos-relay-signature"]) {
+        const value = request.headers.get(name);
+        if (value) headers.set(name, value);
+      }
+    }
     const upstream = await fetch(new URL(`${url.pathname}${url.search}`, API_ORIGIN), {
       method: request.method, headers, body: request.method === "POST" ? await request.arrayBuffer() : undefined,
     });

@@ -15,6 +15,7 @@ import secrets
 import ssl
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -86,10 +87,23 @@ class Worker:
         nonce = secrets.token_hex(16)
         body_hash = hashlib.sha256(raw_body).hexdigest()
         canonical = f"POST\n{pathname}\n{timestamp}\n{nonce}\n{body_hash}".encode("utf-8")
-        result = subprocess.run(
-            ["/usr/bin/openssl", "pkeyutl", "-sign", "-rawin", "-inkey", str(self.private_key)],
-            input=canonical, capture_output=True, check=False,
-        )
+        # OpenSSL implements Ed25519 as a one-shot operation.  Feeding the
+        # message through an anonymous pipe makes its size unknowable and
+        # fails on Ubuntu's OpenSSL 3 with
+        # ``unable to determine file size for oneshot operation``.  A private
+        # temporary file gives OpenSSL a bounded input without persisting
+        # request bodies or credentials in the relay installation.
+        with tempfile.NamedTemporaryFile(prefix="evalos-relay-sign-", mode="w+b") as canonical_file:
+            canonical_file.write(canonical)
+            canonical_file.flush()
+            result = subprocess.run(
+                [
+                    "/usr/bin/openssl", "pkeyutl", "-sign", "-rawin",
+                    "-inkey", str(self.private_key), "-in", canonical_file.name,
+                ],
+                capture_output=True,
+                check=False,
+            )
         if result.returncode != 0:
             raise RuntimeError("relay request signing failed")
         import base64
