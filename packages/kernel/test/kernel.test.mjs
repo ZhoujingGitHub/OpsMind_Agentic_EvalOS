@@ -405,6 +405,39 @@ test("完整冒烟产生父子Span、不可变结果、代码评分和无秘密�
   } finally { labels.close(); store.close(); }
 });
 
+test("Runner按冻结上限并发领卷且每个Trial仍独立完成", async () => {
+  const { store, labels, ledger, gradingService } = fixture();
+  let active = 0;
+  let maximumActive = 0;
+  const concurrentAdapter = (id, strategy) => {
+    const base = createTestDouble(id, strategy);
+    return {
+      ...base,
+      async execute(context) {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return await base.execute(context);
+        } finally {
+          active -= 1;
+        }
+      },
+    };
+  };
+  try {
+    const { experiment } = store.createExperiment(manifest, "concurrent-runner");
+    const runner = new TrialRunner({ store, ledger, gradingService, adapters: {
+      "test-double-a:ENGINEERING_TEST": concurrentAdapter("test-double-a", "context-first"),
+      "test-double-b:ENGINEERING_TEST": concurrentAdapter("test-double-b", "metric-first"),
+    } });
+    assert.equal(await runner.runUntilIdle({ experimentId: experiment.id, concurrency: 4 }), 12);
+    assert.ok(maximumActive >= 2, `expected real overlap, observed ${maximumActive}`);
+    assert.ok(store.listTrials(experiment.id).every((trial) => trial.status === "COMPLETED"));
+    assert.equal(ledger.verify().valid, true);
+  } finally { labels.close(); store.close(); }
+});
+
 test("确定性评分不要求固定工具顺序且工程敏捷不从单Trial伪造", () => {
   const caseSpec = CASES["PILOT-REG-001"];
   const outcome = { status: "resolved", root_cause: "UDM subscriber provisioning fault",

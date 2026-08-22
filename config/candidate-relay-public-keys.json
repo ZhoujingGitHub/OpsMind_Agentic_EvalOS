@@ -1,0 +1,13 @@
+{
+  "contract": "evalos-candidate-relay-keys.1",
+  "candidates": {
+    "agent-harness-v2": {
+      "tenant_id": "tenant-ctyun-ops-demo",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAB6LbPyIjJvq0lzjp7U6hwk0Clnm4E0OBtunUav4mkA8=\n-----END PUBLIC KEY-----\n"
+    },
+    "langgraph-v1": {
+      "tenant_id": "tenant-ctyun-ops-demo",
+      "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAM8Loi2EnMWmPEW3l3TTvOWwuj9wXw1GA3jBnIyTM2Ak=\n-----END PUBLIC KEY-----\n"
+    }
+  }
+}

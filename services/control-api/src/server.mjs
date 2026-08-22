@@ -1,6 +1,12 @@
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { createApp } from "./app.mjs";
+
+let candidateRelayConfig = { candidates: {} };
+try { candidateRelayConfig = JSON.parse(readFileSync(path.resolve("config/candidate-relay-public-keys.json"), "utf8")); }
+catch { /* A server without registered real products remains in engineering-test-only mode. */ }
 
 const port = Number(process.env.PORT ?? 8787);
 const host = process.env.HOST ?? "127.0.0.1";
@@ -17,6 +23,7 @@ const app = createApp({
   allowedOrigin: process.env.EVALOS_ALLOWED_ORIGIN || undefined,
   bootstrapM3Design: true,
   bootstrapEngineeringTestDesign: true,
+  candidateRelayConfig,
 });
 
 const server = createServer(async (request, response) => {

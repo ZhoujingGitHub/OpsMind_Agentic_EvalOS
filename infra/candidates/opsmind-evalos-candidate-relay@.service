@@ -1,0 +1,25 @@
+[Unit]
+Description=OpsMind EvalOS outbound candidate relay (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opsmind
+Group=opsmind
+EnvironmentFile=/etc/opsmind-candidate-relay/%i.env
+ExecStart=/usr/bin/python3 /srv/opsmind-eval-bridge/relay-worker.py
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/srv/opsmind-eval-bridge
+ReadOnlyPaths=/etc/opsmind-candidate-relay
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

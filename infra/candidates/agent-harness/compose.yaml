@@ -1,0 +1,68 @@
+name: opsmind-agent-harness-evaluation
+
+services:
+  api:
+    image: ${OPSMIND_AGENT_HARNESS_IMAGE:?set OPSMIND_AGENT_HARNESS_IMAGE}
+    container_name: opsmind-agent-harness-api
+    restart: unless-stopped
+    network_mode: host
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    environment:
+      OPSMIND_ENV: production
+      OPSMIND_AUTH_REQUIRED: "true"
+      OPSMIND_SERVICE_TENANT_ID: tenant-ctyun-ops-demo
+      OPSMIND_SERVICE_USER_ID: evalos-service
+      OPSMIND_SERVICE_ROLE: noc-operator
+      OPSMIND_APPROVAL_USER_ID: evalos-approval-oracle
+      ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
+      ANTHROPIC_MODEL: deepseek-v4-flash
+      OPSMIND_AGENT_MAX_TURNS: "32"
+      OPSMIND_AGENT_MAX_BUDGET_USD: "1.00"
+      OPSMIND_AGENT_TIMEOUT_SECONDS: "900"
+      OPSMIND_AGENT_IDLE_TIMEOUT_SECONDS: "180"
+      OPSMIND_AGENT_MAX_RETRIES: "1"
+      OPSMIND_MODEL_TOOL_EXECUTION_MODE: hybrid
+      OPSMIND_PROACTIVE_SCHEDULER_ENABLED: "false"
+      OPSMIND_MYSQL_ENABLED: "true"
+      OPSMIND_MYSQL_HOST: 127.0.0.1
+      OPSMIND_MYSQL_PORT: "3306"
+      OPSMIND_MYSQL_DATABASE: opsmind_v23
+      OPSMIND_MYSQL_USER: opsmind_app
+      OPSMIND_REDIS_ENABLED: "true"
+      OPSMIND_REDIS_HOST: 127.0.0.1
+      OPSMIND_REDIS_PORT: "6379"
+      OPSMIND_REDIS_DB: "3"
+      OPSMIND_ACTION_WORKER_ID: agent-harness-evaluation
+      OPSMIND_PROTOCOL_LAB_ENABLED: ${OPSMIND_PROTOCOL_LAB_ENABLED:-false}
+      OPSMIND_PROTOCOL_LAB_HOST: ${OPSMIND_PROTOCOL_LAB_HOST:-114.215.189.185}
+      OPSMIND_PROTOCOL_LAB_PORT: "22"
+      OPSMIND_PROTOCOL_LAB_COMMAND: /usr/local/sbin/opsmind-harness-labctl
+      OPSMIND_PROTOCOL_LAB_CONSUMER_ID: opsmind-harness
+      OPSMIND_PROTOCOL_LAB_SLOT_ID: agent-harness-slot-1
+      OPSMIND_PROTOCOL_LAB_CONTROL_USER: ${OPSMIND_PROTOCOL_LAB_CONTROL_USER:-opsmind_ah_control}
+      OPSMIND_PROTOCOL_LAB_OBSERVER_USER: ${OPSMIND_PROTOCOL_LAB_OBSERVER_USER:-opsmind_ah_observer}
+      OPSMIND_PROTOCOL_LAB_ACTION_USER: ${OPSMIND_PROTOCOL_LAB_ACTION_USER:-opsmind_ah_action}
+      OPSMIND_PROTOCOL_LAB_VERIFIER_USER: ${OPSMIND_PROTOCOL_LAB_VERIFIER_USER:-opsmind_ah_verifier}
+      OPSMIND_PROTOCOL_LAB_KNOWN_HOSTS: /run/secrets/protocol_lab_known_hosts
+      OPSMIND_PROTOCOL_LAB_CONTROL_KEY: /run/secrets/protocol_lab_control_key
+      OPSMIND_PROTOCOL_LAB_OBSERVER_KEY: /run/secrets/protocol_lab_observer_key
+      OPSMIND_PROTOCOL_LAB_ACTION_KEY: /run/secrets/protocol_lab_action_key
+      OPSMIND_PROTOCOL_LAB_VERIFIER_KEY: /run/secrets/protocol_lab_verifier_key
+    volumes:
+      - /srv/opsmind-agent-harness/data/workspaces:/app/test-workspaces
+      - /srv/opsmind-agent-harness/secrets/deepseek_api_key:/run/secrets/deepseek_api_key:ro
+      - /srv/opsmind-agent-harness/secrets/mysql_password:/run/secrets/mysql_password:ro
+      - /srv/opsmind-agent-harness/secrets/redis_password:/run/secrets/redis_password:ro
+      - /srv/opsmind-agent-harness/secrets/action_control_secret:/run/secrets/action_control_secret:ro
+      - /srv/opsmind-agent-harness/secrets/protocol_lab_binding_secret:/run/secrets/protocol_lab_binding_secret:ro
+      - /srv/opsmind-agent-harness/secrets/protocol_lab_known_hosts:/run/secrets/protocol_lab_known_hosts:ro
+      - /srv/opsmind-agent-harness/secrets/protocol_lab_control_key:/run/secrets/protocol_lab_control_key:ro
+      - /srv/opsmind-agent-harness/secrets/protocol_lab_observer_key:/run/secrets/protocol_lab_observer_key:ro
+      - /srv/opsmind-agent-harness/secrets/protocol_lab_action_key:/run/secrets/protocol_lab_action_key:ro
+      - /srv/opsmind-agent-harness/secrets/protocol_lab_verifier_key:/run/secrets/protocol_lab_verifier_key:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

@@ -29,7 +29,14 @@ function assertAttestation(attestation) {
   return attestation;
 }
 
-function assertSeparatedIdentities(token, approvalToken, adminToken) {
+function assertSeparatedIdentities(token, approvalToken, adminToken, requestTransport = null) {
+  if (requestTransport) {
+    const roles = requestTransport.credential_roles ?? [];
+    if (!["candidate_submitter", "approval_oracle", "mode_administrator"].every((role) => roles.includes(role))) {
+      throw new Error("candidate relay must expose three separate credential roles");
+    }
+    return;
+  }
   if (!approvalToken || !adminToken) throw new Error("candidate approval and admin bearer tokens are required through environment variables");
   if (new Set([token, approvalToken, adminToken]).size !== 3) {
     throw new Error("candidate submitter, Approval Oracle and mode administrator must use three separate identities");
@@ -53,7 +60,15 @@ function tenantScoped(principal, tenantId, kind) {
   return Array.isArray(principal?.tenant_ids) && principal.tenant_ids.includes(tenantId);
 }
 
-function client(origin, token, requestTimeoutMs, defaultHeaders = {}) {
+function client(origin, token, requestTimeoutMs, defaultHeaders = {}, requestTransport = null, credentialRole = "candidate_submitter") {
+  if (requestTransport) {
+    return {
+      origin: requestTransport.origin,
+      request: (pathname, { method = "GET", body } = {}) => requestTransport.request(credentialRole, pathname, {
+        method, body, headers: defaultHeaders, timeoutMs: requestTimeoutMs,
+      }),
+    };
+  }
   const root = baseUrl(origin);
   if (!token) throw new Error("real candidate product bearer token is required through an environment variable");
   const request = async (pathname, { method = "GET", body } = {}) => {
@@ -279,13 +294,14 @@ function discovery(attestation, architecture, capability, runtime, health = {}) 
   };
 }
 
-export function createAgentHarnessProductConnector({ origin, token, approvalToken, adminToken, tenantId, attestation, requestTimeoutMs = 30000 } = {}) {
+export function createAgentHarnessProductConnector({ origin, token, approvalToken, adminToken, tenantId, attestation,
+  requestTransport = null, requestTimeoutMs = 30000 } = {}) {
   if (!tenantId) throw new Error("Agent+Harness evaluation tenant id is required");
-  assertSeparatedIdentities(token, approvalToken, adminToken);
+  assertSeparatedIdentities(token, approvalToken, adminToken, requestTransport);
   const tenantHeaders = { "x-tenant-id": tenantId };
-  const api = client(origin, token, requestTimeoutMs, tenantHeaders);
-  const approvalApi = client(origin, approvalToken, requestTimeoutMs, tenantHeaders);
-  const adminApi = client(origin, adminToken, requestTimeoutMs, tenantHeaders);
+  const api = client(origin, token, requestTimeoutMs, tenantHeaders, requestTransport, "candidate_submitter");
+  const approvalApi = client(origin, approvalToken, requestTimeoutMs, tenantHeaders, requestTransport, "approval_oracle");
+  const adminApi = client(origin, adminToken, requestTimeoutMs, tenantHeaders, requestTransport, "mode_administrator");
   const frozen = assertAttestation(attestation);
   const expectedContexts = new Map();
   return Object.freeze({
@@ -398,13 +414,14 @@ export function createAgentHarnessProductConnector({ origin, token, approvalToke
   });
 }
 
-export function createLangGraphProductConnector({ origin, token, approvalToken, adminToken, tenantId, attestation, requestTimeoutMs = 30000 } = {}) {
+export function createLangGraphProductConnector({ origin, token, approvalToken, adminToken, tenantId, attestation,
+  requestTransport = null, requestTimeoutMs = 30000 } = {}) {
   if (!tenantId) throw new Error("LangGraph evaluation tenant id is required");
-  assertSeparatedIdentities(token, approvalToken, adminToken);
+  assertSeparatedIdentities(token, approvalToken, adminToken, requestTransport);
   const tenantHeaders = { "x-tenant-id": tenantId };
-  const api = client(origin, token, requestTimeoutMs, tenantHeaders);
-  const approvalApi = client(origin, approvalToken, requestTimeoutMs, tenantHeaders);
-  const adminApi = client(origin, adminToken, requestTimeoutMs, tenantHeaders);
+  const api = client(origin, token, requestTimeoutMs, tenantHeaders, requestTransport, "candidate_submitter");
+  const approvalApi = client(origin, approvalToken, requestTimeoutMs, tenantHeaders, requestTransport, "approval_oracle");
+  const adminApi = client(origin, adminToken, requestTimeoutMs, tenantHeaders, requestTransport, "mode_administrator");
   const frozen = assertAttestation(attestation);
   const expectedContexts = new Map();
   return Object.freeze({

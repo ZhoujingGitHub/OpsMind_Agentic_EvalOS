@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  CASES, M2_CASES, M3_CASES, DeterministicGradingService, EvalStore, EvaluationLedger, FrozenApprovalOracle, PrivateLabelStore, TrialRunner,
+  CASES, M2_CASES, M3_CASES, CandidateRelayBroker, DeterministicGradingService, EvalStore, EvaluationLedger, FrozenApprovalOracle, PrivateLabelStore, TrialRunner,
   auditableGraderRunView, blindExperimentView, blindGraderRunView, blindTraceView, blindTrialView,
   expertCalibrationFromConsensusSamples, createEvalRegistry, createCaseEnvironment, createTestDouble,
   evaluationEvidenceTraceView, explainTraceRecord, TRACE_FILTERS, readSnapshotFile, sha256,
@@ -15,6 +15,21 @@ import { ProtocolTwinEnvironment, SshTwinClient } from "../../../packages/twin-r
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const ANALYSIS_BUDGET = Object.freeze({ wallclock_ms: 300000, cost_usd: 2, max_turns: 32, max_tool_calls: 24 });
+
+const CANDIDATE_RELAY_PATHS = Object.freeze({
+  "agent-harness-v2": [
+    "^/v2/auth/me$", "^/v2/evaluation/controlled-remediation-contract$", "^/v2/investigation-runtime$",
+    "^/v2/remediation/context$", "^/v2/remediation/mode$", "^/v2/investigation-candidates$",
+    "^/v2/investigations/[A-Za-z0-9_-]+$", "^/v2/investigations/[A-Za-z0-9_-]+/execution-log(?:\\?.*)?$",
+    "^/v2/actions(?:\\?.*)?$", "^/v2/evaluation/actions/[A-Za-z0-9_-]+$", "^/v2/actions/[A-Za-z0-9_-]+/approval$",
+  ],
+  "langgraph-v1": [
+    "^/api/v1/me$", "^/health/ready$", "^/api/v1/automation/overview$", "^/api/v1/automation/mode$",
+    "^/api/v1/candidates$", "^/api/v1/investigations/[A-Za-z0-9_-]+$",
+    "^/api/v1/investigations/[A-Za-z0-9_-]+/journal(?:\\?.*)?$",
+    "^/api/v1/investigations/[A-Za-z0-9_-]+/product-e2e$", "^/api/v1/investigations/[A-Za-z0-9_-]+/approvals$",
+  ],
+});
 
 function json(response, status = 200, headers = {}) {
   return new Response(JSON.stringify(response), { status, headers: { "content-type": "application/json; charset=utf-8", ...headers } });
@@ -46,12 +61,14 @@ export function createApp({
   bootstrapEngineeringTestDesign = false,
   m3DesignManifest = null,
   formalM3RunEnabled = process.env.EVALOS_M3_FORMAL_RUN_ENABLED === "1",
+  candidateRelayConfig = null,
 } = {}) {
   const registry = createEvalRegistry({ m15Cases: CASES, m2Cases: M2_CASES, m3Cases: M3_CASES });
   const store = new EvalStore({ databasePath, runtimeRoot,
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_m15.sql"),
     migrationPaths: [path.join(ROOT, "infra", "migrations", "sqlite", "002_m25_workbench.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "003_m26_run_control.sql")] });
+      path.join(ROOT, "infra", "migrations", "sqlite", "003_m26_run_control.sql"),
+      path.join(ROOT, "infra", "migrations", "sqlite", "004_m31_candidate_relay.sql")] });
   const labels = new PrivateLabelStore({ databasePath: privateLabelDatabasePath,
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const privateLabelHash = labels.publishRegistry(registry);
@@ -63,6 +80,18 @@ export function createApp({
     executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@5.0.0" });
   const approvalOracle = new FrozenApprovalOracle({ labelStore: labels });
   const ledger = new EvaluationLedger(store);
+  const loadRelayConfig = () => {
+    if (candidateRelayConfig) return candidateRelayConfig;
+    const relayConfigPath = process.env.EVALOS_CANDIDATE_RELAY_CONFIG;
+    if (!relayConfigPath) return { candidates: {} };
+    try { return JSON.parse(readFileSync(relayConfigPath, "utf8")); }
+    catch { return { candidates: {} }; }
+  };
+  const relayConfig = loadRelayConfig();
+  const relayCandidates = Object.fromEntries(Object.entries(relayConfig.candidates ?? {}).map(([ref, item]) => [ref, {
+    ...item, allowed_paths: CANDIDATE_RELAY_PATHS[ref] ?? [],
+  }]));
+  const candidateRelay = new CandidateRelayBroker({ store, ledger, candidates: relayCandidates });
   const frozenM31Manifest = m3DesignManifest ?? JSON.parse(readFileSync(path.join(ROOT, "config", "m3-formal-agent-capability.manifest.json"), "utf8"));
   if (bootstrapM3Design) {
     const frozenManifest = frozenM31Manifest;
@@ -107,9 +136,13 @@ export function createApp({
   ];
   for (const config of connectorConfigs) {
     const frozen = frozenCandidate(config.ref);
-    if (!config.origin || !config.token || !config.approvalToken || !config.adminToken || !config.tenantId || !frozen) continue;
+    const relayTransport = candidateRelay.hasCandidate(config.ref) ? candidateRelay.transport(config.ref) : null;
+    const tenantId = config.tenantId ?? relayCandidates[config.ref]?.tenant_id;
+    const directConfigured = config.origin && config.token && config.approvalToken && config.adminToken;
+    if ((!directConfigured && !relayTransport) || !tenantId || !frozen) continue;
     const connector = config.create({ origin: config.origin, token: config.token,
-      approvalToken: config.approvalToken, adminToken: config.adminToken, tenantId: config.tenantId,
+      approvalToken: config.approvalToken, adminToken: config.adminToken, tenantId,
+      requestTransport: relayTransport,
       attestation: { source_revision: frozen.source_revision, artifact_digest: frozen.artifact_digest } });
     const adapter = createCandidateAdapterV3({ id: config.ref, connector });
     realCandidateConnectors[config.ref] = connector;
@@ -470,13 +503,25 @@ export function createApp({
     };
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
     const reviewerDecision = request.method === "POST" && /^\/api\/reviews\/[^/]+\/decisions$/.test(url.pathname);
-    if (request.method === "POST" && !reviewerDecision && !apiToken) {
+    const relayMutation = request.method === "POST" && /^\/api\/candidate-relay\/[^/]+\/(?:claim|requests\/[^/]+\/complete)$/.test(url.pathname);
+    if (request.method === "POST" && !reviewerDecision && !relayMutation && !apiToken) {
       return json({ error: "EVALOS_API_TOKEN must be configured before control-plane mutations" }, 503, cors);
     }
-    if (request.method === "POST" && !reviewerDecision && !isAdmin(request)) {
+    if (request.method === "POST" && !reviewerDecision && !relayMutation && !isAdmin(request)) {
       return json({ error: "authenticated control-plane token required" }, 401, cors);
     }
     try {
+      const relayClaimMatch = url.pathname.match(/^\/api\/candidate-relay\/([^/]+)\/claim$/);
+      const relayCompleteMatch = url.pathname.match(/^\/api\/candidate-relay\/([^/]+)\/requests\/([^/]+)\/complete$/);
+      if (request.method === "POST" && (relayClaimMatch || relayCompleteMatch)) {
+        const candidateRef = decodeURIComponent((relayClaimMatch ?? relayCompleteMatch)[1]);
+        const rawBody = await request.text();
+        candidateRelay.authenticate({ candidateRef, method: request.method, pathname: url.pathname,
+          headers: request.headers, rawBody });
+        const body = rawBody ? JSON.parse(rawBody) : {};
+        if (relayClaimMatch) return json({ request: candidateRelay.claim(candidateRef, body) }, 200, cors);
+        return json(candidateRelay.complete(candidateRef, decodeURIComponent(relayCompleteMatch[2]), body), 200, cors);
+      }
       if (request.method === "GET" && url.pathname === "/health") {
         return json({ status: "ok", service: "opsmind-evalos-control-api", contract: "evalos.6", milestone: "M3.1",
           ledger: ledger.verify(),
@@ -488,7 +533,7 @@ export function createApp({
           eval_intelligence_enabled: liveDeepSeekAvailable,
           candidate_execution: "external-real-products-only", adapters: Object.keys(adapters),
           real_candidate_adapters: Object.fromEntries(["agent-harness-v2", "langgraph-v1"].map((ref) =>
-            [ref, Boolean(realCandidateConnectors[ref])])),
+            [ref, { configured: Boolean(realCandidateConnectors[ref]), transport: candidateRelay.hasCandidate(ref) ? "outbound-signed-relay" : "direct-https" }])),
           case_investigator: { enabled: Boolean(investigator), ...CASE_INVESTIGATOR_RUNTIME },
           eval_intelligence: { enabled: Boolean(investigator), ...CASE_INVESTIGATOR_RUNTIME,
             role: "read-only-score-explanation-and-comparison", score_authority: false },
@@ -568,11 +613,21 @@ export function createApp({
         if (frozenDesign || (experiment.manifest.evaluation_mode === "FORMAL" && !formalM3RunEnabled)) {
           return json({ error: "M3 正式设计已冻结但尚未放行；必须先通过 Adapter 资格、4/8 并发容量和商用产品通道门禁" }, 423, cors);
         }
+        const concurrency = Number(url.searchParams.get("concurrency") ?? 1);
+        const maximumConcurrency = experiment.manifest.capacity_policy.runner_workers;
+        if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > maximumConcurrency) {
+          return json({ error: `runner concurrency must be between 1 and frozen maximum ${maximumConcurrency}` }, 400, cors);
+        }
+        const needsTwin = experiment.manifest.case_refs.some((caseRef) => store.getExecutionCase(caseRef)?.source?.level === "L2");
+        const twinSlots = needsTwin ? Math.max(1, Number(experiment.manifest.capacity_policy.twin_slots ?? 1)) : concurrency;
+        const effectiveConcurrency = Math.max(1, Math.min(concurrency, twinSlots));
         store.setExperimentStatus(id, "RUNNING");
-        const executed = await runner.runUntilIdle({ experimentId: id });
+        const executed = await runner.runUntilIdle({ experimentId: id, concurrency: effectiveConcurrency });
         const summary = store.experimentSummary(id);
         store.setExperimentStatus(id, summary.failed_trials ? "FAILED" : "COMPLETED");
-        return json({ executed, summary: store.experimentSummary(id) }, 200, cors);
+        return json({ executed, requested_concurrency: concurrency, effective_concurrency: effectiveConcurrency,
+          capacity_limited_by: effectiveConcurrency < concurrency ? (needsTwin ? "frozen_twin_slots" : "frozen_capacity_policy") : null,
+          summary: store.experimentSummary(id) }, 200, cors);
       }
       const traceMatch = url.pathname.match(/^\/api\/trials\/([^/]+)\/trace$/);
       if (request.method === "GET" && traceMatch) {
@@ -993,7 +1048,7 @@ export function createApp({
       }
       return json({ error: "not found" }, 404, cors);
     } catch (error) {
-      const clientError = /required|not frozen|requires experiment manifest|exactly two|positive integer|credential|assignment|calibration labels|evaluation run|repetitions|outside the source|formal evaluation|idempotency|Manifest 3\.0|旧版合同|参评考生|重新评测|新建评测|评测必须|评测对象/.test(error.message);
+      const clientError = /required|not frozen|requires experiment manifest|exactly two|positive integer|credential|assignment|calibration labels|evaluation run|repetitions|outside the source|formal evaluation|idempotency|candidate relay|Manifest 3\.0|旧版合同|参评考生|重新评测|新建评测|评测必须|评测对象/.test(error.message);
       return json({ error: error.message }, clientError ? 400 : 500, cors);
     }
   };

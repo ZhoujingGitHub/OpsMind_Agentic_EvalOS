@@ -34,18 +34,26 @@ export class TrialRunner {
     return recovered;
   }
 
-  async runUntilIdle({ experimentId = null } = {}) {
-    let count = 0;
-    while (true) {
-      const trial = this.store.claimNext(this.workerId, this.leaseMs, experimentId);
-      if (!trial) break;
-      await this.runTrial(trial);
-      count += 1;
+  async runUntilIdle({ experimentId = null, concurrency = 1 } = {}) {
+    if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 64) {
+      throw new Error("runner concurrency must be an integer between 1 and 64");
     }
-    return count;
+    const workerLoop = async (index) => {
+      const workerId = concurrency === 1 ? this.workerId : `${this.workerId}-c${index + 1}`;
+      let count = 0;
+      while (true) {
+        const trial = this.store.claimNext(workerId, this.leaseMs, experimentId);
+        if (!trial) break;
+        await this.runTrial(trial, { workerId });
+        count += 1;
+      }
+      return count;
+    };
+    return (await Promise.all(Array.from({ length: concurrency }, (_, index) => workerLoop(index))))
+      .reduce((total, count) => total + count, 0);
   }
 
-  async runTrial(trial) {
+  async runTrial(trial, { workerId = this.workerId } = {}) {
     const caseSpec = this.store.getExecutionCase(trial.case_ref);
     const experiment = this.store.getExperiment(trial.experiment_id);
     const adapter = this.adapters[`${trial.contestant_ref}:${experiment.manifest.evaluation_lane}`] ?? this.adapters[trial.contestant_ref];
@@ -139,7 +147,7 @@ export class TrialRunner {
           this.store.endSpan(trial.id, toolSpan, `tool.${toolName}`, "TOOL", "environment", result.ok ? "OK" : "ERROR", {
             result, source_system: sourceSystem,
           });
-          this.store.heartbeat(trial.id, this.workerId, this.leaseMs);
+          this.store.heartbeat(trial.id, workerId, this.leaseMs);
           return result;
         } catch (error) {
           this.store.endSpan(trial.id, toolSpan, `tool.${toolName}`, "TOOL", "environment", "ERROR", { error: error.message });

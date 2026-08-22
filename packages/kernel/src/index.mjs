@@ -16,4 +16,5 @@ export * from "./source-snapshot.mjs";
 export * from "./event-semantics.mjs";
 export * from "./evaluation-contract.mjs";
 export * from "./approval-oracle.mjs";
+export * from "./candidate-relay.mjs";
 export * from "./utils.mjs";

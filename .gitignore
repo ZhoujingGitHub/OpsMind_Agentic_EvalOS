@@ -14,6 +14,7 @@ artifacts/m15/
 artifacts/m15-real/
 coverage/
 _work/
+.work/
 _research/
 /AI_Agent评测体系前沿方法与平台能力解读报告_20260819.docx
 *.log
