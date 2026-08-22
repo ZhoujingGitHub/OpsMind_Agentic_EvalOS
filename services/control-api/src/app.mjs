@@ -11,7 +11,8 @@ import {
   BLIND_JUDGE_VERSION, CASE_INVESTIGATOR_RUNTIME, createAgentHarnessProductConnector, createCandidateAdapterV3,
   createCaseInvestigator, createLangGraphProductConnector, judgeRecordAndSummarize,
 } from "../../../packages/agent-runtime/src/index.mjs";
-import { ProtocolTwinEnvironment, SshTwinClient } from "../../../packages/twin-runtime/src/index.mjs";
+import { ExternalProductTwinEnvironment, ProtocolTwinEnvironment, SshTwinClient,
+  SshTwinManagerClient } from "../../../packages/twin-runtime/src/index.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const ANALYSIS_BUDGET = Object.freeze({ wallclock_ms: 300000, cost_usd: 2, max_turns: 32, max_tool_calls: 24 });
@@ -152,10 +153,14 @@ export function createApp({
   const adapterFor = (ref, lane) => adapters[`${ref}:${lane}`] ?? adapters[ref];
   const twinConfigured = Boolean(process.env.EVALOS_TWIN_HOST && process.env.EVALOS_TWIN_SSH_KEY && process.env.EVALOS_TWIN_KNOWN_HOSTS);
   const twinClient = twinConfigured ? new SshTwinClient() : null;
+  const twinManagerClient = twinConfigured ? new SshTwinManagerClient() : null;
   const runner = new TrialRunner({ store, ledger, adapters, gradingService, approvalOracle,
-    environmentFactory: ({ caseSpec, trial }) => caseSpec.source?.level === "L2"
-      ? new ProtocolTwinEnvironment({ client: twinClient, caseSpec, trial })
-      : createCaseEnvironment(caseSpec) });
+    environmentFactory: ({ caseSpec, trial }) => {
+      if (caseSpec.source?.level !== "L2") return createCaseEnvironment(caseSpec);
+      return realCandidateConnectors[trial.contestant_ref]
+        ? new ExternalProductTwinEnvironment({ client: twinManagerClient, caseSpec, trial })
+        : new ProtocolTwinEnvironment({ client: twinClient, caseSpec, trial });
+    } });
   store.recoverInterruptedAnalyses();
   const investigator = caseInvestigator ?? (liveDeepSeekAvailable ? createCaseInvestigator({ store }) : null);
 

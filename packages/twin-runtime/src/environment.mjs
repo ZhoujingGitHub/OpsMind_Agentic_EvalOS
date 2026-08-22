@@ -1,4 +1,4 @@
-import { validateTwinResponse } from "./contracts.mjs";
+import { managedTwinTrialId, validateTwinManagerResponse, validateTwinResponse } from "./contracts.mjs";
 
 function allowedEvidence(definition) {
   return new Set(definition?.result?.evidence_refs ?? []);
@@ -105,6 +105,103 @@ export class ProtocolTwinEnvironment {
     return { ok: true, baseline_ref: response.baseline_ref ?? this.caseSpec.environment.baseline_ref,
       clean: response.clean === true, reset_hash: response.reset_hash ?? null };
   }
+}
+
+export class ExternalProductTwinEnvironment {
+  constructor({ client, caseSpec, trial }) {
+    if (!client?.invoke) throw new Error("Twin manager client with invoke() is required");
+    if (caseSpec?.source?.level !== "L2" || !caseSpec?.environment?.scenario_id) throw new Error("L2 Twin environment contract is required");
+    this.client = client;
+    this.caseSpec = caseSpec;
+    this.trial = trial;
+    this.managedTrialId = managedTwinTrialId(trial.contestant_ref, trial.id);
+    this.prepared = false;
+    this.resetDone = false;
+    this.fingerprint = null;
+    this.lastSnapshot = null;
+    this.captureCount = 0;
+  }
+
+  async prepare() {
+    if (this.prepared) throw new Error("External candidate Twin Trial is already prepared");
+    const response = validateTwinManagerResponse(await this.client.invoke({
+      operation: "prepare",
+      contestant_ref: this.trial.contestant_ref,
+      trial_id: this.managedTrialId,
+      scenario_id: this.caseSpec.environment.scenario_id,
+      seed: Number(this.trial.environment_seed),
+    }), "prepare");
+    if (!response.ok) throw new Error(`Candidate Twin prepare failed: ${managerError(response)}`);
+    if (response.slot_lease_present !== true) throw new Error("Candidate Twin prepare did not issue a private slot lease");
+    this.prepared = true;
+    this.fingerprint = response.fingerprint ?? null;
+    return {
+      ok: true,
+      contestant_ref: this.trial.contestant_ref,
+      managed_trial_id: this.managedTrialId,
+      scenario_id: this.caseSpec.environment.scenario_id,
+      fingerprint: this.fingerprint,
+      isolation: response.isolation ?? "external-product-exclusive-trial",
+      slot_lease_present: true,
+    };
+  }
+
+  async call(toolName) {
+    return { ok: false, tool: toolName, error: { code: "EXTERNAL_PRODUCT_TOOL_BOUNDARY",
+      message: "The real candidate product must invoke its own MCP tools; EvalOS will not impersonate the candidate." } };
+  }
+
+  async capture(reason = "adapter_observation") {
+    if (!this.prepared || this.resetDone) return { captured: false, reason: "environment_not_active" };
+    const response = validateTwinManagerResponse(await this.client.invoke({
+      operation: "snapshot",
+      contestant_ref: this.trial.contestant_ref,
+      trial_id: this.managedTrialId,
+    }), "snapshot");
+    if (!response.ok) throw new Error(`Candidate Twin snapshot failed: ${managerError(response)}`);
+    if (response.snapshot && typeof response.snapshot === "object") {
+      this.captureCount += 1;
+      this.lastSnapshot = structuredClone(response.snapshot);
+      return { captured: true, reason, capture_number: this.captureCount, snapshot_hash: response.snapshot_hash ?? null };
+    }
+    return { captured: false, reason: response.already_reset ? "candidate_already_reset" : "snapshot_unavailable" };
+  }
+
+  async snapshot() {
+    let finalCapture = null;
+    try { finalCapture = await this.capture("adapter_completed"); }
+    catch (error) { finalCapture = { captured: false, reason: "capture_failed", error: error.message }; }
+    return {
+      source: this.caseSpec.source,
+      scenario_id: this.caseSpec.environment.scenario_id,
+      contestant_ref: this.trial.contestant_ref,
+      managed_trial_id: this.managedTrialId,
+      fingerprint: this.fingerprint,
+      capture_count: this.captureCount,
+      final_capture: finalCapture,
+      remote: this.lastSnapshot ?? {},
+    };
+  }
+
+  async reset() {
+    if (this.resetDone) return { ok: true, clean: true, idempotent: true };
+    if (!this.prepared) { this.resetDone = true; return { ok: true, clean: true, skipped: true }; }
+    const response = validateTwinManagerResponse(await this.client.invoke({
+      operation: "reset",
+      contestant_ref: this.trial.contestant_ref,
+      trial_id: this.managedTrialId,
+    }), "reset");
+    if (!response.ok || response.clean !== true) return response;
+    this.resetDone = true;
+    return { ok: true, clean: true, idempotent: response.idempotent === true,
+      baseline_ref: response.baseline_ref ?? this.caseSpec.environment.baseline_ref,
+      reset_hash: response.reset_hash ?? null };
+  }
+}
+
+function managerError(response) {
+  return typeof response?.error === "string" ? response.error
+    : response?.error?.message ?? response?.error?.code ?? "unknown";
 }
 
 export function createProtocolTwinEnvironmentFactory({ client }) {

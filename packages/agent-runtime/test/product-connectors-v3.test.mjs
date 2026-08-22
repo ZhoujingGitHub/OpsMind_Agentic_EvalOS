@@ -71,6 +71,10 @@ test("Agent+Harness连接器只通过真实产品API提交任务并保留原始�
   assert.equal(observation.evaluation_binding.binding_strength, "PUBLIC_TASK_CONTEXT");
   assert.equal(observation.raw_events[0].source_system, "agent-harness-product");
   assert.deepEqual(observation.normalized_events[0].raw_source_refs, [observation.raw_events[0].source_ref]);
+  const intake = fixture.requests.find((item) => item.method === "POST" && item.url === "/v2/investigation-candidates");
+  assert.deepEqual(intake.body.time_window, {
+    start_at: "2026-08-22T00:00:00Z", end_at: "2026-08-22T00:10:00Z", timezone: "Asia/Shanghai",
+  });
   assert.ok(fixture.requests.every((item) => item.tenantId === "tenant-eval-harness"));
   assert.ok(fixture.requests.some((item) => item.authorization === "Bearer admin-token"));
   assert.equal(fixture.requests.some((item) => /tool|mcp/i.test(item.url)), false);
@@ -103,7 +107,7 @@ test("LangGraph连接器只调用产品公开接口，不在EvalOS内重建Graph
   assert.equal(readiness.safe_parallelism, 1);
   assert.equal(readiness.least_privilege, true);
   const executionContract = { execution_mode: "controlled_simulation", trial: { id: "run" }, case: { goal: "调查用户注册失败",
-    visible: { operating_mode: "controlled_auto", time_window: "frozen-window" } } };
+    visible: { operating_mode: "controlled_auto", time_window: "trial-relative" } } };
   const prepared = await connector.prepare({ executionContract });
   assert.equal(prepared.operating_mode, "controlled_auto");
   const started = await connector.start({ executionContract });
@@ -114,9 +118,28 @@ test("LangGraph连接器只调用产品公开接口，不在EvalOS内重建Graph
   assert.equal(observation.evaluation_binding.complete, true);
   assert.equal(observation.evaluation_binding.binding_strength, "PUBLIC_TASK_CONTEXT");
   assert.deepEqual(observation.artifact_refs, ["archive:g1"]);
+  const intake = fixture.requests.find((item) => item.method === "POST" && item.url === "/api/v1/candidates");
+  assert.equal(intake.body.trigger_type, "user");
+  assert.equal(Object.hasOwn(intake.body, "source_ref"), false);
+  assert.deepEqual(intake.body.time_window, { timezone: "Asia/Shanghai" });
   assert.ok(fixture.requests.every((item) => item.tenantId === "tenant-eval-graph"));
   assert.ok(fixture.requests.some((item) => item.authorization === "Bearer admin-token"));
   assert.equal(fixture.requests.some((item) => /invoke|tool|mcp/i.test(item.url)), false);
+});
+
+test("Agent+Harness连接器不会把Twin相对时间窗冒充成非法日期", async (t) => {
+  const fixture = await fixtureServer({
+    "POST /v2/investigation-candidates": async () => ({ investigation_id: "relative-window-run" }),
+  });
+  t.after(fixture.close);
+  const connector = createAgentHarnessProductConnector({ origin: fixture.origin, token: "fixture-token",
+    approvalToken: "approval-token", adminToken: "admin-token", tenantId: "tenant-eval-harness", attestation: ATTESTATION });
+  const executionContract = { execution_mode: "controlled_simulation", trial: { id: "relative-window" },
+    case: { goal: "调查Twin当前现场", visible: { operating_mode: "diagnosis_only", time_window: "trial-relative" } } };
+  await connector.start({ executionContract });
+  const intake = fixture.requests.find((item) => item.method === "POST");
+  assert.deepEqual(intake.body.time_window, { timezone: "Asia/Shanghai" });
+  assert.equal(JSON.stringify(intake.body).includes("trial-relative"), false);
 });
 
 test("真实产品连接器拒绝公网明文HTTP和缺失凭据", () => {

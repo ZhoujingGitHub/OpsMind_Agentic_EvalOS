@@ -11,6 +11,7 @@ const adapter = read("packages/agent-runtime/src/candidate-adapter-v3.mjs");
 const connectors = read("packages/agent-runtime/src/product-connectors-v3.mjs");
 const runner = read("packages/kernel/src/runner.mjs");
 const grader = read("packages/kernel/src/grader.mjs");
+const twinEnvironment = read("packages/twin-runtime/src/environment.mjs");
 const packageFiles = ["package.json", "packages/agent-runtime/package.json", "apps/console/package.json"]
   .map(read).join("\n");
 
@@ -34,6 +35,9 @@ assert.match(app, /test-double-a:ENGINEERING_TEST/);
 assert.match(runner, /buildEvaluationContract/);
 assert.match(grader, /grader_contract_version:\s*"5\.0"/);
 assert.match(grader, /DETERMINISTIC_CODE_GRADER/);
+assert.match(twinEnvironment, /ExternalProductTwinEnvironment/);
+assert.match(twinEnvironment, /real candidate product must invoke its own MCP tools/i);
+assert.match(runner, /environment\.independent_capture/);
 assert.doesNotMatch(packageFiles, /"(?:langgraph|@langchain\/langgraph|langchain)"\s*:/i);
 const executableManifests = readdirSync(path.join(root, "config")).filter((name) => name.endsWith(".manifest.json"));
 for (const name of executableManifests) {

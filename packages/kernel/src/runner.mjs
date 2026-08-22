@@ -162,7 +162,14 @@ export class TrialRunner {
           decision: decision.decision, reason_code: decision.reason_code, policy_digest: decision.policy_digest }, agentSpan, "EVALUATOR");
         return decision;
       };
+      const captureEnvironment = async (reason = "candidate_progress") => {
+        if (typeof environment.capture !== "function") return { captured: false, reason: "capture_not_supported" };
+        const capture = await environment.capture(reason);
+        event("environment.independent_capture", "twin-manager", capture ?? { captured: false, reason });
+        return capture;
+      };
       const rawOutcome = await adapter.execute({ caseSpec, trial, experiment, executionContract, toolExecutor, emit, requestApproval,
+        captureEnvironment,
         harnessPolicy: experiment.manifest.policy, maxTurns: Math.max(1, trial.budget.tool_calls - 1) });
       const outcome = redact(rawOutcome).value;
       this.store.endSpan(trial.id, agentSpan, "agent.invoke", "AGENT", "contestant", "OK", { outcome });

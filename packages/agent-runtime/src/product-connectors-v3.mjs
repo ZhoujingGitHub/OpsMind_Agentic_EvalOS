@@ -259,8 +259,15 @@ function finalOutcome({ status, conclusion, uncertainty, evidence = [] }) {
 }
 
 function timeWindow(value) {
-  const [start_at, end_at] = String(value ?? "").split("/");
-  return { ...(start_at ? { start_at } : {}), ...(end_at ? { end_at } : {}), timezone: "Asia/Shanghai" };
+  const raw = String(value ?? "").trim();
+  const [start_at, end_at, ...extra] = raw.split("/");
+  const validRange = extra.length === 0 && start_at && end_at &&
+    Number.isFinite(Date.parse(start_at)) && Number.isFinite(Date.parse(end_at)) &&
+    Date.parse(start_at) < Date.parse(end_at);
+  // L2 Twin Case 使用 trial-relative 这类符号时间窗。严格产品 API 只接受真实日期；
+  // 这里不伪造当前时间，以免同一 Seed 重放时得到不同合同。Twin 的相对时间边界仍由
+  // EvalOS execution contract 和隔离环境强制，产品入口只收到一个无绝对边界的时间窗。
+  return validRange ? { start_at, end_at, timezone: "Asia/Shanghai" } : { timezone: "Asia/Shanghai" };
 }
 
 function frozenEvaluationContext(executionContract) {
@@ -481,11 +488,13 @@ export function createLangGraphProductConnector({ origin, token, approvalToken, 
       const evaluationContext = frozenEvaluationContext(executionContract);
       const scope = executionContract.case.visible.scope ?? {};
       const result = await api.request("/api/v1/candidates", { method: "POST", body: {
-        goal: candidateGoal(executionContract), trigger_type: "eval_replay",
-        source_ref: `evalos:${executionContract.trial.id}:${evaluationContext.context_digest.slice(-16)}`,
+        // EvalOS 提交的是一项新的、冻结的调查任务，不是考生租户数据库里已经存在的告警回放。
+        // 因此必须走产品公开的人工调查入口；client_request_id 负责幂等，评测绑定由下方
+        // expectedContexts 独立校验，不能伪造一条不存在的 source record。
+        goal: candidateGoal(executionContract), trigger_type: "user",
         title: `EvalOS ${executionContract.trial.case_ref}`,
         resource_ids: scope.resource_ids ?? scope.entity_ids ?? [], service_ids: scope.service_ids ?? (scope.service_id ? [scope.service_id] : []),
-        time_window: { value: executionContract.case.visible.time_window }, client_request_id: executionContract.trial.id,
+        time_window: timeWindow(executionContract.case.visible.time_window), client_request_id: executionContract.trial.id,
       } });
       const runRef = result.investigation?.investigation_id;
       if (!runRef) throw new Error("LangGraph product did not create a real investigation");

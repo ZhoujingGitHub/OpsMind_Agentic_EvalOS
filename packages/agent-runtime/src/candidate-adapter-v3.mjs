@@ -94,7 +94,7 @@ export function createCandidateAdapterV3({ id, connector, pollIntervalMs = 500, 
         production_writes_available: discovery.production_writes_available,
       };
     },
-    async execute({ trial, executionContract, emit, requestApproval }) {
+    async execute({ trial, executionContract, emit, requestApproval, captureEnvironment }) {
       if (executionContract.run_class !== "REAL_CANDIDATE" || executionContract.contestant.kind !== "REAL_PRODUCT") {
         throw new Error("Candidate Adapter 3.0 refuses test doubles and non-real runs");
       }
@@ -140,6 +140,13 @@ export function createCandidateAdapterV3({ id, connector, pollIntervalMs = 500, 
             await emit(normalized.event_type, normalized.actor ?? "external-candidate", {
               ...(normalized.payload ?? {}), status: normalized.status, raw_source_refs: normalized.raw_source_refs,
             });
+          }
+          const captureMilestones = observation.normalized_events
+            .map((item) => item?.event_type)
+            .filter((eventType) => ["evidence.collected", "conclusion.recorded", "action.executed",
+              "verification.completed", "rollback.verified"].includes(eventType));
+          if (captureMilestones.length && typeof captureEnvironment === "function") {
+            await captureEnvironment(captureMilestones.at(-1));
           }
           for (const approvalRequest of observation.approval_requests ?? []) {
             if (handledApprovalRefs.has(approvalRequest.request_ref)) continue;

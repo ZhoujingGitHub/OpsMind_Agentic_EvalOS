@@ -70,17 +70,19 @@ test("Candidate Adapter 3.0只做外部提交、事件翻译和证据保全，�
   };
   const adapter = createCandidateAdapterV3({ id: "agent-harness-v2", connector, pollIntervalMs: 1, timeoutMs: 1000 });
   const emitted = [];
+  const captures = [];
   const outcome = await adapter.execute({ trial: { id: "trial-real-1" }, executionContract: {
     run_class: "REAL_CANDIDATE", evaluation_lane: "CONTROLLED_CLOSURE", trial: { id: "trial-real-1" },
     contestant: { ref: "agent-harness-v2", kind: "REAL_PRODUCT", architecture: "CLAUDE_AGENT_SDK_HARNESS", ...fingerprints },
     budget: { wallclock_ms: 1000 },
-  }, emit: async (...args) => emitted.push(args) });
+  }, emit: async (...args) => emitted.push(args), captureEnvironment: async (reason) => captures.push(reason) });
   assert.equal(observed, true);
   assert.equal(outcome.status, "resolved");
   assert.equal(outcome.candidate_run_ref, "external:trial-real-1");
   assert.equal(outcome.evaluation_binding.complete, true);
   assert.ok(emitted.some(([name]) => name === "candidate.raw_event"));
   assert.ok(emitted.some(([name]) => name === "conclusion.recorded"));
+  assert.deepEqual(captures, ["conclusion.recorded"]);
   assert.deepEqual(CANDIDATE_ADAPTER_V3_RUNTIME.forbidden,
     ["invoke-candidate-internal-tools", "synthesize-missing-evidence", "change-official-score"]);
 });

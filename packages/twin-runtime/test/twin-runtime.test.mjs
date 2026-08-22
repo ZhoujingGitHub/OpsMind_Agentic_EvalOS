@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { M2_CASES, M3_CASES, M3_FORMAL_PARTITIONS } from "../../kernel/src/index.mjs";
-import { InMemoryTwinClient, ProtocolTwinEnvironment, validateTwinRequest } from "../src/index.mjs";
+import { ExternalProductTwinEnvironment, InMemoryTwinClient, ProtocolTwinEnvironment, managedTwinTrialId,
+  validateTwinManagerRequest, validateTwinManagerResponse, validateTwinRequest } from "../src/index.mjs";
 
 function trial(id = "trial-m2-001") {
   return { id, environment_seed: 20260814 };
@@ -80,6 +81,46 @@ test("不同 Trial 不能共享活跃 Twin 状态", async () => {
   await first.reset();
   assert.equal((await second.prepare()).ok, true);
   await second.reset();
+});
+
+test("外部真实考生由 EvalOS 考务控制器准备独立前缀 Trial，考生仍调用自己的 MCP", async () => {
+  const calls = [];
+  let active = null;
+  const manager = { invoke: async (request) => {
+    calls.push(structuredClone(request));
+    if (request.operation === "prepare") {
+      active = request.trial_id;
+      return { ok: true, operation: "prepare", fingerprint: "candidate-twin-fingerprint",
+        isolation: "exclusive_trial", slot_lease_present: true };
+    }
+    if (request.operation === "snapshot") return { ok: true, operation: "snapshot", snapshot: {
+      trial_id: active, changes: [{ action_type: "subscriber_profile", parameters: { source: "reference_profile" } }],
+      recovery: { task_success: true },
+    } };
+    if (request.operation === "reset") { active = null; return { ok: true, operation: "reset", clean: true }; }
+    throw new Error("unexpected manager operation");
+  } };
+  const caseSpec = M3_CASES["M3-PUB-003"];
+  const externalTrial = { id: "trial_external_1", contestant_ref: "agent-harness-v2", environment_seed: 2026081601 };
+  const environment = new ExternalProductTwinEnvironment({ client: manager, caseSpec, trial: externalTrial });
+  const prepared = await environment.prepare();
+  assert.equal(prepared.managed_trial_id, "ah-trial_external_1");
+  assert.equal(prepared.slot_lease_present, true);
+  assert.equal((await environment.call("query_core_logs")).error.code, "EXTERNAL_PRODUCT_TOOL_BOUNDARY");
+  assert.equal((await environment.capture("verification.completed")).captured, true);
+  assert.equal((await environment.snapshot()).remote.recovery.task_success, true);
+  assert.equal((await environment.reset()).clean, true);
+  assert.deepEqual(calls.map((item) => item.operation), ["prepare", "snapshot", "snapshot", "reset"]);
+});
+
+test("考务合同拒绝串用考生命名空间且绝不返回私有租约", () => {
+  assert.equal(managedTwinTrialId("langgraph-v1", "trial_1"), "lg-trial_1");
+  assert.throws(() => validateTwinManagerRequest({ operation: "prepare", contestant_ref: "langgraph-v1",
+    trial_id: "ah-trial_1", scenario_id: "amf-service-down", seed: 1 }), /must start with lg-/);
+  assert.throws(() => validateTwinManagerRequest({ operation: "prepare", contestant_ref: "unknown",
+    trial_id: "xx-trial_1", scenario_id: "amf-service-down", seed: 1 }), /Unsupported managed contestant/);
+  assert.throws(() => validateTwinManagerResponse({ ok: true, operation: "prepare", slot_lease_id: "secret" }, "prepare"),
+    /leaked a private lease/);
 });
 
 test("M3 冻结 80 个真实观测条件 Case，四个分区各 20 且互不重叠", () => {

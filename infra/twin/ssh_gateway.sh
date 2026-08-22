@@ -1,9 +1,17 @@
 #!/usr/bin/env sh
 set -eu
 
-prefix='sudo /usr/local/sbin/opsmind-twinctl request '
+base_prefix='sudo /usr/local/sbin/opsmind-twinctl request '
+manager_prefix='sudo /usr/local/sbin/opsmind-eval-manager request '
 case "${SSH_ORIGINAL_COMMAND-}" in
-  "$prefix"*) payload=${SSH_ORIGINAL_COMMAND#"$prefix"} ;;
+  "$base_prefix"*)
+    payload=${SSH_ORIGINAL_COMMAND#"$base_prefix"}
+    target=/usr/local/sbin/opsmind-twinctl
+    ;;
+  "$manager_prefix"*)
+    payload=${SSH_ORIGINAL_COMMAND#"$manager_prefix"}
+    target=/usr/local/sbin/opsmind-eval-manager
+    ;;
   *) printf '%s\n' '{"ok":false,"error":"command denied by Twin SSH gateway"}'; exit 126 ;;
 esac
 
@@ -16,4 +24,4 @@ if [ "${#payload}" -gt 32768 ]; then
   exit 126
 fi
 
-exec sudo /usr/local/sbin/opsmind-twinctl request "$payload"
+exec sudo "$target" request "$payload"

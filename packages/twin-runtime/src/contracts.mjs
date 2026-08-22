@@ -12,6 +12,11 @@ const ACTION_CONTRACTS = Object.freeze({
   capture_policy: { policy: ["bounded-retention"], desired_state: ["enabled"] },
 });
 const OPERATIONS = new Set(["health", "prepare", "observe", "act", "snapshot", "reset"]);
+const MANAGER_OPERATIONS = new Set(["status", "prepare", "snapshot", "reset"]);
+const MANAGED_CONTESTANTS = Object.freeze({
+  "agent-harness-v2": "ah-",
+  "langgraph-v1": "lg-",
+});
 
 export function validateTwinRequest(request) {
   if (!request || typeof request !== "object" || Array.isArray(request)) throw new Error("Twin request must be an object");
@@ -42,6 +47,44 @@ export function validateTwinResponse(response, operation) {
   return response;
 }
 
+export function validateTwinManagerRequest(request) {
+  if (!request || typeof request !== "object" || Array.isArray(request)) throw new Error("Twin manager request must be an object");
+  if (!MANAGER_OPERATIONS.has(request.operation)) throw new Error(`Unsupported Twin manager operation: ${request.operation}`);
+  const prefix = MANAGED_CONTESTANTS[request.contestant_ref];
+  if (!prefix) throw new Error(`Unsupported managed contestant: ${request.contestant_ref}`);
+  if (request.operation !== "status") {
+    if (!ID.test(String(request.trial_id ?? "")) || !String(request.trial_id).startsWith(prefix)) {
+      throw new Error(`Managed Twin trial_id must start with ${prefix}`);
+    }
+  }
+  if (request.operation === "prepare" && !ID.test(String(request.scenario_id ?? ""))) {
+    throw new Error("Invalid managed Twin scenario_id");
+  }
+  if (request.seed !== undefined && !Number.isSafeInteger(Number(request.seed))) {
+    throw new Error("Managed Twin seed must be an integer");
+  }
+  return structuredClone(request);
+}
+
+export function validateTwinManagerResponse(response, operation) {
+  if (!response || typeof response !== "object" || Array.isArray(response)) throw new Error("Twin manager response must be an object");
+  if (typeof response.ok !== "boolean") throw new Error("Twin manager response must contain boolean ok");
+  if (response.operation && response.operation !== operation) throw new Error("Twin manager response operation mismatch");
+  if ("slot_lease_id" in response || "binding_hmac" in response) throw new Error("Twin manager response leaked a private lease or binding secret");
+  return response;
+}
+
+export function managedTwinTrialId(contestantRef, evalosTrialId) {
+  const prefix = MANAGED_CONTESTANTS[contestantRef];
+  if (!prefix) throw new Error(`Unsupported managed contestant: ${contestantRef}`);
+  const suffix = String(evalosTrialId ?? "").replace(/[^A-Za-z0-9._:-]/g, "-");
+  const value = `${prefix}${suffix}`.slice(0, 128);
+  if (!ID.test(value)) throw new Error("Unable to derive a valid managed Twin trial_id");
+  return value;
+}
+
 export const TWIN_CAPABILITIES = Object.freeze([...CAPABILITIES]);
 export const TWIN_ACTION_TYPES = Object.freeze(Object.keys(ACTION_CONTRACTS));
 export const TWIN_OPERATIONS = Object.freeze([...OPERATIONS]);
+export const TWIN_MANAGER_OPERATIONS = Object.freeze([...MANAGER_OPERATIONS]);
+export const TWIN_MANAGED_CONTESTANTS = MANAGED_CONTESTANTS;

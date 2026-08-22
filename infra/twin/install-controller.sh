@@ -9,6 +9,7 @@ install -d -m 0755 -o root -g root /usr/local/libexec
 install -d -m 0750 -o root -g root "${DATA_ROOT}/config/baseline" "${DATA_ROOT}/config/active"
 install -d -m 0750 -o root -g root "${DATA_ROOT}/trials" "${DATA_ROOT}/pcap" "${DATA_ROOT}/artifacts"
 install -m 0750 -o root -g root "${SOURCE_ROOT}/opsmind_twinctl.py" /usr/local/sbin/opsmind-twinctl
+install -m 0750 -o root -g root "${SOURCE_ROOT}/opsmind_eval_manager.py" /usr/local/sbin/opsmind-eval-manager
 install -m 0755 -o root -g root "${SOURCE_ROOT}/ssh_gateway.sh" /usr/local/sbin/opsmind-twin-ssh-gateway
 install -m 0750 -o root -g root "${SOURCE_ROOT}/dns_responder.py" /usr/local/libexec/opsmind-twin-dns.py
 install -m 0750 -o root -g root "${SOURCE_ROOT}/dns_probe.py" /usr/local/libexec/opsmind-twin-dns-probe.py
@@ -21,6 +22,7 @@ if ! id -u evalos-twin >/dev/null 2>&1; then
 fi
 cat >/etc/sudoers.d/opsmind-twinctl <<'EOF'
 evalos-twin ALL=(root) NOPASSWD: /usr/local/sbin/opsmind-twinctl
+evalos-twin ALL=(root) NOPASSWD: /usr/local/sbin/opsmind-eval-manager
 EOF
 chmod 0440 /etc/sudoers.d/opsmind-twinctl
 visudo -cf /etc/sudoers.d/opsmind-twinctl >/dev/null
