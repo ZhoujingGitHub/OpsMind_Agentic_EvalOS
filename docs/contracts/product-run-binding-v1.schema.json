@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsmind.local/contracts/product-run-binding-v1.schema.json",
+  "title": "OpsMind EvalOS External Product Run Binding 1.0",
+  "description": "证明外部真实考生返回的结果确实属于本次冻结Trial，而不是其他Case、Seed、预算或工作模式下的历史结果。",
+  "type": "object",
+  "required": ["contract", "run_ref", "expected_context_digest", "task_context_observed", "native_closure_observed", "binding_strength", "task_checks", "closure_checks", "complete"],
+  "properties": {
+    "contract": { "const": "evalos-product-run-binding.1" },
+    "run_ref": { "type": "string", "minLength": 1 },
+    "expected_context_digest": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+    "task_context_observed": { "type": "boolean" },
+    "native_closure_observed": { "type": "boolean" },
+    "binding_strength": { "enum": ["UNBOUND", "PUBLIC_TASK_CONTEXT", "NATIVE_CLOSURE_FIELDS"] },
+    "task_checks": { "$ref": "#/$defs/checks" },
+    "closure_checks": { "oneOf": [{ "$ref": "#/$defs/checks" }, { "type": "null" }] },
+    "complete": { "type": "boolean" }
+  },
+  "$defs": {
+    "checks": {
+      "type": "object",
+      "required": ["trial_id", "case_ref", "environment_seed", "budget", "operating_mode", "execution_mode"],
+      "properties": {
+        "context_digest": { "type": "boolean" },
+        "trial_id": { "type": "boolean" },
+        "case_ref": { "type": "boolean" },
+        "environment_seed": { "type": "boolean" },
+        "budget": { "type": "boolean" },
+        "operating_mode": { "type": "boolean" },
+        "execution_mode": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -20,7 +20,7 @@ Environment=EVALOS_M2_ARTIFACTS_ROOT=/var/lib/opsmind-evalos/artifacts/m2
 Environment=EVALOS_M2_EXECUTOR_ARTIFACTS_ROOT=/var/lib/opsmind-evalos/artifacts/m2-executor
 Environment=EVALOS_M2_AGENT_ARTIFACTS_ROOT=/var/lib/opsmind-evalos/artifacts/m2-agent
 Environment=EVALOS_M2_QUALIFICATION_ARTIFACTS_ROOT=/var/lib/opsmind-evalos/artifacts/m2-qualification
-Environment=EVALOS_ALLOWED_ORIGIN=http://121.40.223.202:3000
+Environment=EVALOS_ALLOWED_ORIGIN=https://121-40-223-202.sslip.io
 Environment=EVALOS_TWIN_HOST=114.215.189.185
 Environment=EVALOS_TWIN_USER=evalos-twin
 Environment=EVALOS_TWIN_SSH_KEY=/etc/opsmind-evalos/keys/m2-twin-ed25519

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsmind.local/contracts/trace-contract-v3.schema.json",
+  "title": "OpsMind EvalOS Trace Contract 3.0",
+  "description": "同时保存外部考生原始事件和可跨架构比较的统一业务事件；每条统一事件都必须指回原始证据。",
+  "type": "object",
+  "required": ["trace_contract_version", "trial_id", "raw_events", "normalized_events", "trace_digest"],
+  "properties": {
+    "trace_contract_version": { "const": "3.0" },
+    "trial_id": { "type": "string", "minLength": 1 },
+    "raw_events": { "type": "array", "items": { "$ref": "#/$defs/rawEvent" } },
+    "normalized_events": { "type": "array", "items": { "$ref": "#/$defs/normalizedEvent" } },
+    "trace_digest": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "rawEvent": {
+      "type": "object",
+      "required": ["source_ref", "source_system", "recorded_at", "payload", "payload_digest"],
+      "properties": {
+        "source_ref": { "type": "string", "minLength": 1 }, "source_system": { "type": "string", "minLength": 1 },
+        "recorded_at": { "type": "string", "format": "date-time" }, "payload": {}, "payload_digest": { "$ref": "#/$defs/digest" }
+      },
+      "additionalProperties": false
+    },
+    "normalizedEvent": {
+      "type": "object",
+      "required": ["event_type", "actor", "status", "raw_source_refs"],
+      "properties": {
+        "event_type": { "enum": ["task.received", "investigation.started", "evidence.collected", "conclusion.recorded", "action.proposed", "policy.decided", "approval.decided", "ticket.issued", "lease.acquired", "action.executed", "verification.completed", "rollback.executed", "rollback.verified", "circuit_breaker.opened", "emergency_stop.activated", "human_takeover.requested", "archive.reconciled"] },
+        "actor": { "type": "string", "minLength": 1 }, "status": { "type": "string", "minLength": 1 },
+        "raw_source_refs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+        "payload": { "type": "object" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsmind.local/contracts/grader-contract-v5.schema.json",
+  "title": "OpsMind EvalOS Deterministic Grader Contract 5.0",
+  "description": "正式成绩只来自冻结的确定性Code Grader。AI分析和专家意见只能提出复核建议，不能改分。",
+  "type": "object",
+  "required": ["grader_contract_version", "trial_id", "official_score_source", "total", "passed", "dimensions", "hard_gates", "evidence_refs", "grader_digest"],
+  "properties": {
+    "grader_contract_version": { "const": "5.0" },
+    "trial_id": { "type": "string", "minLength": 1 },
+    "grader_version": { "type": "string", "minLength": 1 },
+    "official_score_source": { "const": "DETERMINISTIC_CODE_GRADER" },
+    "total": { "type": "number", "minimum": 0, "maximum": 100 },
+    "passed": { "type": "boolean" },
+    "dimensions": { "type": "object" },
+    "assertions": { "type": "object" },
+    "hard_gates": {
+      "type": "object",
+      "required": ["task_outcome", "evidence_integrity", "scope_safety", "approval_integrity", "execution_safety", "independent_verification", "reset_integrity"],
+      "properties": {
+        "task_outcome": { "type": "boolean" }, "evidence_integrity": { "type": "boolean" },
+        "scope_safety": { "type": "boolean" }, "approval_integrity": { "type": "boolean" },
+        "execution_safety": { "type": "boolean" }, "independent_verification": { "type": "boolean" },
+        "reset_integrity": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "evidence_refs": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "evidence_hits": { "type": "array" },
+    "safety": { "type": "object" },
+    "controlled_closure_evidence": { "type": "object" },
+    "ai_attention": { "type": ["object", "null"], "description": "只读辅助意见，不参与total或passed计算。" },
+    "expert_attention": { "type": ["object", "null"], "description": "可选人工意见，不参与total或passed计算。" },
+    "excluded_from_cross_architecture_cost_comparison": { "type": "boolean" },
+    "scoring_contract": { "type": "string" },
+    "grader_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+  },
+  "additionalProperties": false
+}

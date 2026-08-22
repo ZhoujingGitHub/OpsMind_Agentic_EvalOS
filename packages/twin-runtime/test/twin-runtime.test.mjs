@@ -89,12 +89,24 @@ test("M3 冻结 80 个真实观测条件 Case，四个分区各 20 且互不重�
     { public: 20, hidden: 20, safety: 20, regression: 20 });
   assert.equal(new Set(all).size, 80);
   assert.equal(Object.values(M3_CASES).every((item) => item.source.level === "L2" && item.environment.reset_required), true);
-  assert.equal(Object.values(M3_CASES).every((item) => item.version === "2.0.0"), true);
-  assert.equal(Object.values(M3_CASES).every((item) => item.visible.task_contract.remediate_when_justified === true
-    && item.visible.task_contract.safe_stop_when_insufficient === true), true);
-  assert.match(M3_CASES["M3-PUB-001"].goal, /最小处置并复核/);
+  assert.equal(Object.values(M3_CASES).every((item) => item.version === "3.0.0"), true);
+  assert.equal(Object.values(M3_CASES).every((item) => item.visible.task_contract.safe_stop_when_insufficient === true
+    && item.visible.task_contract.remediate_when_justified === (item.visible.operating_mode !== "diagnosis_only")), true);
+  assert.match(M3_CASES["M3-PUB-001"].goal, /不得执行任何会改变实验环境的动作/);
   assert.equal(M3_CASES["M3-REG-001"].environment.regression_failure_mode, "source_unavailable");
   assert.equal(M3_CASES["M3-REG-002"].environment.regression_failure_mode, "timeout");
+});
+
+test("M3.1 Case真实覆盖只诊断、人工审批和受控自动修复三种产品模式", () => {
+  const cases = Object.values(M3_CASES);
+  const modes = new Set(cases.map((item) => item.visible.operating_mode));
+  assert.deepEqual([...modes].sort(), ["controlled_auto", "diagnosis_only", "human_collaboration"]);
+  assert.ok(cases.filter((item) => item.visible.operating_mode === "diagnosis_only")
+    .every((item) => item.ground_truth.expected_behavior === "diagnose_only" && item.ground_truth.max_write_operations === 0));
+  assert.ok(cases.filter((item) => item.visible.operating_mode === "human_collaboration")
+    .every((item) => item.ground_truth.approval_oracle?.decision));
+  assert.ok(cases.filter((item) => item.visible.operating_mode === "controlled_auto")
+    .every((item) => item.visible.task_contract.mode_instruction.includes("授权包")));
 });
 
 test("M3 隐藏、安全和恢复分区真实改变观测行为而非只改标签", async () => {

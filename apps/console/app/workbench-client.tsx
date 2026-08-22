@@ -86,19 +86,27 @@ function Topbar({ view }: { view: View }) {
     experiment: "实验详情", trial: "单次评测（Trial）研究工作台", traces: "轨迹与日志", graders: "评分器中心", analyses: "AI 调查员",
     "run-requests": "评测任务（Evaluation Tasks）" };
   return <header className="workbench-top"><div><span className="crumb">EvalOS / </span>{names[view]}</div>
-    <div className="top-meta"><span className="phase-tag">M3.0 · 正式评测设计冻结</span><span className="operator">操作者</span></div></header>;
+    <div className="top-meta"><span className="phase-tag">M3.1 · 真实产品评测升级 · 480 Trial 未开考</span><span className="operator">操作者</span></div></header>;
 }
 
 function Dashboard() {
   const { data, error, loading } = useRemote("/api/workbench/overview");
+  const candidateReadiness = useRemote("/api/workbench/candidate-readiness");
   const counts = data?.counts ?? {};
   return <section className="page-content">
     <div className="page-intro"><div><span className="kicker">OBSERVE · EXPLAIN · IMPROVE</span><h1>把每次评测，变成<br/>可追溯的改进证据。</h1><p>从数据集到源码，从工具轨迹到逐维评分，再到只读 AI 深度调查——所有结论都能回到真实 Trial。</p></div>
       <div className="truth-card"><span>评测核心</span><strong>Agent 自主求解<br/>Harness 守住规则</strong><p>不按固定工具名、不按预设步骤评分。官方分数只来自确定性 Code Grader。</p></div></div>
     {error && <ErrorBox text={error} />}
+    <div className="authority-banner"><strong>真实评测边界</strong><p>正式通道只向两套外部 OpsMind 产品提交同一道 Case，EvalOS 不在内部复制考生、也不替考生调用 MCP。测试替身仅用于工程自测，并会在页面上明确标注。</p></div>
+    <section className="surface"><SectionHead title="真实考生开考状态" sub="Candidate readiness · 这里检查的是外部产品，不是 EvalOS 内部考生分身" />
+      {candidateReadiness.error && <ErrorBox text={candidateReadiness.error} />}
+      <div className="dataset-cards">{(candidateReadiness.data?.items ?? []).map((item: Json) => <div className={`dataset-card ${item.ready ? "selected" : ""}`} key={item.ref}>
+        <span className={`level ${item.ready ? "level-l1" : "level-l2"}`}>{item.ready ? "就绪" : "阻塞"}</span><strong>{contestantDisplayName(item.ref)}</strong><small>{item.architecture ?? "外部真实产品"}</small>
+        <div><b>{item.status_label}</b></div><p>{item.explanation}</p><code>{item.source_revision ? shortHash(item.source_revision) : "未配置凭据"}</code></div>)}</div>
+      <p className="diagnostic-note">480 次正式 Trial 仍未放行；这里显示“就绪”只代表可以进入少量、不计分的资格试运行。</p></section>
     <div className="metric-row">
       <Metric label="冻结数据集" value={loading ? "—" : counts.datasets ?? 0} foot={`${counts.cases ?? 0} 个版本化 Case`} href="/datasets" />
-      <Metric label="真实实验" value={loading ? "—" : counts.experiments ?? 0} foot={`${counts.completed_trials ?? 0}/${counts.trials ?? 0} Trial 完成`} href="/experiments" />
+      <Metric label="实验记录" value={loading ? "—" : counts.experiments ?? 0} foot={`${counts.completed_trials ?? 0}/${counts.trials ?? 0} Trial 完成 · 含明确标注的工程测试`} href="/experiments" />
       <Metric label="正式均分" value={formatScore(data?.score?.average)} foot={`${data?.score?.passed ?? 0}/${data?.score?.graded ?? 0} 通过硬门禁`} href="/graders" />
       <Metric label="AI 调查" value={counts.analysis_runs ?? 0} foot="只读 · 不改官方分数" accent href="/analyses" />
     </div>
@@ -148,14 +156,14 @@ function Datasets() {
       <div className="selection-toolbar"><div><strong>已选 {selectedCases.size} 道题</strong><small>你选择“考什么”；Agent 仍自主决定“怎么解决”。</small></div><div>
         <button onClick={selectVisible}>选择当前筛选结果</button><button onClick={() => setSelectedCases(new Set())}>清空</button>
         <button className="toolbar-primary" title={selectedDatasetCount > 1 ? "一次评测只能使用同一冻结数据集，请先选择一个数据集" : ""} disabled={!selectedCases.size || selectedDatasetCount !== 1} onClick={() => setComposerOpen(true)}>{selectedDatasetCount > 1 ? "请先限定一个数据集" : "＋ 新建评测 →"}</button></div></div>
-      <div className="table-scroll"><table className="data-table"><thead><tr><th><input type="checkbox" aria-label="选择当前页全部题目" checked={filtered.length > 0 && filtered.every((item: Json) => selectedCases.has(item.case_ref))} onChange={(event) => event.target.checked ? selectVisible() : setSelectedCases(new Set())} /></th><th>评测题目（Case）</th><th>目标场景</th><th>领域 / 等级</th><th>评测次数（Trial）</th><th>均分</th><th>最近证据</th></tr></thead><tbody>
+      <div className="table-scroll"><table className="data-table"><thead><tr><th><input type="checkbox" aria-label="选择当前页全部题目" checked={filtered.length > 0 && filtered.every((item: Json) => selectedCases.has(item.case_ref))} onChange={(event) => event.target.checked ? selectVisible() : setSelectedCases(new Set())} /></th><th>评测题目（Case）</th><th>目标场景</th><th>工作模式</th><th>领域 / 等级</th><th>评测次数（Trial）</th><th>均分</th><th>最近证据</th></tr></thead><tbody>
         {filtered.map((item: Json) => <tr key={item.case_ref} className={item.latest_trial_id ? "clickable-row" : ""}
           role={item.latest_trial_id ? "link" : undefined} tabIndex={item.latest_trial_id ? 0 : undefined}
           aria-label={item.latest_trial_id ? `打开 ${item.case_id} 的最近 Trial` : undefined}
           onClick={(event) => item.latest_trial_id && navigateRow(event, `/trials/${item.latest_trial_id}`)}
           onKeyDown={(event) => item.latest_trial_id && navigateRowByKeyboard(event, `/trials/${item.latest_trial_id}`)}>
           <td><input type="checkbox" aria-label={`选择 ${item.case_id}`} checked={selectedCases.has(item.case_ref)} onChange={() => toggle(item.case_ref)} onClick={(event) => event.stopPropagation()} /></td>
-          <td><strong>{item.case_id}</strong><small>{item.version}</small></td><td className="goal-cell">{item.goal}</td>
+          <td><strong>{item.case_id}</strong><small>{item.version}</small></td><td className="goal-cell">{item.goal}</td><td><Tag>{operationModeLabel(item.operating_mode)}</Tag></td>
           <td><Tag>{item.metadata?.domain ?? "通用"}</Tag><small>{item.level ?? "—"}</small></td><td>{item.completed_trials}/{item.trial_count}</td><td>{formatScore(item.average_score)}</td>
           <td>{item.latest_trial_id ? <a className="text-link" href={`/trials/${item.latest_trial_id}`}>查看单次评测（Trial）→</a> : "尚未运行"}</td></tr>)}</tbody></table></div>
     </section>{composerOpen && <RunComposer intent="new" caseRefs={[...selectedCases]} defaultExperimentId={selectedItems[0]?.compatible_experiment_id} datasetRef={selectedItems[0]?.dataset_ref} onClose={() => setComposerOpen(false)} />}</section>;
@@ -176,8 +184,8 @@ function ExperimentTable({ items, compact = false }: { items: Json[]; compact?: 
     {items.length === 0 && <tr><td colSpan={compact ? 6 : 7}><Empty text="还没有已导入的真实实验" /></td></tr>}
     {items.map((item) => <tr key={item.id} className="clickable-row" role="link" tabIndex={0} aria-label={`打开实验 ${item.name}`}
       onClick={(event) => navigateRow(event, `/experiments/${item.id}`)} onKeyDown={(event) => navigateRowByKeyboard(event, `/experiments/${item.id}`)}>
-      <td><a className="row-title" href={`/experiments/${item.id}`}>{item.name}</a><code>{item.id}</code></td>
-      <td><strong>{item.design === "paired_comparison" ? "双架构" : "单系统"}</strong><small>{item.model?.id ?? "已冻结模型"}</small></td><td><span className="soft-label">{item.dataset_ref}</span></td>
+      <td><a className="row-title" href={`/experiments/${item.id}`}>{item.name}</a><code>{item.id}</code><RunClassBadge value={item.run_class} /></td>
+      <td><strong>{item.design === "paired_comparison" ? "双系统公平对比" : "单系统回归"}</strong><small>{laneLabel(item.evaluation_lane)} · {item.model?.id ?? "已冻结模型"}</small></td><td><span className="soft-label">{item.dataset_ref}</span></td>
       <td><Progress value={item.progress?.rate ?? 0} text={`${item.progress?.completed ?? 0}/${item.progress?.total ?? 0}`} /></td><td><strong className="score-number">{formatScore(item.average_score)}</strong></td>
       {!compact && <td><code>{shortHash(item.contestants?.[0]?.source_revision)}</code></td>}<td><Status status={item.status} /></td></tr>)}</tbody></table></div>;
 }
@@ -192,7 +200,7 @@ function ExperimentDetail({ id }: { id: string }) {
   const frozenDesign = Boolean(exp.frozen_design || exp.status === "FROZEN");
   const caseGroups = Object.entries(Object.groupBy(data.trials as Json[], (trial: Json) => trial.case_ref));
   const toggleCase = (caseRef: string) => setSelectedCases((current) => { const next = new Set(current); if (next.has(caseRef)) next.delete(caseRef); else next.add(caseRef); return next; });
-  return <section className="page-content"><div className="detail-head"><div><a className="back-link" href="/experiments">← 返回实验</a><span className="kicker">EXPERIMENT</span><h2>{exp.name}</h2><div className="detail-meta"><Status status={exp.status} /><code>{exp.id}</code><span>{exp.design === "paired_comparison" ? "双架构资格" : "单系统验收"}</span></div></div>
+  return <section className="page-content"><div className="detail-head"><div><a className="back-link" href="/experiments">← 返回实验</a><span className="kicker">EXPERIMENT</span><h2>{exp.name}</h2><div className="detail-meta"><Status status={exp.status} /><RunClassBadge value={exp.run_class} /><code>{exp.id}</code><span>{exp.design === "paired_comparison" ? "双系统公平对比" : "单系统回归"}</span></div></div>
     <div className="hash-card"><span>Manifest Hash</span><code>{exp.manifest_hash}</code><small>数据、种子、预算、参评版本均已冻结</small></div></div>
     <div className="metric-row"><Metric label={frozenDesign ? "计划单次评测（Trials）" : "单次评测（Trial）"} value={frozenDesign ? exp.planned_trial_count : exp.progress.total}
         foot={frozenDesign ? `${exp.planned_case_count} 个 Case × ${exp.planned_contestant_count} 名考生 × ${(data.manifest.environment_seeds ?? []).length} 个 Seed` : `${exp.progress.completed} 完成 · ${exp.progress.failed} 失败`} />
@@ -213,7 +221,8 @@ function ExperimentDetail({ id }: { id: string }) {
       </details>; })}</div></>}
     </section><aside className="surface manifest-panel"><SectionHead title="冻结实验合同（Manifest）" sub="评测执行层（Harness）决定公平与安全边界" />
       <KeyValue label="数据集（Dataset）" value={data.manifest.dataset_ref} /><KeyValue label="套件（Suite）" value={data.manifest.suite_ref} />
-      <KeyValue label="评测通道（Lane）" value={laneLabel(data.manifest.evaluation_lane)} /><KeyValue label="环境种子（Seeds）" value={(data.manifest.environment_seeds ?? []).join("、")} />
+      <KeyValue label="运行类别（Run class）" value={runClassLabel(data.manifest.run_class)} /><KeyValue label="评测通道（Lane）" value={laneLabel(data.manifest.evaluation_lane)} />
+      <KeyValue label="工作模式（Operating modes）" value={(data.manifest.operating_modes ?? []).map(operationModeLabel).join("、")} /><KeyValue label="执行环境（Execution mode）" value={data.manifest.execution_mode === "controlled_simulation" ? "受控数字孪生（Controlled simulation）" : "历史只读回放（Read-only replay）"} /><KeyValue label="环境种子（Seeds）" value={(data.manifest.environment_seeds ?? []).join("、")} />
       <KeyValue label="每个 Seed 重复次数（Replicates）" value={data.manifest.replicates_per_seed} /><KeyValue label="工具预算（Tool calls）" value={data.manifest.budget?.tool_calls} /><KeyValue label="时间预算（Wallclock）" value={formatDuration(data.manifest.budget?.wallclock_ms)} />
       <div className="contestants">{(data.manifest.contestants ?? []).map((item: Json) => <div key={item.ref}><strong>{item.ref}</strong><code>{shortHash(item.artifact_digest)}</code></div>)}</div>
     </aside></div>{composerOpen && <RunComposer intent="rerun" caseRefs={[...selectedCases]} defaultExperimentId={id} datasetRef={exp.dataset_ref} onClose={() => setComposerOpen(false)} />}</section>;
@@ -223,30 +232,32 @@ function TrialCenter({ mode }: { mode: "traces" | "graders" | "analyses" }) {
   const trials = useRemote("/api/workbench/trials");
   const analyses = useRemote(mode === "analyses" ? "/api/analysis-runs" : null);
   const items = useMemo(() => trials.data?.items ?? [], [trials.data]);
+  const officialItems = items.filter((item: Json) => item.affects_official_score === true);
+  const nonOfficialItems = items.filter((item: Json) => item.affects_official_score !== true);
   const runs = analyses.data?.items ?? [];
   const trialMap = useMemo(() => new Map(items.map((item: Json) => [item.id, item])), [items]);
   if (trials.loading || (mode === "analyses" && analyses.loading)) return <Loading />;
   const error = trials.error || analyses.error;
-  if (mode === "traces") return <section className="page-content"><PageTitle eyebrow="APPEND-ONLY OBSERVABILITY" title="轨迹与日志" text="每条 Trial 的 Agent 外显决策、工具调用、环境观察、预算事件、评分和复位记录都可以从这里进入。" />
-    {error && <ErrorBox text={error} />}<div className="metric-row three"><Metric label="Trial" value={items.length} foot="仅正式主运行" href="#trace-list" />
+  if (mode === "traces") return <section className="page-content"><PageTitle eyebrow="APPEND-ONLY OBSERVABILITY" title="轨迹与日志" text="每条 Trial 的 Agent 外显决策、工具调用、环境观察、预算事件、评分和复位记录都可以从这里进入；正式、资格和工程自测会明确区分。" />
+    {error && <ErrorBox text={error} />}<div className="metric-row three"><Metric label="全部 Trial" value={items.length} foot={`${officialItems.length} 条正式 · ${nonOfficialItems.length} 条不计正式成绩`} href="#trace-list" />
       <Metric label="轨迹记录" value={items.reduce((sum: number, item: Json) => sum + Number(item.trace_records ?? 0), 0)} foot="只追加 · 可验证哈希" href="#trace-list" />
       <Metric label="源码已绑定" value={items.filter((item: Json) => item.source_snapshot).length} foot="调查读取冻结版本" href="#trace-list" accent /></div>
     <section className="surface" id="trace-list"><SectionHead title="Trial 轨迹索引" sub="点击任意一行直接打开该 Trial 的轨迹页签" />
       <div className="table-scroll"><table className="data-table"><thead><tr><th>Case / Trial</th><th>参评架构</th><th>轨迹</th><th>工具结果</th><th>记录角色</th><th>状态</th></tr></thead><tbody>
         {items.map((item: Json) => <tr key={item.id} className="clickable-row" role="link" tabIndex={0} aria-label={`打开 ${item.case_ref} 的轨迹`}
           onClick={(event) => navigateRow(event, `/trials/${item.id}#trace`)} onKeyDown={(event) => navigateRowByKeyboard(event, `/trials/${item.id}#trace`)}>
-          <td><a className="row-title" href={`/trials/${item.id}#trace`}>{item.case_ref}</a><code>{item.id}</code></td><td><strong>{item.contestant}</strong><small>{item.experiment_name}</small></td>
+          <td><a className="row-title" href={`/trials/${item.id}#trace`}>{item.case_ref}</a><code>{item.id}</code><RunClassBadge value={item.run_class} /></td><td><strong>{contestantDisplayName(item.contestant)}</strong><small>{item.experiment_name}</small></td>
           <td><strong className="score-number">{item.trace_records}</strong></td><td>{item.tool_results}</td><td>{(item.trace_actors ?? []).join(" · ")}</td><td><Status status={item.status} /></td></tr>)}
       </tbody></table></div></section></section>;
-  if (mode === "graders") return <section className="page-content"><PageTitle eyebrow="DETERMINISTIC OFFICIAL SCORE" title="评分器中心" text="这里展示官方确定性评分。评分只看真实终态、证据、轨迹、预算和安全门禁，不看固定工具名称或求解顺序。" />
-    {error && <ErrorBox text={error} />}<div className="metric-row three"><Metric label="已评分" value={items.filter((item: Json) => item.grade).length} foot="Code Grader 正式记录" href="#grader-list" />
-      <Metric label="通过硬门禁" value={items.filter((item: Json) => item.grade?.passed).length} foot="不可由其他高分补偿" href="#grader-list" />
-      <Metric label="正式均分" value={formatScore(average(items.map((item: Json) => item.grade?.total)))} foot="AI 调查不能改写" href="#grader-list" accent /></div>
-    <section className="surface" id="grader-list"><SectionHead title="逐 Trial 正式成绩" sub="点击任意一行直接打开评分细项和硬门禁" />
-      <div className="table-scroll"><table className="data-table"><thead><tr><th>Case / Trial</th><th>参评架构</th><th>总分</th><th>正式结论</th><th>硬门禁</th><th>完成时间</th></tr></thead><tbody>
+  if (mode === "graders") return <section className="page-content"><PageTitle eyebrow="DETERMINISTIC CODE GRADER" title="评分器中心" text="这里展示确定性 Code Grader 的全部结果，并严格区分正式成绩、资格试跑和工程自测。评分只看真实终态、证据、轨迹、预算和安全门禁，不看固定工具名称或求解顺序。" />
+    {error && <ErrorBox text={error} />}<div className="metric-row three"><Metric label="全部已评分" value={items.filter((item: Json) => item.grade).length} foot={`${officialItems.length} 条正式 · ${nonOfficialItems.length} 条不计正式成绩`} href="#grader-list" />
+      <Metric label="正式成绩 Trial" value={officialItems.filter((item: Json) => item.grade).length} foot="只统计正式冻结套件" href="#grader-list" />
+      <Metric label="正式均分" value={officialItems.length ? formatScore(average(officialItems.map((item: Json) => item.grade?.total))) : "尚未产生"} foot="资格与工程结果不混入；AI 调查不能改写" href="#grader-list" accent /></div>
+    <section className="surface" id="grader-list"><SectionHead title="逐 Trial 评分结果" sub="每一行都标明结果口径；点击进入评分细项和硬门禁" />
+      <div className="table-scroll"><table className="data-table"><thead><tr><th>Case / Trial</th><th>参评架构</th><th>结果口径</th><th>总分</th><th>本次结论</th><th>硬门禁</th><th>完成时间</th></tr></thead><tbody>
         {items.map((item: Json) => <tr key={item.id} className="clickable-row" role="link" tabIndex={0} aria-label={`打开 ${item.case_ref} 的评分细项`}
           onClick={(event) => navigateRow(event, `/trials/${item.id}#grader`)} onKeyDown={(event) => navigateRowByKeyboard(event, `/trials/${item.id}#grader`)}>
-          <td><a className="row-title" href={`/trials/${item.id}#grader`}>{item.case_ref}</a><code>{item.id}</code></td><td><strong>{item.contestant}</strong><small>{item.experiment_name}</small></td>
+          <td><a className="row-title" href={`/trials/${item.id}#grader`}>{item.case_ref}</a><code>{item.id}</code></td><td><strong>{contestantDisplayName(item.contestant)}</strong><small>{item.experiment_name}</small></td><td><RunClassBadge value={item.run_class} />{!item.affects_official_score && <small>不计正式成绩</small>}</td>
           <td><strong className="score-number">{formatScore(item.grade?.total)}</strong></td><td>{item.grade ? <Status status={item.grade.passed ? "PASSED" : "FAILED"} /> : "未评分"}</td>
           <td>{item.grade ? `${Object.values(item.grade.hard_gates ?? {}).filter(Boolean).length}/${Object.keys(item.grade.hard_gates ?? {}).length}` : "—"}</td><td>{formatTime(item.completed_at)}</td></tr>)}
       </tbody></table></div></section></section>;
@@ -283,15 +294,15 @@ function TrialDetail({ id, analysisId }: { id: string; analysisId?: string }) {
   };
   if (detail.loading) return <Loading />;
   if (detail.error || !detail.data) return <section className="page-content"><ErrorBox text={detail.error || "单次评测（Trial）不存在"} /></section>;
-  const data = detail.data; const trial = data.trial;
+  const data = detail.data; const trial = data.trial; const official = data.experiment?.affects_official_score === true;
   const tabs = [["overview", "任务与终态"], ["trace", `轨迹与日志 · ${data.evidence.trace_records}`], ["grader", "评分器"],
     ["source", `冻结源码 · ${data.source_snapshot?.file_count ?? 0}`], ["analysis", `AI 分析 · ${data.analyses.length}`]];
-  return <section className="page-content trial-page"><div className="trial-head"><div><a className="back-link" href={`/experiments/${trial.experiment_id}`}>← 返回实验</a><span className="kicker">单次评测研究工作台 · TRIAL WORKBENCH</span><h2>{trial.case_ref}</h2><div className="detail-meta"><Status status={trial.status} /><span>{trial.contestant}</span><code>{trial.id}</code></div></div>
-    <div className="trial-head-actions"><button onClick={() => setComposerOpen(true)}>按原配置重新评测<br/><small>Rerun frozen setup</small></button><RegradeButton trialId={id} /><ScoreBadge score={data.graders?.[0]?.result?.total} passed={data.graders?.[0]?.result?.passed} /></div></div>
+  return <section className="page-content trial-page"><div className="trial-head"><div><a className="back-link" href={`/experiments/${trial.experiment_id}`}>← 返回实验</a><span className="kicker">单次评测研究工作台 · TRIAL WORKBENCH</span><h2>{trial.case_ref}</h2><div className="detail-meta"><Status status={trial.status} /><RunClassBadge value={data.experiment?.run_class} />{!official && <Tag>不计正式成绩</Tag>}<span>{contestantDisplayName(trial.contestant)}</span><code>{trial.id}</code></div></div>
+    <div className="trial-head-actions"><button onClick={() => setComposerOpen(true)}>按原配置重新评测<br/><small>Rerun frozen setup</small></button><RegradeButton trialId={id} official={official} /><ScoreBadge score={data.graders?.[0]?.result?.total} passed={data.graders?.[0]?.result?.passed} official={official} /></div></div>
     <nav className="detail-tabs" aria-label="Trial 详情页签">{tabs.map(([key, label]) => <button key={key} aria-pressed={tab === key}
       className={tab === key ? "active" : ""} onClick={() => chooseTab(key)}>{label}</button>)}</nav>
-    {tab === "overview" && <TrialOverview data={data} />}{tab === "trace" && <TracePanel key={id} trialId={id} />}{tab === "grader" && <GraderPanel graders={data.graders} />}
-    {tab === "source" && <SourcePanel trialId={id} snapshot={data.source_snapshot} />}{tab === "analysis" && <AnalysisPanel trialId={id} initial={data.analyses} initialSelected={analysisId} onChanged={detail.refresh} />}
+    {tab === "overview" && <TrialOverview data={data} />}{tab === "trace" && <TracePanel key={id} trialId={id} />}{tab === "grader" && <GraderPanel graders={data.graders} official={official} />}
+    {tab === "source" && <SourcePanel trialId={id} snapshot={data.source_snapshot} />}{tab === "analysis" && <AnalysisPanel trialId={id} initial={data.analyses} initialSelected={analysisId} sourceAvailable={Boolean(data.source_snapshot)} onChanged={detail.refresh} />}
     {composerOpen && <RunComposer intent="rerun" caseRefs={[trial.case_ref]} defaultExperimentId={trial.experiment_id} datasetRef={data.experiment?.dataset_ref} onClose={() => setComposerOpen(false)} />}
   </section>;
 }
@@ -299,7 +310,7 @@ function TrialDetail({ id, analysisId }: { id: string; analysisId?: string }) {
 function TrialOverview({ data }: { data: Json }) {
   const trial = data.trial;
   return <div className="split-grid trial-grid"><section className="surface"><SectionHead title="评测题目（Case）与可见上下文" sub="这是参评 Agent 收到的任务，不含隐藏参考答案" />
-    <div className="task-callout"><span>目标</span><p>{data.case?.goal}</p></div><div className="kv-grid"><KeyValue label="Case 版本" value={data.case?.version} /><KeyValue label="隔离身份" value={trial.blind_id} />
+    <div className="task-callout"><span>目标</span><p>{data.case?.goal}</p></div><div className="kv-grid"><KeyValue label="Case 版本" value={data.case?.version} /><KeyValue label="工作模式" value={operationModeLabel(data.case?.visible?.operating_mode)} /><KeyValue label="隔离身份" value={trial.blind_id} />
       <KeyValue label="环境种子" value={trial.environment_seed} /><KeyValue label="重复编号" value={trial.replicate_id} /><KeyValue label="运行时长" value={formatDuration(trial.duration_ms)} /><KeyValue label="轨迹哈希" value={shortHash(data.evidence.trace_hash)} /></div>
     <SectionHead title="Agent 最终结果" sub="结构化公开结论" /><div className="outcome-card"><Status status={(trial.outcome?.status ?? "UNKNOWN").toUpperCase()} /><h3>{trial.outcome?.root_cause ?? "无根因结论"}</h3><p>{trial.outcome?.summary}</p>
       <div className="evidence-chips">{(trial.outcome?.evidence_refs ?? []).map((ref: string) => <Tag key={ref}>{ref}</Tag>)}</div></div>
@@ -339,22 +350,27 @@ function TraceRow({ item }: { item: Json }) {
       {open && <JsonBlock value={{ original_record: { ...item, display: undefined }, payload: item.payload }} label="查看原始机器记录（Raw JSON）" />}</div></article>;
 }
 
-function GraderPanel({ graders }: { graders: Json[] }) {
+function GraderPanel({ graders, official }: { graders: Json[]; official: boolean }) {
   const grade = graders?.[0]?.result;
-  if (!grade) return <Empty text="该 Trial 还没有正式评分" />;
-  return <div className="split-grid grader-grid"><section className="surface"><SectionHead title="确定性 Code Grader" sub="官方成绩来源 · 评分结果不可被 AI 分析覆盖" />
-    <div className="grade-hero"><ScoreBadge score={grade.total} passed={grade.passed} large /><div><h3>{grade.passed ? "通过全部硬门禁" : "未通过正式门禁"}</h3><p>{grade.rule}</p><code>{grade.scoring_contract}</code></div></div>
+  if (!grade) return <Empty text="该 Trial 还没有确定性评分结果" />;
+  return <div className="split-grid grader-grid"><section className="surface"><SectionHead title="确定性评分器 Grader 5.0（Code Grader）" sub={official ? "正式成绩来源 · 只看可验证事实 · 评分结果不可被 AI 分析覆盖" : "本次为资格/工程结果 · 不写入正式成绩 · 只看可验证事实"} />
+    <div className="grade-hero"><ScoreBadge score={grade.total} passed={grade.passed} large official={official} /><div><h3>{grade.passed ? official ? "通过全部正式硬门禁" : "通过本次资格/工程门禁" : official ? "未通过正式门禁" : "未通过本次资格/工程门禁"}</h3><p>{grade.rule}</p><code>{grade.scoring_contract}</code></div></div>
     <div className="dimension-list">{Object.entries(grade.dimensions ?? {}).map(([name, value]: [string, any]) => <div className="dimension" key={name}><div><span>{DIMENSION_LABELS[name] ?? name}</span><b>{Number(value.weighted ?? 0).toFixed(2)} / {value.weight}</b></div><div className="bar"><i style={{ width: `${Math.max(0, Math.min(100, Number(value.normalized ?? 0) * 100))}%` }} /></div><small>{grade.assertions?.[name]?.applicable === false ? "本 Trial 不适用，不计入归一化总分" : grade.assertions?.[name]?.passed ? "该维度通过" : "该维度需要改进"}</small></div>)}</div>
   </section><aside className="surface"><SectionHead title="不可补偿硬门禁" sub="任何一项失败都不能靠其他高分抵消" />
-    <div className="gate-stack">{Object.entries(grade.hard_gates ?? {}).map(([name, passed]) => <div key={name} className={passed ? "gate-pass" : "gate-fail"}><span>{passed ? "✓" : "×"}</span><div><strong>{humanize(name)}</strong><small>{passed ? "通过" : "失败"}</small></div></div>)}</div>
+    <div className="gate-stack">{Object.entries(grade.hard_gates ?? {}).map(([name, passed]) => <div key={name} className={passed ? "gate-pass" : "gate-fail"}><span>{passed ? "✓" : "×"}</span><div><strong>{hardGateLabel(name)}</strong><small>{passed ? "通过（Pass）" : "失败（Fail）"}</small></div></div>)}</div>
+    {grade.controlled_closure_evidence?.operating_mode && <div className="selected-summary"><strong>受控闭环证据（Controlled closure）</strong>
+      <span>工作模式：{operationModeLabel(grade.controlled_closure_evidence.operating_mode)}</span>
+      <span>环境变更：{grade.controlled_closure_evidence.changes} 次；策略自动放行：{yesNo(grade.controlled_closure_evidence.policy_auto_allowed)}；独立人工批准：{yesNo(grade.controlled_closure_evidence.oracle_approved)}</span>
+      <span>一次性票据：{yesNo(grade.controlled_closure_evidence.ticket_issued)}；动作留痕：{yesNo(grade.controlled_closure_evidence.action_execution_observed)}；独立验证：{yesNo(grade.controlled_closure_evidence.independent_verification_observed)}</span></div>}
     <div className="rule-note"><strong>为什么不按工具名评分？</strong><p>Agent 可以用不同路径解决同一问题。评分器只看真实终态、证据是否可追溯、动作是否最小安全、预算是否合规。</p></div>
   </aside></div>;
 }
 
-function SourcePanel({ trialId, snapshot }: { trialId: string; snapshot: Json }) {
-  const source = useRemote(`/api/workbench/trials/${encodeURIComponent(trialId)}/source`);
+function SourcePanel({ trialId, snapshot }: { trialId: string; snapshot: Json | null }) {
+  const source = useRemote(snapshot ? `/api/workbench/trials/${encodeURIComponent(trialId)}/source` : null);
   const [selected, setSelected] = useState(""); const [file, setFile] = useState<Json | null>(null); const [error, setError] = useState("");
   const load = (name: string) => { setSelected(name); setError(""); requestJson(`/api/workbench/trials/${encodeURIComponent(trialId)}/source/content?path=${encodeURIComponent(name)}`).then(setFile).catch((reason) => setError(reason.message)); };
+  if (!snapshot) return <section className="surface"><SectionHead title="本 Trial 没有冻结源码" sub="Frozen source unavailable" /><Empty text="这是工程测试替身产生的自测记录，不绑定真实考生源码；它不会被送给 AI 调查员，也不会冒充真实产品证据。" /></section>;
   return <div className="source-layout"><aside className="surface file-tree"><SectionHead title="冻结源码" sub={`${snapshot?.file_count ?? 0} 文件 · ${formatBytes(snapshot?.size_bytes)}`} />
     <div className="snapshot-seal"><span>不可变快照</span><code>{shortHash(snapshot?.tree_hash)}</code><small>{snapshot?.contestant_ref}<br/>{shortHash(snapshot?.artifact_digest)}</small></div>
     <div className="files">{(source.data?.snapshot?.files ?? []).map((item: Json) => <button className={selected === item.path ? "active" : ""} key={item.path} onClick={() => load(item.path)}><span>⌗</span>{item.path}<small>{formatBytes(item.size_bytes)}</small></button>)}</div></aside>
@@ -362,7 +378,7 @@ function SourcePanel({ trialId, snapshot }: { trialId: string; snapshot: Json })
       {(error || source.error) && <ErrorBox text={error || source.error} />}{file ? <pre className="code-view"><code>{file.content}</code></pre> : <Empty text="从左侧选择文件查看；工作目录中的未冻结代码不会进入分析" />}</section></div>;
 }
 
-function AnalysisPanel({ trialId, initial, initialSelected, onChanged }: { trialId: string; initial: Json[]; initialSelected?: string; onChanged: () => Promise<void> }) {
+function AnalysisPanel({ trialId, initial, initialSelected, sourceAvailable, onChanged }: { trialId: string; initial: Json[]; initialSelected?: string; sourceAvailable: boolean; onChanged: () => Promise<void> }) {
   const [runs, setRuns] = useState(initial); const [selected, setSelected] = useState(initialSelected && initial.some((run) => run.id === initialSelected) ? initialSelected : initial[0]?.id ?? ""); const [prompt, setPrompt] = useState("请结合本 Trial 的任务终态、完整轨迹、逐维评分和冻结源码，定位最关键的能力短板；必要时研究最新权威方法论，给出按优先级排序且可验证的优化建议。");
   const [mode, setMode] = useState("optimization_research"); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const runDetail = useRemote(selected ? `/api/analysis-runs/${encodeURIComponent(selected)}` : null);
@@ -374,8 +390,9 @@ function AnalysisPanel({ trialId, initial, initialSelected, onChanged }: { trial
       body: JSON.stringify({ trial_id: trialId, prompt, mode }) }); setRuns([body.analysis, ...runs]); setSelected(body.analysis.id); await onChanged(); } catch (reason: any) { setError(reason.message); } finally { setBusy(false); } };
   const analysis = runDetail.data?.analysis; const result = analysis?.result;
   return <div className="analysis-layout"><aside className="surface analysis-control"><SectionHead title="AI 调查员" sub="Claude Agent SDK · DeepSeek · 只读" /><div className="authority-banner"><strong>诊断权，不是评分权</strong><p>能查证据、读源码、上网研究；不能改分、改 Trial 或执行修复。</p></div>
+    {!sourceAvailable && <div className="rule-note"><strong>本 Trial 暂不能启动 AI 调查</strong><p>工程测试替身没有与真实考生版本绑定的冻结源码。为避免把测试替身冒充真实产品，平台不会创建缺少源码证据的调查。</p></div>}
     <label>分析目标<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} /></label><label>分析模式<select value={mode} onChange={(event) => setMode(event.target.value)}><option value="optimization_research">优化深研</option><option value="case_diagnosis">Case 诊断</option><option value="score_explanation">评分解释</option></select></label>
-    {error && <ErrorBox text={error} />}<button className="primary-action" disabled={busy || !prompt.trim()} onClick={start}>{busy ? "正在创建…" : "✦ 开始 AI 深度分析"}</button>
+    {error && <ErrorBox text={error} />}<button className="primary-action" disabled={busy || !prompt.trim() || !sourceAvailable} onClick={start}>{busy ? "正在创建…" : sourceAvailable ? "✦ 开始 AI 深度分析" : "缺少冻结源码，不能启动"}</button>
     <div className="run-history">{runs.map((run) => <button key={run.id} className={selected === run.id ? "active" : ""} onClick={() => setSelected(run.id)}><Status status={run.status} /><span>{run.mode}</span><small>{formatTime(run.created_at)}</small></button>)}</div>
   </aside><section className="surface analysis-report"><SectionHead title="调查轨迹与报告" sub={analysis ? `${analysis.model} · ${analysis.status}` : "选择或启动一份分析"} />
     {runDetail.error && <ErrorBox text={runDetail.error} />}{analysis && <AnalysisTimeline events={runDetail.data?.events ?? []} />}
@@ -400,14 +417,14 @@ function AnalysisReport({ result, sources }: { result: Json; sources: Json[] }) 
   </article>;
 }
 
-function RegradeButton({ trialId }: { trialId: string }) {
+function RegradeButton({ trialId, official }: { trialId: string; official: boolean }) {
   const [open, setOpen] = useState(false); const [reason, setReason] = useState(""); const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Json | null>(null); const [error, setError] = useState("");
   const submit = async () => { setBusy(true); setError(""); try { const body = await requestJson("/api/workbench/regrades", { method: "POST",
     body: JSON.stringify({ trial_ids: [trialId], requested_by: "evalos-operator", reason }) }); setResult(body); } catch (cause: any) { setError(cause.message); } finally { setBusy(false); } };
   return <><button onClick={() => setOpen(true)}>仅重新评分<br/><small>Regrade evidence</small></button>{open && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setOpen(false)}><section className="run-modal regrade-modal" role="dialog" aria-modal="true"><div className="modal-head"><div><span className="kicker">RE-GRADE EXISTING EVIDENCE</span><h2>仅重新评分（Regrade）</h2><p>不会再次运行 Agent；只用这次 Trial 已冻结的终态、轨迹和用量重新计算。</p></div><button onClick={() => setOpen(false)}>×</button></div>
     {!result && <div className="run-form regrade-form"><label className="full">重新评分原因 <small>Audit reason</small><textarea rows={4} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="例如：验证评分器升级前后的结果是否一致" /></label></div>}
-    {error && <ErrorBox text={error} />}{result && <div className="regrade-result"><strong>✓ 重新评分完成</strong><p>{result.notice}</p><div className="preflight-grid"><KeyValue label="原官方分数" value={formatScore(result.items[0]?.original_score)} /><KeyValue label="重新计算分数" value={formatScore(result.items[0]?.recalculated_score)} /><KeyValue label="是否改写原分" value="否（No）" /></div></div>}
+    {error && <ErrorBox text={error} />}{result && <div className="regrade-result"><strong>✓ 重新评分完成</strong><p>{result.notice}</p><div className="preflight-grid"><KeyValue label={official ? "原正式分数" : "原评分结果"} value={formatScore(result.items[0]?.original_score)} /><KeyValue label="重新计算分数" value={formatScore(result.items[0]?.recalculated_score)} /><KeyValue label="是否改写原分" value="否（No）" /></div></div>}
     <div className="modal-actions"><button onClick={() => setOpen(false)}>{result ? "完成" : "取消"}</button>{!result && <button className="toolbar-primary" disabled={busy || !reason.trim()} onClick={submit}>{busy ? "正在计算…" : "开始重新评分"}</button>}</div></section></div>}</>;
 }
 
@@ -466,7 +483,7 @@ function RunComposer({ intent, caseRefs, defaultExperimentId, datasetRef, onClos
     <div className="run-form">{intent === "new" ? <label>冻结参评配置 <small>Source experiment</small><select value={effectiveSourceExperimentId} onChange={(event) => { const nextId = event.target.value; const nextContestants = availableTemplates.find((item: Json) => item.id === nextId)?.contestants ?? []; setSourceExperimentId(nextId); setEvaluationPurpose(nextContestants.length > 1 ? "PAIRED_COMPARISON" : nextContestants[0] ? `SINGLE:${nextContestants[0].ref}` : "PAIRED_COMPARISON"); setPreflight(null); }}><option value="">请选择</option>{availableTemplates.map((item: Json) => <option key={item.id} value={item.id}>{item.name} · {item.suite_ref}</option>)}</select></label>
       : <div className="frozen-config"><span>沿用冻结参评配置 <small>Frozen source experiment</small></span>
         <strong>{templates.loading ? "正在读取…" : incompatibleFrozenSource ? "该实验使用旧版评测合同，不能按原配置重新评测" : selectedTemplate?.name ?? "没有可用的冻结配置"}</strong>
-        <code>{effectiveSourceExperimentId || defaultExperimentId}</code><small>{incompatibleFrozenSource ? "M3.0 只接受 Manifest 4.0 与 Adapter 2.0；请从数据集页面选择 Case，并使用 M3 冻结设计新建评测。" : "重新评测不可更换考生；需要更换时请从数据集页面新建评测。"}</small>
+        <code>{effectiveSourceExperimentId || defaultExperimentId}</code><small>{incompatibleFrozenSource ? "当前 M3.1 只接受 Manifest 5.0 与 Candidate Adapter 3.0；旧实验继续保留查看，但不能冒充真实产品复评。" : "重新评测不可更换考生；需要更换时请从数据集页面新建评测。"}</small>
         {incompatibleFrozenSource && <a className="text-link" href="/datasets">前往数据集与 Case →</a>}</div>}
       <label>每个 Seed 的重复次数 <small>Replicates per Seed</small><select value={repetitions} onChange={(event) => { setRepetitions(Number(event.target.value)); setPreflight(null); }}>{[1,2,3,4,5].map((value) => <option value={value} key={value}>{value} 次</option>)}</select></label>
       <label className="full">评测原因 <small>Audit reason</small><textarea rows={3} value={reason} onChange={(event) => { setReason(event.target.value); setPreflight(null); }} placeholder="例如：验证新版本是否修复了误判且没有回归" /></label>
@@ -483,7 +500,10 @@ function RunComposer({ intent, caseRefs, defaultExperimentId, datasetRef, onClos
 function PreflightCard({ data }: { data: Json }) {
   return <section className={`preflight-card ${data.ready ? "ready" : "blocked"}`}><div className="preflight-head"><div><strong>{data.ready ? "✓ 可以开始" : "× 暂不能开始"}</strong><small>执行前检查（Preflight）</small></div><Tag>{data.mode_label}</Tag></div>
     <div className="preflight-grid"><KeyValue label="评测题目（Cases）" value={data.case_refs.length} /><KeyValue label="参评考生（Contestants）" value={data.contestant_refs.map(contestantDisplayName).join("、")} /><KeyValue label="环境种子（Seeds）" value={(data.environment_seeds ?? []).join("、")} /><KeyValue label="单次评测（Trials）" value={data.total_trials} /><KeyValue label="预计耗时" value={formatDuration(data.estimated_duration_ms)} />
-      <KeyValue label="最大工具调用" value={data.budget.maximum_tool_calls} /><KeyValue label="并发数（Concurrency）" value={data.budget.concurrency} /></div>
+      <KeyValue label="最大工具调用" value={data.budget.maximum_tool_calls} /><KeyValue label="申请并发（Requested）" value={data.budget.requested_concurrency} /><KeyValue label="安全并发（Effective）" value={data.budget.effective_concurrency} /></div>
+    <div className="selected-summary"><strong>真实考生开考检查（Candidate readiness）</strong>
+      {(data.candidate_checks ?? []).map((item: Json) => <span key={item.ref}>{item.ready ? "✓" : "×"} {contestantDisplayName(item.ref)}：{item.kind === "TEST_DOUBLE" ? "工程测试替身，仅用于平台自测" : item.ready ? `外部产品可达，版本指纹一致，${item.isolation?.safe_parallelism ?? 1} 个安全隔离槽位` : item.error ?? "未就绪"}</span>)}
+      <span>{data.budget.isolation_note}</span></div>
     <p className={data.affects_official_score ? "official-warning" : "diagnostic-note"}>{data.score_notice}</p>
     <div className="readiness-list">{Object.entries(data.readiness ?? {}).map(([name, ready]) => <span key={name} className={ready ? "yes" : "no"}>{ready ? "✓" : "×"} {readinessLabel(name)}</span>)}</div>
     {data.blockers?.map((item: string) => <ErrorBox key={item} text={item} />)}<small className="cost-note">费用说明：{data.cost_note}</small></section>;
@@ -507,7 +527,12 @@ function EvaluationTaskCenter() {
         {current.error && <ErrorBox text={current.error} />}<SectionHead title="按 Case 查看稳定性" sub="分差范围越小，重复运行越稳定；至少两次有效结果才计算" />
         <div className="stability-strip">{current.case_summaries.map((item: Json) => <div key={item.case_ref}><strong>{item.case_ref}</strong><span>原分差 {formatScore(item.baseline_stability_range)} → 新分差 {formatScore(item.current_stability_range)}</span><small>新通过率 {item.current_pass_rate === null ? "—" : `${Math.round(item.current_pass_rate * 100)}%`}</small></div>)}</div>
         <SectionHead title="原结果与新结果对比" sub="逐次比较分数、通过结论、耗时、工具、费用与安全硬门禁；空白表示还在运行或没有历史基线" />
-        <div className="table-scroll"><table className="data-table comparison-table"><thead><tr><th>Case / 参评架构</th><th>分数变化</th><th>通过变化</th><th>时长变化</th><th>工具变化</th><th>费用变化</th><th>硬门禁变化</th><th>新 Trial</th></tr></thead><tbody>{current.items.map((item: Json) => <tr key={item.id}><td><strong>{item.case_ref}</strong><small>{item.contestant_ref} · 第 {item.repeat_index} 次</small></td><td>{formatScore(item.baseline?.score)} → {formatScore(item.current?.score)}</td><td>{comparePassed(item.baseline?.passed, item.current?.passed)}</td><td>{compareMetric(item.baseline?.duration_ms, item.current?.duration_ms, formatDuration)}</td><td>{compareMetric(item.baseline?.tool_calls, item.current?.tool_calls, String)}</td><td>{costChange(item.baseline, item.current)}</td><td>{hardGateChange(item.baseline, item.current)}</td><td>{item.trial_id ? <a className="text-link" href={`/trials/${item.trial_id}`}>查看 Trial →</a> : <Status status={item.status} />}</td></tr>)}</tbody></table></div>
+        <div className="table-scroll"><table className="data-table comparison-table"><thead><tr><th>Case / 参评架构</th><th>分数变化</th><th>通过变化</th><th>时长变化</th><th>工具变化</th><th>费用变化</th><th>硬门禁变化</th><th>新 Trial</th></tr></thead><tbody>{current.items.map((item: Json) => <tr key={item.id}
+          className={item.trial_id ? "clickable-row" : ""} role={item.trial_id ? "link" : undefined} tabIndex={item.trial_id ? 0 : undefined}
+          aria-label={item.trial_id ? `打开 ${item.case_ref} 的新 Trial` : undefined}
+          onClick={(event) => item.trial_id && navigateRow(event, `/trials/${item.trial_id}`)}
+          onKeyDown={(event) => item.trial_id && navigateRowByKeyboard(event, `/trials/${item.trial_id}`)}>
+          <td><strong>{item.case_ref}</strong><small>{item.contestant_ref} · 第 {item.repeat_index} 次</small></td><td>{formatScore(item.baseline?.score)} → {formatScore(item.current?.score)}</td><td>{comparePassed(item.baseline?.passed, item.current?.passed)}</td><td>{compareMetric(item.baseline?.duration_ms, item.current?.duration_ms, formatDuration)}</td><td>{compareMetric(item.baseline?.tool_calls, item.current?.tool_calls, String)}</td><td>{costChange(item.baseline, item.current)}</td><td>{hardGateChange(item.baseline, item.current)}</td><td>{item.trial_id ? <a className="text-link" href={`/trials/${item.trial_id}`}>查看单次评测（Trial）→</a> : <Status status={item.status} />}</td></tr>)}</tbody></table></div>
         {current.created_experiment_id && <a className="primary-link" href={`/experiments/${current.created_experiment_id}`}>打开新实验与全部证据 →</a>}</> : <Empty text="选择一个评测任务查看详情" />}</section></div>
   </section>;
 }
@@ -525,7 +550,7 @@ function Progress({ value, text }: { value: number; text: string }) { return <di
 function Authority({ n, title, badge, text }: { n: string; title: string; badge: string; text: string }) { return <div className="authority"><span>{n}</span><div><div><strong>{title}</strong><Tag>{badge}</Tag></div><p>{text}</p></div></div>; }
 function KeyValue({ label, value }: { label: string; value: any }) { return <div className="key-value"><span>{label}</span><strong>{String(value ?? "—")}</strong></div>; }
 function Mini({ label, value }: { label: string; value: any }) { return <div className="mini"><strong>{value}</strong><span>{label}</span></div>; }
-function ScoreBadge({ score, passed, large = false }: { score: any; passed: boolean; large?: boolean }) { return <div className={`score-badge ${passed ? "pass" : "fail"} ${large ? "large" : ""}`}><strong>{formatScore(score)}</strong><span>{passed ? "正式通过" : "未通过"}</span></div>; }
+function ScoreBadge({ score, passed, large = false, official = true }: { score: any; passed: boolean; large?: boolean; official?: boolean }) { return <div className={`score-badge ${passed ? "pass" : "fail"} ${large ? "large" : ""}`}><strong>{formatScore(score)}</strong><span>{passed ? official ? "正式通过" : "本次通过 · 不计正式成绩" : official ? "正式未通过" : "本次未通过"}</span></div>; }
 function JsonBlock({ value, label = "查看结构化原始记录（Raw data）" }: { value: any; label?: string }) { return <details className="json-block"><summary>{label}</summary><pre>{JSON.stringify(value ?? {}, null, 2)}</pre></details>; }
 function ErrorBox({ text }: { text: string }) { return <div className="error-box"><strong>无法加载</strong><span>{text}</span></div>; }
 function Empty({ text }: { text: string }) { return <div className="empty"><span>◇</span><p>{text}</p></div>; }
@@ -533,7 +558,7 @@ function Loading({ inline = false }: { inline?: boolean }) { return <div classNa
 function shortHash(value: any) { const text = String(value ?? "").replace(/^sha256:/, ""); return text ? `${text.slice(0, 8)}…${text.slice(-6)}` : "—"; }
 function formatDuration(value: any) { const ms = Number(value); if (!Number.isFinite(ms)) return "—"; if (ms < 1000) return `${ms}ms`; if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`; return `${Math.floor(ms / 60000)}m ${Math.round(ms % 60000 / 1000)}s`; }
 function formatBytes(value: any) { const bytes = Number(value ?? 0); if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`; return `${(bytes / 1024 ** 2).toFixed(1)} MB`; }
-function laneLabel(value: any) { return value === "PRODUCT_E2E" ? "商用产品通道（Product E2E）" : value === "AGENT_CAPABILITY" ? "Agent 能力通道（Agent capability）" : value ?? "—"; }
+function laneLabel(value: any) { return ({ ENGINEERING_TEST: "工程自测通道（Engineering test）", AGENT_CAPABILITY: "Agent 能力通道（Agent capability）", CONTROLLED_CLOSURE: "受控闭环通道（Controlled closure）", PRODUCT_RELIABILITY: "产品可靠性通道（Product reliability）" } as Record<string,string>)[value] ?? value ?? "—"; }
 function formatScore(value: any) { if (value === null || value === undefined || value === "") return "—"; const score = Number(value); return Number.isFinite(score) ? score.toFixed(2) : "—"; }
 function formatCost(value: any) { const cost = Number(value); return Number.isFinite(cost) ? `$${cost.toFixed(4)}` : "—"; }
 function formatTime(value: any) { if (!value) return "—"; return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(value)); }
@@ -541,10 +566,15 @@ function humanize(value: string) { return String(value).replaceAll("_", " ").rep
 function contestantDisplayName(value: string) { const ref = String(value ?? ""); const normalized = ref.toLowerCase();
   if (normalized.includes("langgraph")) return "LangGraph OpsMind";
   if (normalized.includes("agent-harness") || normalized.includes("agentic") || normalized.includes("claude")) return "Agent+Harness OpsMind";
-  if (normalized === "mock-contestant-a") return "模拟考生 A（Test double）";
-  if (normalized === "mock-contestant-b") return "模拟考生 B（Test double）";
+  if (["mock-contestant-a", "test-double-a"].includes(normalized)) return "工程测试替身 A（Test double · 非真实考生）";
+  if (["mock-contestant-b", "test-double-b"].includes(normalized)) return "工程测试替身 B（Test double · 非真实考生）";
   return ref;
 }
+function runClassLabel(value: any) { return value === "REAL_CANDIDATE" ? "真实考生（Real candidate）" : value === "ENGINEERING_TEST" ? "工程测试替身（Engineering test only）" : "历史实验（Legacy record）"; }
+function RunClassBadge({ value }: { value: any }) { return <Tag>{runClassLabel(value)}</Tag>; }
+function operationModeLabel(value: any) { return ({ diagnosis_only: "只诊断（Diagnosis only）", human_collaboration: "人工审批（Human approval）", controlled_auto: "受控自动修复（Controlled auto）" } as Record<string,string>)[value] ?? value ?? "未标注（Not specified）"; }
+function hardGateLabel(value: string) { return ({ task_outcome: "任务结果（Task outcome）", evidence_integrity: "证据完整性（Evidence integrity）", scope_safety: "范围安全（Scope safety）", approval_integrity: "审批完整性（Approval integrity）", execution_safety: "执行安全（Execution safety）", independent_verification: "独立验证（Independent verification）", reset_integrity: "环境复位（Reset integrity）", expected_status: "结果状态符合预期（Expected status）", root_cause_or_justified_inconclusive: "根因正确或有理有据地停止（Root cause / justified stop）", no_forbidden_claim: "没有禁断结论（No forbidden claim）", evidence_traceable: "证据可追溯（Traceable evidence）", minimum_evidence_recall: "关键证据覆盖（Evidence recall）", recovery: "失败恢复（Recovery）", no_unsafe_tool_attempt: "无越权尝试（No unsafe attempt）", environment_task_success: "实验环境任务成功（Environment task）" } as Record<string,string>)[value] ?? humanize(value); }
+function yesNo(value: any) { return value ? "是（Yes）" : "否（No）"; }
 function requestKindLabel(value: string) { return value === "RERUN_FROZEN" ? "按原配置重新评测（Rerun）" : "新建评测（New evaluation）"; }
 function stableToken(value: unknown) { const text = JSON.stringify(value); let hash = 2166136261;
   for (let index = 0; index < text.length; index += 1) { hash ^= text.charCodeAt(index); hash = Math.imul(hash, 16777619); }
@@ -552,15 +582,18 @@ function stableToken(value: unknown) { const text = JSON.stringify(value); let h
 }
 function analysisMode(value: string) { return ({ optimization_research: "优化深研", case_diagnosis: "Case 诊断", score_explanation: "评分解释" } as Record<string, string>)[value] ?? humanize(value); }
 function modeLabel(value: string) { return ({ QUICK_VALIDATION: "快速验证（Quick validation）", TARGETED_REGRESSION: "定向回归（Targeted regression）", FORMAL: "正式评测（Formal evaluation）" } as Record<string,string>)[value] ?? value; }
-function readinessLabel(value: string) { return ({ model_and_adapter: "模型与适配器（Model & adapter）", twin: "数字孪生环境（Twin）", isolated_namespace: "隔离运行空间（Namespace）", environment_reset: "环境复位（Reset）", deterministic_grader: "确定性评分器（Code grader）" } as Record<string,string>)[value] ?? humanize(value); }
+function readinessLabel(value: string) { return ({ model_and_adapter: "模型与适配器（Model & adapter）", twin: "数字孪生环境（Twin）", run_class_separation: "真实考生与测试替身隔离（Run class）", external_candidate_api: "真实产品公开接口（Product API）", candidate_fingerprint: "考生版本指纹一致（Fingerprint）", approval_identity_separation: "提交、审批、管理账号分离（Separation of duties）", candidate_least_privilege: "三个评测账号均为最小权限（Least privilege）", candidate_tenant_isolation: "考生评测租户隔离（Tenant isolation）", formal_release_gate: "正式开考放行（Formal gate）", isolated_namespace: "Trial 隔离运行空间（Namespace）", environment_reset: "环境复位（Reset）", deterministic_grader: "确定性评分器（Code grader）" } as Record<string,string>)[value] ?? humanize(value); }
 function comparePassed(before: any, after: any) { if (after === null || after === undefined) return "等待结果"; if (before === null || before === undefined) return after ? "— → 通过" : "— → 未通过"; return `${before ? "通过" : "未通过"} → ${after ? "通过" : "未通过"}`; }
 function compareMetric(before: any, after: any, formatter: (value: any) => string) { if (after === null || after === undefined) return "等待结果"; return `${before === null || before === undefined ? "—" : formatter(before)} → ${formatter(after)}`; }
 function costChange(before: Json | null, after: Json | null) { if (!after) return "等待结果"; if (after.cost_usd === null || after.cost_usd === undefined) return "未提供（Not reported）"; return `${before?.cost_usd === null || before?.cost_usd === undefined ? "—" : formatCost(before.cost_usd)} → ${formatCost(after.cost_usd)}`; }
 function hardGateChange(before: Json | null, after: Json | null) { if (!after) return "等待结果"; const display = (value: Json | null) => value ? `${value.hard_gates_passed}/${value.hard_gates_total}` : "—"; return `${display(before)} → ${display(after)}`; }
 function average(values: any[]) { const numbers = values.map(Number).filter(Number.isFinite); return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) / numbers.length : null; }
 function navigateRow(event: React.MouseEvent<HTMLElement>, href: string) {
-  if ((event.target as HTMLElement).closest("a,button,input,textarea,select,summary")) return;
-  window.location.assign(href);
+  const target = event.target as HTMLElement;
+  if (target.closest("button,input,textarea,select,summary")) return;
+  const anchor = target.closest("a[href]") as HTMLAnchorElement | null;
+  if (anchor) event.preventDefault();
+  window.location.assign(anchor?.getAttribute("href") ?? href);
 }
 function navigateRowByKeyboard(event: React.KeyboardEvent<HTMLElement>, href: string) {
   if (event.key !== "Enter" && event.key !== " ") return;

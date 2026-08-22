@@ -1,0 +1,27 @@
+{
+  "contract": "evalos-capability-protection.1",
+  "milestone": "M3.1",
+  "rule": "breaking changes are allowed, but an accepted capability may be removed only by an explicit product decision and replacement evidence",
+  "capabilities": [
+    { "id": "CAP-001", "name": "Claude Agent SDK + DeepSeek 智能分析", "owner": "eval-intelligence", "evidence": ["packages/agent-runtime/src/case-investigator.mjs"], "verification": "architecture" },
+    { "id": "CAP-002", "name": "单主 Agent 自主调查循环", "owner": "eval-intelligence", "evidence": ["packages/agent-runtime/src/case-investigator.mjs"], "verification": "architecture" },
+    { "id": "CAP-003", "name": "Claude Agent SDK 原生工具与 Skill", "owner": "eval-intelligence", "evidence": ["packages/agent-runtime/src/case-investigator.mjs", "packages/agent-runtime/opsmind-plugin/skills"], "verification": "architecture" },
+    { "id": "CAP-004", "name": "MCP 由 Agent 动态选择", "owner": "eval-intelligence", "evidence": ["packages/agent-runtime/src/case-investigator.mjs"], "verification": "architecture" },
+    { "id": "CAP-005", "name": "Skill 只教方法、不写死流程", "owner": "eval-intelligence", "evidence": ["packages/agent-runtime/opsmind-plugin/skills"], "verification": "architecture" },
+    { "id": "CAP-006", "name": "Harness 强制考试规则", "owner": "kernel", "evidence": ["packages/kernel/src/evaluation-contract.mjs", "packages/kernel/src/budget.mjs", "packages/kernel/src/ledger.mjs"], "verification": "test" },
+    { "id": "CAP-007", "name": "每个 Trial 独立命名空间", "owner": "kernel", "evidence": ["packages/kernel/src/store.mjs", "packages/kernel/src/runner.mjs"], "verification": "test" },
+    { "id": "CAP-008", "name": "Twin 真实终态与确定性复位", "owner": "twin", "evidence": ["packages/twin-runtime/src/environment.mjs", "packages/twin-runtime/src/ssh-client.mjs"], "verification": "test" },
+    { "id": "CAP-009", "name": "确定性 Code Grader 是官方成绩", "owner": "grader", "evidence": ["packages/kernel/src/grader.mjs", "services/control-api/src/app.mjs"], "verification": "test" },
+    { "id": "CAP-010", "name": "不按工具名和固定顺序评分", "owner": "grader", "evidence": ["packages/kernel/src/grader.mjs"], "verification": "test" },
+    { "id": "CAP-011", "name": "安全停止、提示注入和跨租户拒绝硬门禁", "owner": "grader", "evidence": ["packages/kernel/src/grader.mjs", "packages/kernel/src/runner.mjs"], "verification": "test" },
+    { "id": "CAP-012", "name": "原始机器轨迹、中文解释和分页", "owner": "evidence", "evidence": ["packages/kernel/src/event-semantics.mjs", "services/control-api/src/app.mjs", "apps/console/app/workbench-client.tsx"], "verification": "browser" },
+    { "id": "CAP-013", "name": "冻结源码、证据和版本指纹", "owner": "evidence", "evidence": ["packages/kernel/src/source-snapshot.mjs", "packages/kernel/src/store.mjs"], "verification": "test" },
+    { "id": "CAP-014", "name": "只读 AI Case 调查和权威研究", "owner": "eval-intelligence", "evidence": ["packages/agent-runtime/src/case-investigator.mjs", "apps/console/app/workbench-client.tsx"], "verification": "browser" },
+    { "id": "CAP-015", "name": "新建评测、单个或批量重新评测与预检", "owner": "control-plane", "evidence": ["services/control-api/src/app.mjs", "apps/console/app/workbench-client.tsx"], "verification": "browser" },
+    { "id": "CAP-016", "name": "异步任务、离开页面继续与取消未开始 Trial", "owner": "control-plane", "evidence": ["services/control-api/src/app.mjs", "packages/kernel/src/store.mjs"], "verification": "test" },
+    { "id": "CAP-017", "name": "Regrade 只追加、不覆盖原成绩", "owner": "grader", "evidence": ["services/control-api/src/app.mjs", "packages/kernel/src/store.mjs"], "verification": "test" },
+    { "id": "CAP-018", "name": "快速验证、定向回归和正式评测隔离", "owner": "control-plane", "evidence": ["services/control-api/src/app.mjs", "apps/console/app/workbench-client.tsx"], "verification": "test" },
+    { "id": "CAP-019", "name": "专家评审可选且无改分权", "owner": "measurement", "evidence": ["packages/kernel/src/store.mjs", "services/control-api/src/app.mjs"], "verification": "test" },
+    { "id": "CAP-020", "name": "失败不删除、仿真层级诚实标识", "owner": "evidence", "evidence": ["packages/kernel/src/runner.mjs", "packages/kernel/src/registry.mjs", "apps/console/app/workbench-client.tsx"], "verification": "browser" }
+  ]
+}

@@ -45,13 +45,36 @@ function trialSelect(where = "") {
 }
 
 function manifestRefs(manifest) {
-  if (manifest.manifest_version !== "4.0") throw new Error("EvalOS requires experiment manifest 4.0; legacy manifests are not accepted");
-  if (manifest.milestone !== "M3.0") throw new Error("Manifest 4.0 requires milestone M3.0");
+  if (manifest.manifest_version !== "5.0") throw new Error("EvalOS requires experiment manifest 5.0; legacy manifests are archived read-only and cannot execute");
+  if (manifest.milestone !== "M3.1") throw new Error("Manifest 5.0 requires milestone M3.1");
+  if (!["ENGINEERING_TEST", "REAL_CANDIDATE"].includes(manifest.run_class)) {
+    throw new Error("run_class must be ENGINEERING_TEST or REAL_CANDIDATE");
+  }
   if (!["QUALIFICATION", "CAPACITY_REHEARSAL", "FORMAL"].includes(manifest.evaluation_mode)) {
     throw new Error("evaluation_mode must be QUALIFICATION, CAPACITY_REHEARSAL, or FORMAL");
   }
-  if (!["AGENT_CAPABILITY", "PRODUCT_E2E"].includes(manifest.evaluation_lane)) {
-    throw new Error("evaluation_lane must be AGENT_CAPABILITY or PRODUCT_E2E");
+  if (!["ENGINEERING_TEST", "AGENT_CAPABILITY", "CONTROLLED_CLOSURE", "PRODUCT_RELIABILITY"].includes(manifest.evaluation_lane)) {
+    throw new Error("evaluation_lane is not supported by Manifest 5.0");
+  }
+  if (manifest.run_class === "ENGINEERING_TEST" && manifest.evaluation_lane !== "ENGINEERING_TEST") {
+    throw new Error("engineering test data must use the isolated ENGINEERING_TEST lane");
+  }
+  if (manifest.run_class === "REAL_CANDIDATE" && manifest.evaluation_lane === "ENGINEERING_TEST") {
+    throw new Error("real candidates cannot run in the engineering test lane");
+  }
+  assertUniqueStrings(manifest.operating_modes, "operating_modes");
+  if (manifest.operating_modes.some((mode) => !["diagnosis_only", "human_collaboration", "controlled_auto"].includes(mode))) {
+    throw new Error("operating_modes contains an unsupported commercial mode");
+  }
+  if (!["controlled_simulation", "replay_read_only"].includes(manifest.execution_mode)) {
+    throw new Error("execution_mode must keep production writes closed");
+  }
+  assertExactKeys(manifest.approval_oracle, ["ref", "digest", "decision_source", "timeout_ms", "separation_of_duties"], "approval_oracle");
+  if (!manifest.approval_oracle.ref || !SHA256_DIGEST.test(manifest.approval_oracle.digest) ||
+      manifest.approval_oracle.decision_source !== "frozen_case_contract" ||
+      !Number.isInteger(manifest.approval_oracle.timeout_ms) || manifest.approval_oracle.timeout_ms < 1000 ||
+      manifest.approval_oracle.separation_of_duties !== true) {
+    throw new Error("approval_oracle must be frozen, deterministic and independent from the candidate");
   }
   if (!manifest.suite_ref || !manifest.dataset_ref) throw new Error("suite_ref and dataset_ref are required");
   if (!Array.isArray(manifest.case_refs) || !manifest.case_refs.length || new Set(manifest.case_refs).size !== manifest.case_refs.length) {
@@ -86,14 +109,24 @@ function manifestRefs(manifest) {
     throw new Error(`${manifest.design} requires exactly ${expectedContestants} contestant(s)`);
   }
   for (const contestant of manifest.contestants) {
-    if (!contestant.ref || contestant.adapter_contract_version !== "2.0" || !contestant.adapter_version ||
-        !contestant.source_revision || !SHA256_DIGEST.test(contestant.artifact_digest) || !SHA256_DIGEST.test(contestant.runtime_digest)) {
-      throw new Error("each contestant must freeze ref, Adapter 2.0, adapter version, source revision, artifact digest, and runtime digest");
+    if (!contestant.ref || !["REAL_PRODUCT", "TEST_DOUBLE"].includes(contestant.kind) || !contestant.architecture ||
+        contestant.adapter_contract_version !== "3.0" || !contestant.adapter_version || !contestant.source_revision ||
+        !SHA256_DIGEST.test(contestant.artifact_digest) || !SHA256_DIGEST.test(contestant.runtime_digest) ||
+        !SHA256_DIGEST.test(contestant.runtime_manifest_digest) || !SHA256_DIGEST.test(contestant.capability_contract_digest)) {
+      throw new Error("each contestant must freeze identity, kind, architecture, Adapter 3.0, source, runtime and capability fingerprints");
     }
+  }
+  const contestantKinds = new Set(manifest.contestants.map((item) => item.kind));
+  if (contestantKinds.size !== 1) throw new Error("test doubles and real candidates must never be mixed in one experiment");
+  if (manifest.run_class === "ENGINEERING_TEST" && !contestantKinds.has("TEST_DOUBLE")) {
+    throw new Error("ENGINEERING_TEST accepts only explicitly labelled TEST_DOUBLE contestants");
+  }
+  if (manifest.run_class === "REAL_CANDIDATE" && !contestantKinds.has("REAL_PRODUCT")) {
+    throw new Error("REAL_CANDIDATE accepts only frozen external REAL_PRODUCT contestants");
   }
   if (!manifest.model || !manifest.frozen_dependencies || !manifest.budget || !manifest.policy ||
       !manifest.retry_policy || !manifest.capacity_policy || !manifest.statistics_policy) {
-    throw new Error("Manifest 4.0 must freeze model, dependencies, budget, policy, retry, capacity, and statistics");
+    throw new Error("Manifest 5.0 must freeze model, dependencies, budget, policy, retry, capacity, and statistics");
   }
   assertExactKeys(manifest.model, ["provider", "id", "interface", "sdk", "thinking", "temperature", "max_turns"], "model");
   if (manifest.model.provider !== "deepseek" || manifest.model.id !== "deepseek-v4-flash" ||
@@ -116,15 +149,15 @@ function manifestRefs(manifest) {
     throw new Error("all frozen budget values must be positive numbers");
   }
 
-  assertExactKeys(manifest.policy, ["allowed_tools", "allowed_native_tools", "forbidden_actions", "heartbeat_ms", "result_contract", "action_approval"], "policy");
+  assertExactKeys(manifest.policy, ["allowed_tools", "allowed_native_tools", "forbidden_actions", "heartbeat_ms", "result_contract", "production_writes", "action_approval"], "policy");
   assertUniqueStrings(manifest.policy.allowed_tools, "policy.allowed_tools");
   assertUniqueStrings(manifest.policy.allowed_native_tools, "policy.allowed_native_tools");
   assertUniqueStrings(manifest.policy.forbidden_actions, "policy.forbidden_actions");
-  assertExactKeys(manifest.policy.action_approval, ["mode", "max_writes_per_trial", "human_approval_required"], "policy.action_approval");
-  if (manifest.policy.action_approval.mode !== "frozen-lab-preauthorization" ||
-      manifest.policy.action_approval.human_approval_required !== false ||
+  if (manifest.policy.production_writes !== false) throw new Error("production writes must remain hard-disabled");
+  assertExactKeys(manifest.policy.action_approval, ["mode", "max_writes_per_trial"], "policy.action_approval");
+  if (manifest.policy.action_approval.mode !== "case-driven-approval-oracle" ||
       !Number.isInteger(manifest.policy.action_approval.max_writes_per_trial) || manifest.policy.action_approval.max_writes_per_trial < 0) {
-    throw new Error("action approval must be frozen isolated-lab preauthorization with a non-negative write limit");
+    throw new Error("action approval must use the frozen approval oracle with a non-negative write limit");
   }
 
   assertExactKeys(manifest.retry_policy, ["max_infrastructure_retries", "retryable_categories", "capability_failures_retryable"], "retry_policy");

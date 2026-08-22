@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsmind.local/contracts/case-contract-v3.schema.json",
+  "title": "OpsMind EvalOS Case Contract 3.0",
+  "description": "考生可见的题面。隐藏答案、审批裁判规则和评分断言不进入本合同。",
+  "type": "object",
+  "required": ["id", "version", "goal", "visible", "source", "environment"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "minLength": 1 },
+    "goal": { "type": "string", "minLength": 1 },
+    "visible": {
+      "type": "object",
+      "required": ["tenant", "scope", "time_window", "success_criteria"],
+      "properties": {
+        "tenant": { "type": "string", "minLength": 1 },
+        "scope": {},
+        "time_window": { "type": "string", "minLength": 1 },
+        "success_criteria": { "type": "object" },
+        "trigger_type": { "type": "string" },
+        "operating_mode": { "enum": ["diagnosis_only", "human_collaboration", "controlled_auto"] }
+      },
+      "additionalProperties": true
+    },
+    "source": { "type": "object" },
+    "environment": { "type": ["object", "null"] }
+  },
+  "additionalProperties": false
+}

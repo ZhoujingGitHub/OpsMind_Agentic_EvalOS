@@ -16,7 +16,7 @@ const IDENTITY_KEYS = new Set([
   "passed",
 ]);
 
-const IDENTITY_VALUE = /(?:@anthropic-ai\/claude-agent-sdk|claude-agent-sdk|deepseek-v4-flash|agent-harness-v2|langgraph-v1|deterministic-replay-brain|mock-contestant-[a-z0-9_-]+)/gi;
+const IDENTITY_VALUE = /(?:@anthropic-ai\/claude-agent-sdk|claude-agent-sdk|deepseek-v4-flash|agent-harness-v2|langgraph-v1|explicit-engineering-test-double|test-double-[a-z0-9_-]+)/gi;
 
 function stripIdentity(value) {
   if (Array.isArray(value)) return value.map(stripIdentity);

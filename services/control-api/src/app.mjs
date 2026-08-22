@@ -2,14 +2,14 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  CASES, M2_CASES, M3_CASES, DeterministicGradingService, EvalStore, EvaluationLedger, PrivateLabelStore, TrialRunner,
+  CASES, M2_CASES, M3_CASES, DeterministicGradingService, EvalStore, EvaluationLedger, FrozenApprovalOracle, PrivateLabelStore, TrialRunner,
   auditableGraderRunView, blindExperimentView, blindGraderRunView, blindTraceView, blindTrialView,
-  expertCalibrationFromConsensusSamples, createEvalRegistry, createCaseEnvironment, createMockContestant,
+  expertCalibrationFromConsensusSamples, createEvalRegistry, createCaseEnvironment, createTestDouble,
   evaluationEvidenceTraceView, explainTraceRecord, TRACE_FILTERS, readSnapshotFile, sha256,
 } from "../../../packages/kernel/src/index.mjs";
 import {
-  BLIND_JUDGE_VERSION, DEEPSEEK_AGENT_RUNTIME, LANGGRAPH_RUNTIME, createDeepSeekClaudeAgentAdapter, createLangGraphAdapter,
-  CASE_INVESTIGATOR_RUNTIME, ProductToolBridgeRegistry, createCaseInvestigator, createProductE2EAdapter, judgeRecordAndSummarize,
+  BLIND_JUDGE_VERSION, CASE_INVESTIGATOR_RUNTIME, createAgentHarnessProductConnector, createCandidateAdapterV3,
+  createCaseInvestigator, createLangGraphProductConnector, judgeRecordAndSummarize,
 } from "../../../packages/agent-runtime/src/index.mjs";
 import { ProtocolTwinEnvironment, SshTwinClient } from "../../../packages/twin-runtime/src/index.mjs";
 
@@ -22,6 +22,12 @@ function json(response, status = 200, headers = {}) {
 
 function publicTrial(trial) {
   return blindTrialView(trial);
+}
+
+export function evaluationRunName(sourceName, mode) {
+  const runLabel = mode === "QUICK_VALIDATION" ? "快速验证" : mode === "TARGETED_REGRESSION" ? "定向回归" : "正式评测";
+  const baseName = String(sourceName).replace(/^(快速验证|定向回归|正式评测)\s*·\s*/u, "");
+  return `${runLabel} · ${baseName}`;
 }
 
 export function createApp({
@@ -37,6 +43,7 @@ export function createApp({
   allowedOrigin = process.env.EVALOS_ALLOWED_ORIGIN ?? "http://127.0.0.1:3000",
   caseInvestigator = null,
   bootstrapM3Design = false,
+  bootstrapEngineeringTestDesign = false,
   m3DesignManifest = null,
   formalM3RunEnabled = process.env.EVALOS_M3_FORMAL_RUN_ENABLED === "1",
 } = {}) {
@@ -49,14 +56,16 @@ export function createApp({
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const privateLabelHash = labels.publishRegistry(registry);
   store.publishRegistry(registry, { privateLabelHash });
-  store.registerGraderSpec({ id: "evalos-code-grader", version: "4.2.0", type: "code", status: "APPROVED",
+  store.registerGraderSpec({ id: "evalos-code-grader", version: "5.0.0", type: "code", status: "APPROVED",
     definition: { weights: "25/15/15/15/15/5/5/5", safety: "non-compensable-hard-gate",
       l2_environment_task: "non-compensable-hard-gate" } });
   const gradingService = new DeterministicGradingService({ labelStore: labels,
-    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@4.2.0" });
+    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@5.0.0" });
+  const approvalOracle = new FrozenApprovalOracle({ labelStore: labels });
   const ledger = new EvaluationLedger(store);
+  const frozenM31Manifest = m3DesignManifest ?? JSON.parse(readFileSync(path.join(ROOT, "config", "m3-formal-agent-capability.manifest.json"), "utf8"));
   if (bootstrapM3Design) {
-    const frozenManifest = m3DesignManifest ?? JSON.parse(readFileSync(path.join(ROOT, "config", "m3-formal-agent-capability.manifest.json"), "utf8"));
+    const frozenManifest = frozenM31Manifest;
     // A frozen design is immutable. A release that intentionally changes any
     // part of the contract must create a new audited design instead of trying
     // to overwrite the previous idempotent record during process startup.
@@ -67,31 +76,50 @@ export function createApp({
         planned_trial_count: frozenManifest.case_refs.length * frozenManifest.environment_seeds.length * frozenManifest.contestants.length,
         execution_authorized: false } });
   }
-  const adapters = {
-    "mock-contestant-a": createMockContestant("mock-contestant-a", "context-first"),
-    "mock-contestant-b": createMockContestant("mock-contestant-b", "metric-first"),
-  };
-  const liveDeepSeekAvailable = Boolean(process.env.DEEPSEEK_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN ?? process.env.ANTHROPIC_API_KEY);
-  if (liveDeepSeekAvailable) adapters["agent-harness-v2"] = createDeepSeekClaudeAgentAdapter();
-  const liveLangGraphAvailable = liveDeepSeekAvailable && Boolean(process.env.OPSMIND_LANGGRAPH_PYTHON && process.env.OPSMIND_LANGGRAPH_ROOT);
-  if (liveLangGraphAvailable) adapters["langgraph-v1"] = createLangGraphAdapter();
-  const productAdapterConfig = {
-    "agent-harness-v2": { endpoint: process.env.EVALOS_AGENT_PRODUCT_ADAPTER_URL,
-      token: process.env.EVALOS_AGENT_PRODUCT_ADAPTER_TOKEN },
-    "langgraph-v1": { endpoint: process.env.EVALOS_LANGGRAPH_PRODUCT_ADAPTER_URL,
-      token: process.env.EVALOS_LANGGRAPH_PRODUCT_ADAPTER_TOKEN },
-  };
-  const productToolBridgeRegistry = new ProductToolBridgeRegistry();
-  const productToolBridgeOrigin = process.env.EVALOS_PRODUCT_TOOL_BRIDGE_ORIGIN;
-  for (const [ref, config] of Object.entries(productAdapterConfig)) {
-    if (config.endpoint && config.token && productToolBridgeOrigin) adapters[`${ref}:PRODUCT_E2E`] = createProductE2EAdapter({
-      id: ref, ...config, bridgeRegistry: productToolBridgeRegistry, bridgePublicOrigin: productToolBridgeOrigin,
-    });
+  if (bootstrapEngineeringTestDesign) {
+    const engineeringManifest = JSON.parse(readFileSync(path.join(ROOT, "config", "m15-smoke.manifest.json"), "utf8"));
+    const designKey = `engineering-test-design:${sha256(engineeringManifest)}`;
+    const frozen = store.createExperiment(engineeringManifest, designKey, { scheduleTrials: false });
+    if (frozen.created) ledger.append({ entityType: "experiment", entityId: frozen.experiment.id,
+      action: "experiment.engineering_test_design_registered", payload: {
+        manifest_hash: frozen.experiment.manifest_hash,
+        run_class: "ENGINEERING_TEST",
+        candidate_kind: "TEST_DOUBLE",
+        affects_official_score: false,
+        execution_authorized: false,
+      } });
   }
+  const adapters = {
+    "test-double-a:ENGINEERING_TEST": createTestDouble("test-double-a", "context-first"),
+    "test-double-b:ENGINEERING_TEST": createTestDouble("test-double-b", "metric-first"),
+  };
+  const frozenCandidate = (ref) => frozenM31Manifest.contestants.find((item) => item.ref === ref);
+  const realCandidateConnectors = {};
+  const connectorConfigs = [
+    { ref: "agent-harness-v2", origin: process.env.EVALOS_AGENT_HARNESS_ORIGIN,
+      token: process.env.EVALOS_AGENT_HARNESS_TOKEN, approvalToken: process.env.EVALOS_AGENT_HARNESS_APPROVAL_TOKEN,
+      adminToken: process.env.EVALOS_AGENT_HARNESS_ADMIN_TOKEN, tenantId: process.env.EVALOS_AGENT_HARNESS_TENANT_ID,
+      create: createAgentHarnessProductConnector },
+    { ref: "langgraph-v1", origin: process.env.EVALOS_LANGGRAPH_ORIGIN,
+      token: process.env.EVALOS_LANGGRAPH_TOKEN, approvalToken: process.env.EVALOS_LANGGRAPH_APPROVAL_TOKEN,
+      adminToken: process.env.EVALOS_LANGGRAPH_ADMIN_TOKEN, tenantId: process.env.EVALOS_LANGGRAPH_TENANT_ID,
+      create: createLangGraphProductConnector },
+  ];
+  for (const config of connectorConfigs) {
+    const frozen = frozenCandidate(config.ref);
+    if (!config.origin || !config.token || !config.approvalToken || !config.adminToken || !config.tenantId || !frozen) continue;
+    const connector = config.create({ origin: config.origin, token: config.token,
+      approvalToken: config.approvalToken, adminToken: config.adminToken, tenantId: config.tenantId,
+      attestation: { source_revision: frozen.source_revision, artifact_digest: frozen.artifact_digest } });
+    const adapter = createCandidateAdapterV3({ id: config.ref, connector });
+    realCandidateConnectors[config.ref] = connector;
+    for (const lane of adapter.supportedEvaluationLanes) adapters[`${config.ref}:${lane}`] = adapter;
+  }
+  const liveDeepSeekAvailable = Boolean(process.env.DEEPSEEK_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN ?? process.env.ANTHROPIC_API_KEY);
   const adapterFor = (ref, lane) => adapters[`${ref}:${lane}`] ?? adapters[ref];
   const twinConfigured = Boolean(process.env.EVALOS_TWIN_HOST && process.env.EVALOS_TWIN_SSH_KEY && process.env.EVALOS_TWIN_KNOWN_HOSTS);
   const twinClient = twinConfigured ? new SshTwinClient() : null;
-  const runner = new TrialRunner({ store, ledger, adapters, gradingService,
+  const runner = new TrialRunner({ store, ledger, adapters, gradingService, approvalOracle,
     environmentFactory: ({ caseSpec, trial }) => caseSpec.source?.level === "L2"
       ? new ProtocolTwinEnvironment({ client: twinClient, caseSpec, trial })
       : createCaseEnvironment(caseSpec) });
@@ -122,7 +150,8 @@ export function createApp({
   const workbenchExperiments = () => store.listExperiments().map((experiment) => {
     const summary = store.experimentSummary(experiment.id);
     const trials = store.listTrials(experiment.id, { includeReplays: false });
-    const frozenDesign = trials.length === 0 && experiment.manifest.evaluation_mode === "FORMAL";
+    const frozenDesign = trials.length === 0 && (experiment.manifest.evaluation_mode === "FORMAL"
+      || experiment.manifest.run_class === "ENGINEERING_TEST");
     const plannedCaseRefs = experiment.manifest.case_refs ?? [];
     const plannedContestants = experiment.manifest.contestants ?? [];
     const plannedSeeds = experiment.manifest.environment_seeds ?? [];
@@ -131,6 +160,8 @@ export function createApp({
       [partition, plannedCaseRefs.filter((caseRef) => caseRef.startsWith(`M3-${partition}-`)).length]));
     return { id: experiment.id, name: experiment.name, status: frozenDesign ? "FROZEN" : experiment.status, design: experiment.manifest.design,
       manifest_version: experiment.manifest.manifest_version,
+      run_class: experiment.manifest.run_class, evaluation_lane: experiment.manifest.evaluation_lane,
+      operating_modes: experiment.manifest.operating_modes, execution_mode: experiment.manifest.execution_mode,
       evaluation_mode: evaluationMode(experiment), affects_official_score: evaluationMode(experiment) === "FORMAL",
       frozen_design: frozenDesign, planned_case_count: plannedCaseRefs.length,
       planned_contestant_count: plannedContestants.length,
@@ -138,8 +169,9 @@ export function createApp({
       partition_counts: partitionCounts,
       dataset_ref: experiment.dataset_ref, suite_ref: experiment.suite_ref, manifest_hash: experiment.manifest_hash,
       model: experiment.manifest.model ?? null, contestants: experiment.status === "COMPLETED"
-        ? experiment.manifest.contestants?.map(({ ref, adapter_version, source_revision, artifact_digest }) =>
-          ({ ref, adapter_version, source_revision, artifact_digest })) : store.listBlinds(experiment.id).map(({ blind_id }) => ({ ref: blind_id })),
+        ? experiment.manifest.contestants?.map(({ ref, kind, architecture, adapter_version, source_revision, artifact_digest }) =>
+          ({ ref, kind, architecture, adapter_version, source_revision, artifact_digest }))
+        : store.listBlinds(experiment.id).map(({ blind_id }) => ({ ref: blind_id, kind: "BLINDED" })),
       progress: { completed: summary.completed_trials, failed: summary.failed_trials, total: summary.trial_count,
         rate: summary.completion_rate }, average_score: summary.average_score,
       analyses: trials.reduce((sum, trial) => sum + store.listAnalysisRuns(trial.id).length, 0),
@@ -155,7 +187,9 @@ export function createApp({
     });
     const latest = [...trials].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))).at(-1) ?? null;
     return { case_ref: item.case_ref, case_id: item.case_id, version: item.version, dataset_ref: item.dataset_ref,
-      goal: item.public.goal, scope: item.public.visible?.scope ?? null, metadata: item.metadata,
+      goal: item.public.goal, scope: item.public.visible?.scope ?? null,
+      operating_mode: item.public.visible?.operating_mode ?? null,
+      operating_mode_label: item.public.visible?.operating_mode_label ?? null, metadata: item.metadata,
       level: item.metadata?.level ?? store.listDatasets().find((dataset) => dataset.dataset_ref === item.dataset_ref)?.level,
       trial_count: trials.length, completed_trials: trials.filter((trial) => trial.status === "COMPLETED").length,
       average_score: scores.length ? Number((scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(2)) : null,
@@ -175,6 +209,11 @@ export function createApp({
       id: trial.id,
       experiment_id: trial.experiment_id,
       experiment_name: experiment?.name ?? trial.experiment_id,
+      run_class: experiment?.manifest?.run_class ?? null,
+      evaluation_lane: experiment?.manifest?.evaluation_lane ?? null,
+      evaluation_mode: evaluationMode(experiment),
+      affects_official_score: evaluationMode(experiment) === "FORMAL",
+      candidate_kind: experiment?.manifest?.contestants?.find((item) => item.ref === trial.contestant_ref)?.kind ?? null,
       case_ref: trial.case_ref,
       contestant: experiment?.status === "COMPLETED" ? trial.contestant_ref : trial.blind_id,
       status: trial.status,
@@ -192,14 +231,14 @@ export function createApp({
     };
   });
 
-  const preflightEvaluation = (body) => {
+  const preflightEvaluation = async (body) => {
     const mode = body.mode ?? "QUICK_VALIDATION";
     if (!new Set(["QUICK_VALIDATION", "TARGETED_REGRESSION", "FORMAL"]).has(mode)) throw new Error("invalid evaluation run mode");
     const requestKind = body.request_kind;
     if (!new Set(["RERUN_FROZEN", "NEW_EVALUATION"]).has(requestKind)) throw new Error("必须明确选择按原配置重新评测或新建评测");
     const source = store.getExperiment(body.source_experiment_id);
     if (!source) throw new Error("source experiment is required");
-    if (source.manifest.manifest_version !== "4.0") throw new Error("冻结参评配置仍是旧版合同；M3.0 只接受 Manifest 4.0，请选择或创建新版实验配置");
+    if (source.manifest.manifest_version !== "5.0") throw new Error("冻结参评配置属于旧版只读历史；M3.1 只执行 Manifest 5.0，请选择新版实验配置");
     const suite = store.listSuites().find((item) => item.suite_ref === source.suite_ref);
     const caseRefs = [...new Set(body.case_refs ?? [])];
     if (!caseRefs.length) throw new Error("at least one case is required");
@@ -248,12 +287,55 @@ export function createApp({
     const needsTwin = caseRefs.some((caseRef) => store.getExecutionCase(caseRef)?.source?.level === "L2");
     const missingAdapters = contestants.map((item) => item.ref).filter((ref) => !adapterFor(ref, source.manifest.evaluation_lane)
       || !adapterFor(ref, source.manifest.evaluation_lane).supportedEvaluationLanes?.includes(source.manifest.evaluation_lane));
+    const runClassViolations = contestants.flatMap((item) => {
+      if (source.manifest.run_class === "ENGINEERING_TEST" && item.kind !== "TEST_DOUBLE") {
+        return [`工程测试实验只能使用明确标注的测试替身：${item.ref}`];
+      }
+      if (source.manifest.run_class === "REAL_CANDIDATE" && item.kind !== "REAL_PRODUCT") {
+        return [`真实评测实验禁止使用测试替身或内部考生分身：${item.ref}`];
+      }
+      if (item.kind === "TEST_DOUBLE" && source.manifest.evaluation_lane !== "ENGINEERING_TEST") {
+        return [`测试替身只能进入工程测试通道：${item.ref}`];
+      }
+      if (item.kind === "REAL_PRODUCT" && source.manifest.evaluation_lane === "ENGINEERING_TEST") {
+        return [`真实产品不能伪装成工程测试替身：${item.ref}`];
+      }
+      return [];
+    });
+    const candidateChecks = await Promise.all(contestants.map(async (contestant) => {
+      if (contestant.kind === "TEST_DOUBLE") {
+        return { ref: contestant.ref, kind: "TEST_DOUBLE", ready: true, label: "工程测试替身（不进入真实成绩）",
+          isolation: { safe_parallelism: Number(source.manifest.capacity_policy?.runner_workers ?? 1) } };
+      }
+      const adapter = adapterFor(contestant.ref, source.manifest.evaluation_lane);
+      if (!adapter || typeof adapter.preflight !== "function") {
+        return { ref: contestant.ref, kind: contestant.kind, ready: false,
+          error: "真实产品连接器或开考检查未配置" };
+      }
+      try {
+        return { ref: contestant.ref, kind: contestant.kind, ...(await adapter.preflight({ contestant })) };
+      } catch (error) {
+        return { ref: contestant.ref, kind: contestant.kind, ready: false,
+          error: String(error?.message ?? error) };
+      }
+    }));
+    const failedCandidateChecks = candidateChecks.filter((item) => !item.ready);
+    const requestedConcurrency = Math.max(1, Number(source.manifest.capacity_policy?.runner_workers ?? 1));
+    const candidateParallelism = candidateChecks.length
+      ? Math.min(...candidateChecks.map((item) => Number(item.isolation?.safe_parallelism ?? requestedConcurrency)))
+      : 1;
+    const twinParallelism = needsTwin ? Math.max(1, Number(source.manifest.capacity_policy?.twin_slots ?? 1)) : requestedConcurrency;
+    const effectiveConcurrency = Math.max(1, Math.min(requestedConcurrency, candidateParallelism, twinParallelism));
     const blockers = [
       ...(missingAdapters.length ? [`参评适配器未就绪：${missingAdapters.join("、")}`] : []),
+      ...runClassViolations,
+      ...failedCandidateChecks.map((item) => `真实考生开考检查失败（${item.ref}）：${item.error ?? "产品未就绪或冻结指纹不一致"}`),
       ...(needsTwin && !twinConfigured ? ["所选 L2 Case 需要数字孪生环境，但 Twin 尚未配置"] : []),
+      ...(mode === "FORMAL" && effectiveConcurrency < requestedConcurrency
+        ? [`正式评测并发资格未通过：冻结配置要求 ${requestedConcurrency} 并发，当前隔离环境只能安全支持 ${effectiveConcurrency} 并发`] : []),
       ...(mode === "FORMAL" && !formalM3RunEnabled ? ["M3 正式评测尚未放行：Adapter 资格、4/8 并发容量和商用产品通道门禁必须全部通过"] : []),
     ];
-    return { contract: "evalos-preflight.2", ready: blockers.length === 0, blockers,
+    return { contract: "evalos-preflight.3", ready: blockers.length === 0, blockers,
       request_kind: requestKind, evaluation_purpose: evaluationPurpose,
       mode, mode_label: mode === "QUICK_VALIDATION" ? "快速验证（Quick validation）" : mode === "TARGETED_REGRESSION"
         ? "定向回归（Targeted regression）" : "正式评测（Formal evaluation）",
@@ -261,11 +343,24 @@ export function createApp({
       case_refs: caseRefs, contestant_refs: contestants.map((item) => item.ref), environment_seeds: environmentSeeds,
       contestants: contestants.map(({ ref, adapter_version, source_revision, artifact_digest }) =>
         ({ ref, adapter_version, source_revision, artifact_digest })), repetitions, total_trials: totalTrials,
+      candidate_checks: candidateChecks,
       estimated_duration_ms: Math.round(perTrialDuration * totalTrials), estimated_cost_usd: null,
       cost_note: "模型单价未写入冻结合同，平台展示预算与真实用量，不伪造费用估算。",
       budget: { per_trial: source.manifest.budget, maximum_tool_calls: totalTrials * Number(source.manifest.budget?.tool_calls ?? 0),
-        concurrency: Number(source.manifest.capacity_policy?.runner_workers ?? 1) },
+        requested_concurrency: requestedConcurrency, effective_concurrency: effectiveConcurrency,
+        isolation_note: effectiveConcurrency < requestedConcurrency
+          ? "当前按安全隔离槽位降为串行/低并发执行；不会让不同工作模式共享同一租户并发切换。"
+          : "每个并发任务均有冻结的隔离边界。" },
       readiness: { model_and_adapter: missingAdapters.length === 0, twin: !needsTwin || twinConfigured,
+        run_class_separation: runClassViolations.length === 0,
+        external_candidate_api: failedCandidateChecks.length === 0,
+        candidate_fingerprint: failedCandidateChecks.every((item) => !/drift/i.test(item.error ?? "")),
+        approval_identity_separation: candidateChecks.filter((item) => item.kind === "REAL_PRODUCT")
+          .every((item) => item.credentials?.identities_separated === true),
+        candidate_least_privilege: candidateChecks.filter((item) => item.kind === "REAL_PRODUCT")
+          .every((item) => item.credentials?.least_privilege === true),
+        candidate_tenant_isolation: candidateChecks.filter((item) => item.kind === "REAL_PRODUCT")
+          .every((item) => item.isolation?.tenant_bound === true),
         formal_release_gate: mode !== "FORMAL" || formalM3RunEnabled,
         isolated_namespace: true, environment_reset: true, deterministic_grader: true },
       affects_official_score: mode === "FORMAL",
@@ -327,7 +422,7 @@ export function createApp({
         const casePartitions = Object.fromEntries(Object.entries(source.manifest.case_partitions)
           .map(([name, refs]) => [name, refs.filter((ref) => selectedRefs.has(ref))]));
         const manifest = { ...source.manifest,
-          name: `${request.mode === "QUICK_VALIDATION" ? "快速验证" : request.mode === "TARGETED_REGRESSION" ? "定向回归" : "正式评测"} · ${source.name}`,
+          name: evaluationRunName(source.name, request.mode),
           design: contestants.length === 2 ? "paired_comparison" : "single_system_acceptance",
           case_refs: request.selection.case_refs, case_partitions: casePartitions, contestants,
           environment_seeds: request.selection.environment_seeds, replicates_per_seed: request.selection.repetitions,
@@ -375,37 +470,74 @@ export function createApp({
     };
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
     const reviewerDecision = request.method === "POST" && /^\/api\/reviews\/[^/]+\/decisions$/.test(url.pathname);
-    const productToolBridge = request.method === "POST" && url.pathname === "/internal/product-tool-bridge";
-    if (request.method === "POST" && !reviewerDecision && !productToolBridge && !apiToken) {
+    if (request.method === "POST" && !reviewerDecision && !apiToken) {
       return json({ error: "EVALOS_API_TOKEN must be configured before control-plane mutations" }, 503, cors);
     }
-    if (request.method === "POST" && !reviewerDecision && !productToolBridge && !isAdmin(request)) {
+    if (request.method === "POST" && !reviewerDecision && !isAdmin(request)) {
       return json({ error: "authenticated control-plane token required" }, 401, cors);
     }
     try {
-      if (productToolBridge) {
-        const authorization = request.headers.get("authorization") ?? "";
-        const token = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
-        const bridged = await productToolBridgeRegistry.invoke(token, await request.json());
-        return json(bridged.body, bridged.status, cors);
-      }
       if (request.method === "GET" && url.pathname === "/health") {
-        return json({ status: "ok", service: "opsmind-evalos-control-api", contract: "evalos.5", milestone: "M3.0",
+        return json({ status: "ok", service: "opsmind-evalos-control-api", contract: "evalos.6", milestone: "M3.1",
           ledger: ledger.verify(),
-          formal_m3: { enabled: formalM3RunEnabled },
+          formal_run: { enabled: formalM3RunEnabled, guard: "480_TRIAL_NOT_AUTHORIZED" },
           twin: { configured: twinConfigured } }, 200, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/runtime/capabilities") {
-        return json({ live_deepseek_enabled: liveDeepSeekAvailable, live_langgraph_enabled: liveLangGraphAvailable,
-          runtime: DEEPSEEK_AGENT_RUNTIME, external_comparator: LANGGRAPH_RUNTIME, adapters: Object.keys(adapters),
-          product_e2e_adapters: Object.fromEntries(Object.keys(productAdapterConfig).map((ref) =>
-            [ref, Boolean(adapters[`${ref}:PRODUCT_E2E`])])),
+        return json({ contract: "evalos-runtime-capabilities.3", milestone: "M3.1",
+          eval_intelligence_enabled: liveDeepSeekAvailable,
+          candidate_execution: "external-real-products-only", adapters: Object.keys(adapters),
+          real_candidate_adapters: Object.fromEntries(["agent-harness-v2", "langgraph-v1"].map((ref) =>
+            [ref, Boolean(realCandidateConnectors[ref])])),
           case_investigator: { enabled: Boolean(investigator), ...CASE_INVESTIGATOR_RUNTIME },
+          eval_intelligence: { enabled: Boolean(investigator), ...CASE_INVESTIGATOR_RUNTIME,
+            role: "read-only-score-explanation-and-comparison", score_authority: false },
           secret_source: liveDeepSeekAvailable ? "environment-only" : null,
           twin: { configured: twinConfigured, transport: twinConfigured ? "restricted-ssh-command" : null },
           trust_boundary: { execution_plane_private_labels: false, grading_plane_private_labels: true } }, 200, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/datasets") return json({ items: store.listDatasets() }, 200, cors);
+      if (request.method === "GET" && url.pathname === "/api/workbench/candidate-readiness") {
+        const items = [];
+        for (const ref of ["agent-harness-v2", "langgraph-v1"]) {
+          const frozen = frozenCandidate(ref);
+          const adapter = adapterFor(ref, frozenM31Manifest.evaluation_lane);
+          if (!frozen || !adapter || typeof adapter.preflight !== "function") {
+            items.push({ ref, kind: "REAL_PRODUCT", configured: false, ready: false,
+              status_label: "尚未连接", explanation: "EvalOS 尚未取得该真实产品的独立评测凭据或公开产品接口。" });
+            continue;
+          }
+          try {
+            const check = await adapter.preflight({ contestant: frozen });
+            items.push({ ref, kind: "REAL_PRODUCT", configured: true, ready: check.ready,
+              architecture: check.architecture, source_revision: check.source_revision,
+              status_label: check.ready ? "可以参加资格试运行" : "产品未就绪",
+              explanation: check.ready ? "外部产品可达，冻结版本一致，提交/审批/管理身份相互独立且遵守最小权限。"
+                : "产品健康状态、身份隔离、最小权限或评测租户未达到开考要求。",
+              health: check.health, isolation: check.isolation, credentials: check.credentials });
+          } catch (error) {
+            items.push({ ref, kind: "REAL_PRODUCT", configured: true, ready: false, status_label: "开考检查失败",
+              explanation: String(error?.message ?? error) });
+          }
+        }
+        return json({ contract: "evalos-candidate-readiness.1", formal_480_enabled: false, items }, 200, cors);
+      }
+      if (request.method === "GET" && url.pathname === "/api/candidate-adapters/discover") {
+        if (!isAdmin(request)) return json({ error: "authenticated control-plane token required" }, 401, cors);
+        const items = [];
+        for (const ref of ["agent-harness-v2", "langgraph-v1"]) {
+          const connector = realCandidateConnectors[ref];
+          if (!connector) { items.push({ ref, configured: false, ready: false, reason: "connector_not_configured" }); continue; }
+          try {
+            const discovered = await connector.discover();
+            const frozen = frozenCandidate(ref);
+            const drift = ["source_revision", "artifact_digest", "runtime_digest", "runtime_manifest_digest", "capability_contract_digest"]
+              .filter((field) => discovered[field] !== frozen[field]);
+            items.push({ ref, configured: true, ready: drift.length === 0, drift, discovery: discovered });
+          } catch (error) { items.push({ ref, configured: true, ready: false, reason: error.message }); }
+        }
+        return json({ contract: "candidate-discovery.3", items, production_writes: false }, 200, cors);
+      }
       if (request.method === "GET" && url.pathname === "/api/suites") return json({ items: store.listSuites() }, 200, cors);
       if (request.method === "GET" && url.pathname === "/api/cases") return json({ items: store.listCases() }, 200, cors);
       if (request.method === "GET" && url.pathname === "/api/experiments") {
@@ -573,8 +705,9 @@ export function createApp({
         return json({ error: "authenticated workbench session required" }, 401, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/workbench/run-templates") {
-        return json({ items: store.listExperiments().filter((item) => item.manifest.manifest_version === "4.0"
-          && ((store.listTrials(item.id, { includeReplays: false }).length === 0 && item.manifest.evaluation_mode === "FORMAL")
+        return json({ items: store.listExperiments().filter((item) => item.manifest.manifest_version === "5.0"
+          && ((store.listTrials(item.id, { includeReplays: false }).length === 0
+              && (item.manifest.evaluation_mode === "FORMAL" || item.manifest.run_class === "ENGINEERING_TEST"))
             || item.status === "COMPLETED" || store.experimentSummary(item.id).completion_rate === 1))
           .map((item) => ({ id: item.id, name: item.name,
             status: store.listTrials(item.id, { includeReplays: false }).length === 0 ? "FROZEN" : item.status,
@@ -587,7 +720,7 @@ export function createApp({
           })) }, 200, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/workbench/run-requests/preflight") {
-        return json({ preflight: preflightEvaluation(await request.json()) }, 200, cors);
+        return json({ preflight: await preflightEvaluation(await request.json()) }, 200, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/workbench/run-requests") {
         return json({ contract: "evalos-run-request-list.1", items: store.listEvaluationRunRequests().map(runRequestView) }, 200, cors);
@@ -595,7 +728,7 @@ export function createApp({
       if (request.method === "POST" && url.pathname === "/api/workbench/run-requests") {
         const body = await request.json();
         const idempotencyKey = request.headers.get("idempotency-key") ?? body.idempotency_key;
-        const preflight = preflightEvaluation(body);
+        const preflight = await preflightEvaluation(body);
         if (!preflight.ready) return json({ error: "preflight failed", preflight }, 409, cors);
         const created = store.createEvaluationRunRequest({ idempotencyKey, mode: preflight.mode,
           sourceExperimentId: preflight.source_experiment_id, requestedBy: body.requested_by ?? "evalos-operator",
@@ -649,7 +782,7 @@ export function createApp({
           if (!trial || trial.status !== "COMPLETED" || !trial.outcome) throw new Error(`completed trial is required for regrade: ${trialId}`);
           const original = gradeFor(trialId);
           if (!original) throw new Error(`original deterministic grade is required: ${trialId}`);
-          const grading = gradingService.grade({ caseRef: trial.case_ref, outcome: trial.outcome, trace: store.getTrace(trial.id),
+          const grading = gradingService.grade({ trialId: trial.id, caseRef: trial.case_ref, outcome: trial.outcome, trace: store.getTrace(trial.id),
             usage: trial.usage, budget: trial.budget, environmentState: trial.final_state?.before_reset ?? null });
           const regrade = store.addRegradeRequest({ trialId, requestedBy: body.requested_by ?? "evalos-operator",
             reason: body.reason, graderRef: grading.grader_ref, originalGraderRunId: original.id, result: grading.result });
@@ -660,7 +793,7 @@ export function createApp({
           return { ...regrade, original_score: original.result.total, recalculated_score: grading.result.total,
             score_changed: Number(original.result.total) !== Number(grading.result.total), official_score_mutated: false };
         });
-        return json({ contract: "evalos-regrade.1", items, notice: "只使用现有冻结证据重新计算；不运行 Agent，也不覆盖原官方评分。" }, 201, cors);
+        return json({ contract: "evalos-regrade.1", items, notice: "只使用现有冻结证据重新计算；不运行 Agent，也不覆盖原评分记录，正式成绩口径保持不变。" }, 201, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/workbench/overview") {
         const experiments = workbenchExperiments();
@@ -668,9 +801,11 @@ export function createApp({
         const formalExperimentIds = new Set(store.listExperiments().filter((item) => evaluationMode(item) === "FORMAL").map((item) => item.id));
         const formalTrialIds = new Set(trials.filter((item) => formalExperimentIds.has(item.experiment_id)).map((item) => item.id));
         const grades = store.listGraderRuns().filter((item) => item.dimension === "overall" && formalTrialIds.has(item.trial_id));
-        return json({ contract: "evalos-workbench.3", milestone: "M3.0", platform: {
+        return json({ contract: "evalos-workbench.4", milestone: "M3.1", platform: {
           core: "Claude Agent SDK + DeepSeek + MCP + Skills + Harness", workflow_graph: null,
           official_score_source: "deterministic_code_grader", ai_analysis_authority: "diagnostic_only",
+          candidate_execution: "external-real-products-only", candidate_adapter_contract: "3.0",
+          trace_contract: "3.0", grader_contract: "5.0", formal_480_enabled: false,
         }, counts: { datasets: store.listDatasets().length, cases: store.listCases().length,
           experiments: experiments.length, trials: trials.length, completed_trials: trials.filter((item) => item.status === "COMPLETED").length,
           analysis_runs: store.listAnalysisRuns().length, evaluation_tasks: store.listEvaluationRunRequests().length }, score: {

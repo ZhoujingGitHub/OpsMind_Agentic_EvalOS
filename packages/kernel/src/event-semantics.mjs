@@ -14,7 +14,7 @@ const EVENT_DEFINITIONS = Object.freeze({
   "environment.snapshot": ["采集环境快照", "Capture environment snapshot", "环境观察"],
   "environment.reset": ["复位考试环境", "Reset evaluation environment", "环境复位"],
   "model.decision": ["记录 Agent 的外显决策", "Record model decision", "Agent 决策"],
-  "grader.code": ["执行确定性评分", "Run deterministic code grader", "正式评分"],
+  "grader.code": ["执行确定性评分", "Run deterministic code grader", "确定性评分"],
   "budget.check": ["检查资源预算", "Check resource budget", "预算控制"],
   "budget.warning": ["资源预算接近上限", "Resource budget nearing limit", "预算控制"],
   "budget.exhausted": ["资源预算已用尽", "Resource budget exhausted", "预算控制"],
@@ -41,7 +41,7 @@ const TOOL_DEFINITIONS = Object.freeze({
 
 const KIND_DEFINITIONS = Object.freeze({
   AGENT: ["Agent 决策", "Agent"], TOOL: ["工具调用", "Tool"], CHAIN: ["评测执行", "Harness"],
-  INTERNAL: ["系统内部", "Internal"], ENVIRONMENT: ["环境交互", "Environment"], EVALUATOR: ["正式评分", "Grader"],
+  INTERNAL: ["系统内部", "Internal"], ENVIRONMENT: ["环境交互", "Environment"], EVALUATOR: ["确定性评分", "Grader"],
 });
 
 const ACTOR_DEFINITIONS = Object.freeze({

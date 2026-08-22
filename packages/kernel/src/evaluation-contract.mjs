@@ -1,6 +1,6 @@
 import { sha256 } from "./utils.mjs";
 
-export const EVALUATION_ADAPTER_CONTRACT_VERSION = "2.0";
+export const EVALUATION_ADAPTER_CONTRACT_VERSION = "3.0";
 
 function descriptor(name, definition) {
   return {
@@ -15,14 +15,14 @@ function descriptor(name, definition) {
 }
 
 export function buildEvaluationContract({ experiment, trial, caseSpec, adapter }) {
-  if (experiment?.manifest?.manifest_version !== "4.0") throw new Error("Evaluation Adapter 2.0 requires Manifest 4.0");
+  if (experiment?.manifest?.manifest_version !== "5.0") throw new Error("Candidate Adapter 3.0 requires Manifest 5.0");
   const contestant = experiment.manifest.contestants.find((item) => item.ref === trial.contestant_ref);
   if (!contestant) throw new Error(`contestant is not frozen in the manifest: ${trial.contestant_ref}`);
   if (contestant.adapter_contract_version !== EVALUATION_ADAPTER_CONTRACT_VERSION) {
-    throw new Error(`contestant ${contestant.ref} does not use Evaluation Adapter contract 2.0`);
+    throw new Error(`contestant ${contestant.ref} does not use Candidate Adapter contract 3.0`);
   }
   if (adapter.adapterContractVersion !== EVALUATION_ADAPTER_CONTRACT_VERSION) {
-    throw new Error(`runtime adapter ${adapter.id} does not implement Evaluation Adapter contract 2.0`);
+    throw new Error(`runtime adapter ${adapter.id} does not implement Candidate Adapter contract 3.0`);
   }
   if (contestant.adapter_version !== adapter.adapterVersion) {
     throw new Error(`runtime adapter version mismatch for ${contestant.ref}`);
@@ -33,6 +33,9 @@ export function buildEvaluationContract({ experiment, trial, caseSpec, adapter }
   const contract = {
     adapter_contract_version: EVALUATION_ADAPTER_CONTRACT_VERSION,
     evaluation_lane: experiment.manifest.evaluation_lane,
+    run_class: experiment.manifest.run_class,
+    operating_modes: experiment.manifest.operating_modes,
+    execution_mode: experiment.manifest.execution_mode,
     experiment_id: experiment.id,
     trial: {
       id: trial.id,
@@ -47,6 +50,10 @@ export function buildEvaluationContract({ experiment, trial, caseSpec, adapter }
       source_revision: contestant.source_revision,
       artifact_digest: contestant.artifact_digest,
       runtime_digest: contestant.runtime_digest,
+      runtime_manifest_digest: contestant.runtime_manifest_digest,
+      capability_contract_digest: contestant.capability_contract_digest,
+      kind: contestant.kind,
+      architecture: contestant.architecture,
     },
     case: {
       id: caseSpec.id,
@@ -66,6 +73,7 @@ export function buildEvaluationContract({ experiment, trial, caseSpec, adapter }
     frozen_dependencies: experiment.manifest.frozen_dependencies,
     budget: trial.budget,
     policy: experiment.manifest.policy,
+    approval_oracle: experiment.manifest.approval_oracle,
     retry_policy: experiment.manifest.retry_policy,
   };
   return Object.freeze({ ...contract, contract_digest: `sha256:${sha256(contract)}` });

@@ -1,3 +1,5 @@
+// Engineering-only deterministic test double. This file is never registered
+// in a REAL_CANDIDATE evaluation lane and must never be described as OpsMind.
 function unique(values) {
   return [...new Set(values)];
 }
@@ -80,13 +82,13 @@ class EvidenceSeekingReplayBrain {
   }
 }
 
-export function createMockContestant(id, style = "context-first") {
+export function createTestDouble(id, style = "context-first") {
   return {
     id,
-    adapterVersion: "1.0.0",
-    adapterContractVersion: "2.0",
-    supportedEvaluationLanes: ["AGENT_CAPABILITY"],
-    runtime: "deterministic-replay-brain",
+    adapterVersion: "test-double-adapter-3.0.0",
+    adapterContractVersion: "3.0",
+    supportedEvaluationLanes: ["ENGINEERING_TEST"],
+    runtime: "explicit-engineering-test-double",
     async execute({ caseSpec, toolExecutor, emit, maxTurns = 10 }) {
       const brain = new EvidenceSeekingReplayBrain(style);
       const observations = [];

@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createServer } from "node:http";
 import test from "node:test";
-import { BLIND_JUDGE_RUNTIME, DEEPSEEK_AGENT_RUNTIME, EVALOS_LEAD_RUNTIME, LANGGRAPH_RUNTIME, ProductToolBridgeRegistry, blindJudgePromptMaterial, createHarnessToolBridge, createProductE2EAdapter, deepSeekEnvironment, isolatedBashCommand, isLangGraphCapabilityFailure, judgeAttentionDecision, langGraphCapabilityFailureOutcome, normalizeInvestigatorReport, toMcpToolResult, toolPolicy } from "../src/index.mjs";
+import { BLIND_JUDGE_RUNTIME, CANDIDATE_ADAPTER_V3_RUNTIME, DEEPSEEK_AGENT_RUNTIME, EVALOS_LEAD_RUNTIME, blindJudgePromptMaterial, createCandidateAdapterV3, deepSeekEnvironment, isolatedBashCommand, judgeAttentionDecision, normalizeInvestigatorReport, toMcpToolResult, toolPolicy } from "../src/index.mjs";
 import { CASES } from "../../kernel/src/index.mjs";
 
 test("runtime uses Claude Agent SDK over DeepSeek Anthropic endpoint without a graph framework", () => {
@@ -45,104 +44,45 @@ test("investigator accepts natural report variants but freezes one strict canoni
   assert.match(report.methodology_sources[0].url, /^https:\/\/www\.anthropic\.com\//);
 });
 
-test("V1 comparison adapter is explicitly a real LangGraph StateGraph runtime", () => {
-  assert.equal(LANGGRAPH_RUNTIME.architecture, "LANGGRAPH_V1");
-  assert.equal(LANGGRAPH_RUNTIME.orchestration, "real-stategraph");
-  assert.equal(LANGGRAPH_RUNTIME.model, "deepseek-v4-flash");
-});
-
-test("LangGraph Adapter 2.0 receives the frozen Manifest 4.0 Seed and replicate fields", () => {
-  const adapterSource = readFileSync(new URL("../src/langgraph-adapter.mjs", import.meta.url), "utf8");
-  const runnerSource = readFileSync(new URL("../python/langgraph_runner.py", import.meta.url), "utf8");
-  assert.match(adapterSource, /environment_seed:\s*trial\.environment_seed/);
-  assert.match(adapterSource, /replicate_id:\s*trial\.replicate_id/);
-  assert.doesNotMatch(adapterSource, /trial\.seed/);
-  assert.match(runnerSource, /trial\["environment_seed"\]/);
-  assert.match(runnerSource, /trial\["replicate_id"\]/);
-  assert.doesNotMatch(runnerSource, /trial\["seed"\]/);
-  assert.match(runnerSource, /payload:\s*dict\[str, Any\],\s*\*,\s*latency_ms:\s*int\s*=\s*0/s);
-  assert.match(runnerSource, /model_latency_ms=max\(0, int\(latency_ms\)\)/);
-  assert.match(runnerSource, /evalos-scope-policy:2\.0\.0/);
-  assert.doesNotMatch(runnerSource, /evalos-scope-policy@2\.0\.0/);
-});
-
-test("V1 comparison adapter obtains tool results through the live EvalOS Harness bridge", async () => {
-  const calls = [];
-  const bridge = await createHarnessToolBridge({ allowedTools: ["query_sessions"],
-    toolExecutor: async (name, args) => { calls.push({ name, args }); return { ok: true, data: { registered: true }, evidence_refs: ["state:ue-registered"] }; } });
-  try {
-    const denied = await fetch(bridge.url, { method: "POST", headers: { authorization: "Bearer wrong", "content-type": "application/json" },
-      body: JSON.stringify({ tool_name: "query_sessions", arguments: {} }) });
-    assert.equal(denied.status, 401);
-    const response = await fetch(bridge.url, { method: "POST", headers: { authorization: `Bearer ${bridge.token}`, "content-type": "application/json" },
-      body: JSON.stringify({ tool_name: "query_sessions", arguments: { tenant: "opsmind-m2-lab" } }) });
-    assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { ok: true, data: { registered: true }, evidence_refs: ["state:ue-registered"] });
-    assert.deepEqual(calls, [{ name: "query_sessions", args: { tenant: "opsmind-m2-lab" } }]);
-  } finally { await bridge.close(); }
-});
-
-test("Product E2E Adapter 2.0调用真实队列接口并要求六类商用证据", async () => {
-  const evidence = Object.fromEntries(["queue", "worker", "recovery", "persistence", "audit", "archive"]
-    .map((name) => [name, { recorded: true, ref: `${name}:fixture` }]));
-  const requests = [];
-  const bridgeRegistry = new ProductToolBridgeRegistry();
-  const server = createServer(async (request, response) => {
-    const chunks = [];
-    for await (const chunk of request) chunks.push(chunk);
-    requests.push({ method: request.method, url: request.url, authorization: request.headers.authorization,
-      body: chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : null });
-    response.setHeader("content-type", "application/json");
-    if (request.method === "POST") {
-      const bridgeToken = requests.at(-1).body.tool_bridge.authorization.replace("Bearer ", "");
-      requests.at(-1).bridgeResult = await bridgeRegistry.invoke(bridgeToken, { trial_id: "trial-product-1",
-        contract_digest: "sha256:contract", tool_name: "query_logs", arguments: { tenant: "tenant-a" } });
-      return response.end(JSON.stringify({ adapter_contract_version: "2.0",
-        evaluation_lane: "PRODUCT_E2E", eval_run_id: "trial-product-1", status: "QUEUED" }));
-    }
-    return response.end(JSON.stringify({ adapter_contract_version: "2.0", evaluation_lane: "PRODUCT_E2E",
-      eval_run_id: "trial-product-1", status: "COMPLETED", product_evidence: evidence,
-      outcome: { status: "resolved", root_cause: "verified-product-result", evidence_refs: ["audit:fixture"] },
-      trace_events: [{ name: "product.worker.completed", payload: { durable: true } }] }));
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  try {
-    const address = server.address();
-    const adapter = createProductE2EAdapter({ id: "agent-harness-v2", endpoint: `http://127.0.0.1:${address.port}`,
-      token: "fixture-token", bridgeRegistry, bridgePublicOrigin: "http://127.0.0.1:8787",
-      pollIntervalMs: 1, requestTimeoutMs: 5000 });
-    const emitted = [];
-    const outcome = await adapter.execute({ trial: { id: "trial-product-1" },
-      executionContract: { evaluation_lane: "PRODUCT_E2E", contract_digest: "sha256:contract",
-        tools: [{ name: "query_logs" }] }, toolExecutor: async (name, args) => ({ ok: true, name, args }),
-      emit: async (...args) => emitted.push(args) });
-    assert.equal(outcome.status, "resolved");
-    assert.deepEqual(Object.keys(outcome.product_evidence).sort(), Object.keys(evidence).sort());
-    assert.deepEqual(requests.map((item) => item.method), ["POST", "GET"]);
-    assert.equal(requests.every((item) => item.authorization === "Bearer fixture-token"), true);
-    assert.deepEqual(requests[0].bridgeResult, { status: 200,
-      body: { ok: true, name: "query_logs", args: { tenant: "tenant-a" } } });
-    assert.equal(JSON.stringify(emitted).includes("fixture-token"), false);
-    assert.ok(emitted.some(([name]) => name === "product.e2e.evidence"));
-  } finally { await new Promise((resolve) => server.close(resolve)); }
-});
-
-test("V1参数化变更通过独立ActionRuntime调用Harness桥而不伪装成只读MCP", () => {
-  const runnerSource = readFileSync(new URL("../python/langgraph_runner.py", import.meta.url), "utf8");
-  assert.match(runnerSource, /ActionRuntime\(\)/);
-  assert.match(runnerSource, /ActionHandler\(/);
-  assert.match(runnerSource, /if definition\.get\("read_only", True\) is False:\s+continue/);
-  assert.match(runnerSource, /call_harness_tool\(tool_name, dict\(proposal\.parameters\)\)/);
-  assert.match(runnerSource, /deferred_to_harness_trial_reset/);
-});
-
-test("V1选错不存在工具被记录为能力失败而非Runner基础设施失败", () => {
-  assert.equal(isLangGraphCapabilityFailure("ToolNotFoundError: query_probe"), true);
-  assert.equal(isLangGraphCapabilityFailure("HTTP 503 connection reset"), false);
-  const outcome = langGraphCapabilityFailureOutcome("ToolNotFoundError: query_probe", ["run_probe", "query_logs"]);
-  assert.equal(outcome.status, "inconclusive");
-  assert.match(outcome.root_cause, /invalid-tool-selection/);
-  assert.deepEqual(outcome.evidence_refs, []);
+test("Candidate Adapter 3.0只做外部提交、事件翻译和证据保全，不代考", async () => {
+  const fingerprints = {
+    source_revision: "abcdef1234567",
+    artifact_digest: `sha256:${"1".repeat(64)}`,
+    runtime_digest: `sha256:${"2".repeat(64)}`,
+    runtime_manifest_digest: `sha256:${"3".repeat(64)}`,
+    capability_contract_digest: `sha256:${"4".repeat(64)}`,
+  };
+  let observed = false;
+  const connector = {
+    kind: "fixture-external-product",
+    discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "CLAUDE_AGENT_SDK_HARNESS",
+      production_writes_available: false, ...fingerprints }),
+    start: async ({ executionContract }) => ({ run_ref: `external:${executionContract.trial.id}`, status: "RUNNING" }),
+    observe: async ({ runRef }) => { observed = true; return { run_ref: runRef, status: "COMPLETED", next_cursor: "1",
+      raw_events: [{ source_ref: "raw:1", source_system: "real-product", recorded_at: new Date().toISOString(),
+        payload: { status: "completed" }, payload_digest: `sha256:${"5".repeat(64)}` }],
+      normalized_events: [{ event_type: "conclusion.recorded", actor: "external-candidate", status: "OK",
+        raw_source_refs: ["raw:1"], payload: { evidence_refs: ["evidence:real"] } }],
+      evaluation_binding: { contract: "evalos-product-run-binding.1", complete: true,
+        binding_strength: "PUBLIC_TASK_CONTEXT", expected_context_digest: `sha256:${"6".repeat(64)}` },
+      outcome: { status: "resolved", root_cause: "real-product-result", evidence_refs: ["evidence:real"] } }; },
+    cancel: async () => {},
+  };
+  const adapter = createCandidateAdapterV3({ id: "agent-harness-v2", connector, pollIntervalMs: 1, timeoutMs: 1000 });
+  const emitted = [];
+  const outcome = await adapter.execute({ trial: { id: "trial-real-1" }, executionContract: {
+    run_class: "REAL_CANDIDATE", evaluation_lane: "CONTROLLED_CLOSURE", trial: { id: "trial-real-1" },
+    contestant: { ref: "agent-harness-v2", kind: "REAL_PRODUCT", architecture: "CLAUDE_AGENT_SDK_HARNESS", ...fingerprints },
+    budget: { wallclock_ms: 1000 },
+  }, emit: async (...args) => emitted.push(args) });
+  assert.equal(observed, true);
+  assert.equal(outcome.status, "resolved");
+  assert.equal(outcome.candidate_run_ref, "external:trial-real-1");
+  assert.equal(outcome.evaluation_binding.complete, true);
+  assert.ok(emitted.some(([name]) => name === "candidate.raw_event"));
+  assert.ok(emitted.some(([name]) => name === "conclusion.recorded"));
+  assert.deepEqual(CANDIDATE_ADAPTER_V3_RUNTIME.forbidden,
+    ["invoke-candidate-internal-tools", "synthesize-missing-evidence", "change-official-score"]);
 });
 
 test("DeepSeek environment keeps credentials in memory and maps the exact model", () => {
@@ -231,29 +171,21 @@ test("Bash代码执行使用净化环境且不继承模型凭据", () => {
   assert.doesNotMatch(command, /ANTHROPIC|DEEPSEEK|API_KEY/);
 });
 
-test("Agent通用合同明确主动风险状态与Bash相对路径边界", () => {
-  const source = readFileSync(new URL("../src/deepseek-claude-adapter.mjs", import.meta.url), "utf8");
-  const langGraphSource = readFileSync(new URL("../python/langgraph_runner.py", import.meta.url), "utf8");
-  assert.match(source, /risk_detected whenever a proactive future risk was established/);
-  assert.match(source, /Use relative paths only; never reference an absolute path or '\.\.'/);
-  assert.match(source, /Observe or change the Twin exclusively through the provided OpsMind MCP tools/);
-  for (const contractSource of [source, langGraphSource]) {
-    assert.match(contractSource, /最小处置并复核/);
-    assert.match(contractSource, /root_cause 或 summary 使用了某个观测或数据源失败/);
-  }
+test("Eval Intelligence保持Claude Agent SDK开放式调查，同时严格只读且不能改分", () => {
+  const source = readFileSync(new URL("../src/case-investigator.mjs", import.meta.url), "utf8");
+  assert.match(source, /自主形成可证伪假设/);
+  assert.match(source, /不存在固定步骤、静态节点图或预写修复流程/);
+  assert.match(source, /原生 Read\/Glob\/Grep\/Bash/);
+  assert.match(source, /不得输出隐式思维链/);
+  assert.match(source, /不能改变正式分数/);
 });
 
-test("Adapter 2.0资格把能力、任务、安全、恢复和动作审批都设为硬门禁", () => {
-  const source = readFileSync(new URL("../../../scripts/run-m3-adapter-qualification.mjs", import.meta.url), "utf8");
-  assert.match(source, /all_capability_code_grades_passed/);
-  assert.match(source, /all_environment_tasks_succeeded/);
-  assert.match(source, /all_safety_hard_gates_passed/);
-  assert.match(source, /tool_failure_recovery_proved/);
-  assert.match(source, /timeout_recovery_proved/);
-  assert.match(source, /frozen_harness_action_approval_proved/);
-  assert.match(source, /twinPreflight\.active_trial/);
-  assert.match(source, /未创建任何 Trial/);
-  assert.doesNotMatch(source, /not_qualification_veto/);
+test("Candidate Adapter 3.0强制真实考生指纹、原始证据回指和禁止代考", () => {
+  const source = readFileSync(new URL("../src/candidate-adapter-v3.mjs", import.meta.url), "utf8");
+  assert.match(source, /candidate discovery drift/);
+  assert.match(source, /each normalized event must point to preserved raw evidence/);
+  assert.match(source, /Candidate Adapter 3\.0 refuses test doubles/);
+  assert.match(source, /invoke-candidate-internal-tools/);
 });
 
 test("冻结发布把参评Agent指纹与EvalOS平台指纹分离", () => {

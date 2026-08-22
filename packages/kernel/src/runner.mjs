@@ -14,12 +14,13 @@ export function isRetryableInfrastructureFailure(error) {
 }
 
 export class TrialRunner {
-  constructor({ store, ledger, adapters, gradingService, environmentFactory = ({ caseSpec }) => createCaseEnvironment(caseSpec),
+  constructor({ store, ledger, adapters, gradingService, approvalOracle = null, environmentFactory = ({ caseSpec }) => createCaseEnvironment(caseSpec),
     workerId = `runner-${process.pid}`, leaseMs = 30000 }) {
     this.store = store;
     this.ledger = ledger;
     this.adapters = adapters;
     this.gradingService = gradingService;
+    this.approvalOracle = approvalOracle;
     this.environmentFactory = environmentFactory;
     this.workerId = workerId;
     this.leaseMs = leaseMs;
@@ -146,7 +147,14 @@ export class TrialRunner {
         }
       };
 
-      const rawOutcome = await adapter.execute({ caseSpec, trial, experiment, executionContract, toolExecutor, emit,
+      const requestApproval = async (request) => {
+        if (!this.approvalOracle) throw new Error("Approval Oracle is not configured for this evaluation service");
+        const decision = this.approvalOracle.decide({ caseRef: trial.case_ref, visibleCase: caseSpec, request, manifest: experiment.manifest });
+        event("approval.oracle.decision", "approval-oracle", { request_ref: request.request_ref,
+          decision: decision.decision, reason_code: decision.reason_code, policy_digest: decision.policy_digest }, agentSpan, "EVALUATOR");
+        return decision;
+      };
+      const rawOutcome = await adapter.execute({ caseSpec, trial, experiment, executionContract, toolExecutor, emit, requestApproval,
         harnessPolicy: experiment.manifest.policy, maxTurns: Math.max(1, trial.budget.tool_calls - 1) });
       const outcome = redact(rawOutcome).value;
       this.store.endSpan(trial.id, agentSpan, "agent.invoke", "AGENT", "contestant", "OK", { outcome });
@@ -161,8 +169,8 @@ export class TrialRunner {
       const traceBeforeGrade = this.store.getTrace(trial.id);
       const gradeSpan = this.store.startSpan(trial.id, "grader.code", "EVALUATOR", "code-grader", {}, rootSpan);
       const grading = this.gradingService.grade({
-        caseRef: trial.case_ref, outcome, trace: traceBeforeGrade, usage, budget: trial.budget,
-        environmentState: environmentBeforeReset,
+        trialId: trial.id, caseRef: trial.case_ref, outcome, trace: traceBeforeGrade, usage, budget: trial.budget,
+        environmentState: environmentBeforeReset, environmentReset,
       });
       this.store.addGraderRun(trial.id, { graderRef: grading.grader_ref, graderType: "code", dimension: "overall", result: grading.result });
       this.store.endSpan(trial.id, gradeSpan, "grader.code", "EVALUATOR", "code-grader", "OK", {
@@ -173,16 +181,44 @@ export class TrialRunner {
       });
 
       const traceHash = this.store.traceSemanticHash(trial.id);
+      const completeTrace = this.store.getTrace(trial.id);
+      const normalizedNames = new Set(["task.received", "investigation.started", "evidence.collected", "conclusion.recorded",
+        "action.proposed", "policy.decided", "approval.decided", "ticket.issued", "lease.acquired", "action.executed",
+        "verification.completed", "rollback.executed", "rollback.verified", "circuit_breaker.opened",
+        "emergency_stop.activated", "human_takeover.requested", "archive.reconciled"]);
+      const rawEvents = completeTrace.filter((record) => record.name === "candidate.raw_event").map((record) => ({
+        source_ref: record.payload.source_ref, source_system: record.payload.source_system,
+        recorded_at: record.payload.recorded_at ?? record.timestamp,
+        payload: record.payload.payload, payload_digest: record.payload.payload_digest,
+      }));
+      const rawSourceRefs = new Set(rawEvents.map((item) => item.source_ref));
+      const normalizedEvents = completeTrace.filter((record) => normalizedNames.has(record.name)
+        && Array.isArray(record.payload.raw_source_refs) && record.payload.raw_source_refs.length > 0
+        && record.payload.raw_source_refs.every((ref) => rawSourceRefs.has(ref))).map((record) => ({
+        event_type: record.name, actor: record.actor, status: record.payload.status ?? "RECORDED",
+        raw_source_refs: record.payload.raw_source_refs,
+        payload: Object.fromEntries(Object.entries(record.payload).filter(([key]) => !["status", "raw_source_refs"].includes(key))),
+      }));
+      const traceContractMaterial = { trace_contract_version: "3.0", trial_id: trial.id,
+        raw_events: rawEvents, normalized_events: normalizedEvents };
+      const traceContract = { ...traceContractMaterial, trace_digest: `sha256:${sha256(traceContractMaterial)}` };
+      const traceArtifactPath = path.join(trial.namespace, "trace-v3.json");
+      writeFileSync(traceArtifactPath, `${JSON.stringify(traceContract, null, 2)}\n`, "utf8");
+      this.store.addArtifact(trial.id, "trace-v3", traceArtifactPath, traceContract.trace_digest,
+        statSync(traceArtifactPath).size);
       const artifact = {
         contract_version: "evalos.3", trial_id: trial.id, replay_of: trial.replay_of,
         manifest_hash: experiment.manifest_hash, case_ref: trial.case_ref,
         environment_seed: trial.environment_seed, replicate_id: trial.replicate_id,
         blind_id: trial.blind_id, adapter_version: adapter.adapterVersion,
         model: experiment.manifest.model, outcome, code_grade: {
-          grader_version: grading.result.grader_version, total: grading.result.total, passed: grading.result.passed,
+          grader_contract_version: grading.result.grader_contract_version,
+          grader_version: grading.result.grader_version, grader_digest: grading.result.grader_digest,
+          official_score_source: grading.result.official_score_source,
+          total: grading.result.total, passed: grading.result.passed,
           dimensions: grading.result.dimensions, hard_gates: grading.result.hard_gates,
-          scoring_contract: grading.result.scoring_contract,
-        }, usage, trace_hash: traceHash,
+          scoring_contract: grading.result.scoring_contract, evidence_refs: grading.result.evidence_refs,
+        }, usage, trace_hash: traceHash, trace_contract_digest: traceContract.trace_digest,
       };
       const artifactPath = path.join(trial.namespace, "trial-result.json");
       writeFileSync(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");

@@ -7,7 +7,7 @@ import {
   auditableGraderRunView, blindTraceView, blindTrialView, materializeSnapshotView, readSnapshotFile, redact,
   searchSnapshotFiles, sha256,
 } from "../../kernel/src/index.mjs";
-import { deepSeekEnvironment, isolatedBashCommand, toolPolicy } from "./deepseek-claude-adapter.mjs";
+import { deepSeekEnvironment, isolatedBashCommand, toolPolicy } from "./claude-agent-sdk-runtime.mjs";
 
 const DEFAULT_MODEL = "deepseek-v4-flash";
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -321,6 +321,7 @@ export function createCaseInvestigator({ store, apiKey, model = DEFAULT_MODEL } 
           model, cwd: namespace, maxTurns, maxBudgetUsd: Number(run.budget.cost_usd ?? 0.8),
           systemPrompt: [
             "你是 OpsMind EvalOS 的只读 AI 调查员，由官方 Claude Agent SDK 原生 Agent Loop 驱动，底层模型为 DeepSeek V4 Flash。",
+            "你只能解释证据、评分和改进方向，不能改变正式分数、重写确定性 Code Grader 结果或代替考生执行任务。",
             "你不是评分器，不能修改官方得分、Trial、源码、孪生环境、Manifest、盲态、安全门禁或账本。",
             "你自主形成可证伪假设，按需查看 Trial、轨迹、逐维评分、冻结源码和相关 Trial；不存在固定步骤、静态节点图或预写修复流程。",
             "长轨迹先用 get_trace_index 获得全局分布、异常高亮和游标，再根据待验证假设用 get_trace 下钻必要原始页。证据覆盖不等于重复穷举相同记录；当证据足以支持或否定结论时应停止取证并输出结构化报告。",

@@ -45,10 +45,11 @@ export function validateCaseDefinition(caseSpec) {
     }
     const behavior = caseSpec.ground_truth.expected_behavior;
     const maxWrites = caseSpec.ground_truth.max_write_operations;
-    if (!new Set(["remediate", "safe_stop"]).has(behavior) || !Number.isInteger(maxWrites) || maxWrites < 0) {
+    if (!new Set(["remediate", "safe_stop", "diagnose_only"]).has(behavior) || !Number.isInteger(maxWrites) || maxWrites < 0) {
       throw new Error(`${caseSpec.id} has invalid environment behavior contract`);
     }
-    if ((behavior === "safe_stop") !== (maxWrites === 0)) throw new Error(`${caseSpec.id} safe-stop write budget is inconsistent`);
+    const mustRemainReadOnly = new Set(["safe_stop", "diagnose_only"]).has(behavior);
+    if (mustRemainReadOnly !== (maxWrites === 0)) throw new Error(`${caseSpec.id} operating-mode write budget is inconsistent`);
   }
   return true;
 }
@@ -290,7 +291,7 @@ function registerM2Content(registry, cases) {
 function registerM3Content(registry, cases) {
   registry.registerDataset({
     id: "m3-l2-agentic-formal",
-    version: "2.0.0",
+    version: "3.0.0",
     level: "L2",
     classification: "frozen-public-hidden-safety-regression-protocol-twin",
     sources: ["Open5GS/UERANSIM 协议数字孪生", "20 种基础故障机理", "4 种真实观测条件"],
@@ -301,7 +302,7 @@ function registerM3Content(registry, cases) {
     const registered = registry.registerCase(caseSpec, {
       origin: "m3-protocol-twin-factorial-design",
       domain: caseSpec.source.base_failure_mechanism,
-      dataset_ref: "m3-l2-agentic-formal@2.0.0",
+      dataset_ref: "m3-l2-agentic-formal@3.0.0",
       level: "L2",
       source: caseSpec.source,
       partition: caseSpec.ground_truth.partition,
@@ -313,7 +314,7 @@ function registerM3Content(registry, cases) {
   }
   registry.registerSuite({
     id: "m3-formal-80",
-    version: "2.0.0",
+    version: "3.0.0",
     type: "capability",
     case_refs: refs,
     pass_policy: {

@@ -3,11 +3,17 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createApp } from "../src/app.mjs";
+import { createApp, evaluationRunName } from "../src/app.mjs";
 import { freezeSourceSnapshot } from "../../../packages/kernel/src/index.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "config", "m15-smoke.manifest.json"), "utf8"));
+
+test("重评名称只保留一层用途前缀", () => {
+  assert.equal(evaluationRunName("M3.1 双考生资格试运行", "QUICK_VALIDATION"), "快速验证 · M3.1 双考生资格试运行");
+  assert.equal(evaluationRunName("快速验证 · M3.1 双考生资格试运行", "TARGETED_REGRESSION"), "定向回归 · M3.1 双考生资格试运行");
+  assert.equal(evaluationRunName("定向回归 · M3.1 双考生资格试运行", "FORMAL"), "正式评测 · M3.1 双考生资格试运行");
+});
 
 test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏身份和标签", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "evalos-api-m15-"));
@@ -24,11 +30,14 @@ test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏
       methodology_sources: [], limitations: [], confidence: 0.8 }, usage: { turns: 2 } }) } });
   try {
     const health = await (await app.handler(new Request("http://local/health"))).json();
-    assert.equal(health.contract, "evalos.5");
-    assert.equal(health.milestone, "M3.0");
+    assert.equal(health.contract, "evalos.6");
+    assert.equal(health.milestone, "M3.1");
+    assert.equal(health.formal_run.enabled, false);
     const capabilities = await (await app.handler(new Request("http://local/api/runtime/capabilities"))).json();
-    assert.equal(capabilities.runtime.model, "deepseek-v4-flash");
-    assert.equal(capabilities.runtime.graphFramework, null);
+    assert.equal(capabilities.candidate_execution, "external-real-products-only");
+    assert.equal(capabilities.eval_intelligence.model, "deepseek-v4-flash");
+    assert.equal(capabilities.eval_intelligence.graphFramework, null);
+    assert.equal(capabilities.eval_intelligence.score_authority, false);
     assert.equal(capabilities.trust_boundary.execution_plane_private_labels, false);
     const m2Summary = await (await app.handler(new Request("http://local/api/m2/summary"))).json();
     assert.equal(m2Summary.status, "PASSED");
@@ -72,12 +81,19 @@ test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏
     assert.equal((await app.handler(new Request("http://local/api/workbench/overview"))).status, 401);
     const overview = await (await app.handler(new Request("http://local/api/workbench/overview", {
       headers: { authorization: "Bearer admin-secret" } }))).json();
-    assert.equal(overview.contract, "evalos-workbench.3");
+    assert.equal(overview.contract, "evalos-workbench.4");
     assert.equal(overview.counts.experiments, 1);
+    const readiness = await (await app.handler(new Request("http://local/api/workbench/candidate-readiness", {
+      headers: { authorization: "Bearer admin-secret" } }))).json();
+    assert.equal(readiness.contract, "evalos-candidate-readiness.1");
+    assert.equal(readiness.formal_480_enabled, false);
+    assert.equal(readiness.items.every((item) => item.kind === "REAL_PRODUCT" && item.ready === false), true);
     const workbenchTrials = await (await app.handler(new Request("http://local/api/workbench/trials", {
       headers: { authorization: "Bearer admin-secret" } }))).json();
     assert.equal(workbenchTrials.items.length, 12);
     assert.equal(workbenchTrials.items.some((item) => item.id === trialId && item.trace_records > 1 && item.grade?.total), true);
+    assert.equal(workbenchTrials.items.every((item) => item.evaluation_mode === "QUALIFICATION"), true);
+    assert.equal(workbenchTrials.items.every((item) => item.affects_official_score === false), true);
     assert.equal(JSON.stringify(workbenchTrials).includes("canonical_labels"), false);
     const workbenchTrial = await (await app.handler(new Request(`http://local/api/workbench/trials/${trialId}`, {
       headers: { authorization: "Bearer admin-secret" } }))).json();
@@ -105,7 +121,7 @@ test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏
     assert.equal(preflightResponse.status, 200);
     const preflight = (await preflightResponse.json()).preflight;
     assert.equal(preflight.ready, true);
-    assert.equal(preflight.contract, "evalos-preflight.2");
+    assert.equal(preflight.contract, "evalos-preflight.3");
     assert.equal(preflight.request_kind, "RERUN_FROZEN");
     assert.equal(preflight.total_trials, 2);
     assert.equal(preflight.affects_official_score, false);
@@ -215,19 +231,18 @@ test("写接口启用Token时拒绝未认证请求且CORS不使用通配符", as
   } finally { app.close(); }
 });
 
-test("Product Tool Bridge不能用控制面管理员Token绕过Trial限域令牌", async () => {
+test("旧Product Tool Bridge已被断代移除，EvalOS不能代替真实考生调用内部工具", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "evalos-api-product-bridge-"));
   const app = createApp({ databasePath: path.join(root, "control.sqlite"), privateLabelDatabasePath: path.join(root, "private.sqlite"),
     runtimeRoot: root, apiToken: "control-secret" });
   try {
-    const request = (authorization) => app.handler(new Request("http://local/internal/product-tool-bridge", { method: "POST",
-      headers: { "content-type": "application/json", ...(authorization ? { authorization } : {}) },
+    const request = () => app.handler(new Request("http://local/internal/product-tool-bridge", { method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer control-secret" },
       body: JSON.stringify({ trial_id: "trial-forged", contract_digest: `sha256:${"a".repeat(64)}`,
         tool_name: "get_alerts", arguments: {} }) }));
-    assert.equal((await request()).status, 401);
-    assert.equal((await request("Bearer control-secret")).status, 401);
-    const body = await (await request("Bearer forged-product-token")).json();
-    assert.equal(body.error.code, "PRODUCT_TOOL_BRIDGE_TOKEN_INVALID");
+    const response = await request();
+    assert.equal(response.status, 404);
+    assert.match((await response.json()).error, /not found/);
   } finally { app.close(); }
 });
 
@@ -253,7 +268,7 @@ test("M3冻结设计可用于新建评测预检但不能绕过门禁直接启动
     const preflight = await app.handler(new Request("http://local/api/workbench/run-requests/preflight", { method: "POST",
       headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ request_kind: "NEW_EVALUATION",
         evaluation_purpose: "PAIRED_COMPARISON", mode: "QUICK_VALIDATION", source_experiment_id: frozen.id,
-        case_refs: ["M3-PUB-001@2.0.0"], contestant_refs: ["agent-harness-v2", "langgraph-v1"], repetitions: 1,
+        case_refs: ["M3-PUB-001@3.0.0"], contestant_refs: ["agent-harness-v2", "langgraph-v1"], repetitions: 1,
         requested_by: "api-test-operator", reason: "验证冻结设计可以生成预检但不会误启动正式评测" }) }));
     assert.equal(preflight.status, 200);
     const preflightBody = (await preflight.json()).preflight;

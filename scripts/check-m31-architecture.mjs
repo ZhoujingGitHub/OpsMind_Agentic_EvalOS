@@ -1,0 +1,62 @@
+import assert from "node:assert/strict";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
+
+const root = path.resolve(import.meta.dirname, "..");
+const read = (file) => readFileSync(path.join(root, file), "utf8");
+const app = read("services/control-api/src/app.mjs");
+const runtime = read("packages/agent-runtime/src/claude-agent-sdk-runtime.mjs");
+const intelligence = read("packages/agent-runtime/src/case-investigator.mjs");
+const adapter = read("packages/agent-runtime/src/candidate-adapter-v3.mjs");
+const connectors = read("packages/agent-runtime/src/product-connectors-v3.mjs");
+const runner = read("packages/kernel/src/runner.mjs");
+const grader = read("packages/kernel/src/grader.mjs");
+const packageFiles = ["package.json", "packages/agent-runtime/package.json", "apps/console/package.json"]
+  .map(read).join("\n");
+
+assert.match(runtime, /@anthropic-ai\/claude-agent-sdk/);
+assert.match(runtime, /deepseek-v4-flash/);
+assert.match(runtime, /model-driven-tool-loop/);
+assert.match(intelligence, /自主形成可证伪假设/);
+assert.match(intelligence, /不存在固定步骤、静态节点图或预写修复流程/);
+assert.match(adapter, /external REAL_PRODUCT/);
+assert.match(adapter, /submit-translate-preserve-evidence/);
+assert.doesNotMatch(adapter, /toolExecutor|environment\.call|invoke.*mcp/i);
+assert.match(connectors, /external-product-control-plane-client/);
+assert.match(connectors, /candidateCodeMutation:\s*false/);
+assert.match(connectors, /evalos-product-run-binding\.1/);
+assert.match(adapter, /not bound to the frozen Trial context/);
+assert.equal(existsSync(path.join(root, "docs/contracts/product-run-binding-v1.schema.json")), true);
+assert.match(app, /createAgentHarnessProductConnector/);
+assert.match(app, /createLangGraphProductConnector/);
+assert.match(app, /createTestDouble\("test-double-a"/);
+assert.match(app, /test-double-a:ENGINEERING_TEST/);
+assert.match(runner, /buildEvaluationContract/);
+assert.match(grader, /grader_contract_version:\s*"5\.0"/);
+assert.match(grader, /DETERMINISTIC_CODE_GRADER/);
+assert.doesNotMatch(packageFiles, /"(?:langgraph|@langchain\/langgraph|langchain)"\s*:/i);
+const executableManifests = readdirSync(path.join(root, "config")).filter((name) => name.endsWith(".manifest.json"));
+for (const name of executableManifests) {
+  const manifest = JSON.parse(read(name.startsWith("config/") ? name : `config/${name}`));
+  if (name === "m3-formal-agent-capability.manifest.json" || name === "m15-smoke.manifest.json") {
+    assert.equal(manifest.manifest_version, "5.0", `当前可执行清单必须是 Manifest 5.0：${name}`);
+  }
+}
+const formal = JSON.parse(read("config/m3-formal-agent-capability.manifest.json"));
+assert.equal(formal.dataset_ref, "m3-l2-agentic-formal@3.0.0");
+assert.equal(formal.suite_ref, "m3-formal-80@3.0.0");
+assert.equal(formal.case_refs.every((ref) => ref.endsWith("@3.0.0")), true);
+
+for (const removed of [
+  "packages/agent-runtime/src/deepseek-claude-adapter.mjs",
+  "packages/agent-runtime/src/langgraph-adapter.mjs",
+  "packages/agent-runtime/src/product-e2e-adapter.mjs",
+  "packages/agent-runtime/python/langgraph_runner.py",
+  "config/m3-adapter-qualification.manifest.json",
+  "config/m3-product-e2e-qualification.manifest.json",
+  "config/m3-capacity-4x.manifest.json",
+  "config/m3-capacity-8x.manifest.json",
+]) assert.equal(existsSync(path.join(root, removed)), false, `旧考生分身仍存在：${removed}`);
+
+assert.doesNotMatch(`${app}\n${runner}`, /ProductToolBridgeRegistry|\/internal\/product-tool-bridge/);
+console.log("M3.1 架构检查通过：EvalOS 保持 Claude Agent SDK 开放式单 Agent，真实考生只通过外部产品接口参评，旧考生分身与 Adapter 2.0 已断代移除。");

@@ -1,8 +1,18 @@
 {
-  "manifest_version": "4.0",
-  "milestone": "M3.0",
+  "manifest_version": "5.0",
+  "milestone": "M3.1",
+  "run_class": "ENGINEERING_TEST",
   "evaluation_mode": "QUALIFICATION",
-  "evaluation_lane": "AGENT_CAPABILITY",
+  "evaluation_lane": "ENGINEERING_TEST",
+  "operating_modes": ["diagnosis_only"],
+  "execution_mode": "controlled_simulation",
+  "approval_oracle": {
+    "ref": "evalos-test-approval-oracle@1.0.0",
+    "digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+    "decision_source": "frozen_case_contract",
+    "timeout_ms": 30000,
+    "separation_of_duties": true
+  },
   "design": "paired_comparison",
   "name": "M1.5 可信测量内核冒烟",
   "suite_ref": "m15-kernel-smoke@1.0.0",
@@ -17,8 +27,8 @@
   "environment_seeds": [20260813],
   "replicates_per_seed": 3,
   "contestants": [
-    { "ref": "mock-contestant-a", "adapter_contract_version": "2.0", "adapter_version": "1.0.0", "source_revision": "m15-local-test-double-a", "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "runtime_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" },
-    { "ref": "mock-contestant-b", "adapter_contract_version": "2.0", "adapter_version": "1.0.0", "source_revision": "m15-local-test-double-b", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "runtime_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" }
+    { "ref": "test-double-a", "kind": "TEST_DOUBLE", "architecture": "TEST_DOUBLE", "adapter_contract_version": "3.0", "adapter_version": "test-double-adapter-3.0.0", "source_revision": "m31-local-test-double-a", "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "runtime_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "runtime_manifest_digest": "sha256:abababababababababababababababababababababababababababababababab", "capability_contract_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" },
+    { "ref": "test-double-b", "kind": "TEST_DOUBLE", "architecture": "TEST_DOUBLE", "adapter_contract_version": "3.0", "adapter_version": "test-double-adapter-3.0.0", "source_revision": "m31-local-test-double-b", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "runtime_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "runtime_manifest_digest": "sha256:babababababababababababababababababababababababababababababababa", "capability_contract_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }
   ],
   "model": { "provider": "deepseek", "id": "deepseek-v4-flash", "interface": "anthropic", "sdk": "@anthropic-ai/claude-agent-sdk", "thinking": "disabled", "temperature": 0, "max_turns": 20 },
   "frozen_dependencies": {
@@ -26,10 +36,10 @@
     "agent_harness_skill_pack": { "ref": "m15-mock-skills@1.0.0", "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222" },
     "langgraph_knowledge_pack": { "ref": "m15-mock-knowledge@1.0.0", "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333" },
     "scope_policy": { "ref": "m15-scope@1.0.0", "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444" },
-    "grader": { "ref": "m15-code-grader@2.1.0", "digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555" },
+    "grader": { "ref": "evalos-code-grader@5.0.0", "digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555" },
     "twin": { "ref": "m15-test-double@1.0.0", "digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666" },
-    "trace_schema": { "ref": "evalos-trace@2.0.0", "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777" },
-    "product_adapter_contract": { "ref": "evalos-product-adapter@2.0.0", "digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888" }
+    "trace_schema": { "ref": "evalos-trace@3.0.0", "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777" },
+    "product_adapter_contract": { "ref": "evalos-candidate-adapter@3.0.0", "digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888" }
   },
   "budget": {
     "input_tokens": 4000,
@@ -47,7 +57,8 @@
     "forbidden_actions": ["write_production", "change_policy", "read_hidden_answer", "cross_tenant_access"],
     "heartbeat_ms": 5000,
     "result_contract": "opsmind.investigation-result.v2",
-    "action_approval": { "mode": "frozen-lab-preauthorization", "max_writes_per_trial": 1, "human_approval_required": false }
+    "production_writes": false,
+    "action_approval": { "mode": "case-driven-approval-oracle", "max_writes_per_trial": 1 }
   },
   "retry_policy": { "max_infrastructure_retries": 1, "retryable_categories": ["RATE_LIMIT", "TRANSPORT_RESET", "TEMPORARY_UNAVAILABLE"], "capability_failures_retryable": false },
   "capacity_policy": { "runner_workers": 1, "twin_slots": 1, "max_queue_depth": 12 },

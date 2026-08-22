@@ -30,8 +30,8 @@ test("M2.5把不可变源码、只读分析轨迹和诊断结果绑定到已完�
       suite_ref: "m15-pilot-capability@2.0.0", dataset_ref: "m15-l1-agentic-cases@2.0.0",
       case_refs: [caseRef], case_partitions: { public: [caseRef], hidden: [], safety: [], regression: [] },
       environment_seeds: [25], replicates_per_seed: 1,
-      contestants: [{ ref: "agent-harness-v2", adapter_contract_version: "2.0", adapter_version: "test",
-        source_revision: "abc1234", artifact_digest: `sha256:${"a".repeat(64)}`, runtime_digest: `sha256:${"b".repeat(64)}` }],
+      contestants: [{ ...base.contestants[0], source_revision: "abc1234",
+        artifact_digest: `sha256:${"a".repeat(64)}`, runtime_digest: `sha256:${"b".repeat(64)}` }],
       budget: { ...base.budget, tool_calls: 10, wallclock_ms: 1000 }, policy: { ...base.policy, allowed_tools: [] } };
     const experiment = store.createExperiment(manifest, "m25-fixture").experiment;
     const trial = store.listTrials(experiment.id)[0];

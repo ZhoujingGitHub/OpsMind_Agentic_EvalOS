@@ -10,7 +10,7 @@ async function render(pathname = "/") {
     { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
 }
 
-test("服务端渲染M3.0动态评测与改进工作台", async () => {
+test("服务端渲染M3.1真实产品评测与改进工作台", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   const html = await response.text();
@@ -81,6 +81,8 @@ test("工作台明确Agent自主性、确定性评分、源码快照和只读AI�
   assert.match(source, /intent="new"/);
   assert.match(source, /intent="rerun"/);
   assert.match(source, /快速验证/);
+  assert.match(source, /不计正式成绩/);
+  assert.match(source, /测试替身/);
   assert.match(source, /定向回归/);
   assert.match(source, /仅重新评分/);
   assert.match(source, /原结果与新结果对比/);

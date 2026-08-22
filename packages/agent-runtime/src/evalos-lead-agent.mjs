@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { blindExperimentView, blindGraderRunView, blindTraceView, blindTrialView } from "../../kernel/src/projections.mjs";
-import { deepSeekEnvironment } from "./deepseek-claude-adapter.mjs";
+import { deepSeekEnvironment } from "./claude-agent-sdk-runtime.mjs";
 
 const DEFAULT_MODEL = "deepseek-v4-flash";
 const READ_ONLY_TOOLS = ["mcp__evalos__list_experiments", "mcp__evalos__get_experiment", "mcp__evalos__get_trial_trace",

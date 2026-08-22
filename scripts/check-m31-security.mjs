@@ -1,0 +1,34 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+const root = path.resolve(import.meta.dirname, "..");
+const read = (file) => readFileSync(path.join(root, file), "utf8");
+const app = read("services/control-api/src/app.mjs");
+const adapter = read("packages/agent-runtime/src/candidate-adapter-v3.mjs");
+const connectors = read("packages/agent-runtime/src/product-connectors-v3.mjs");
+const oracle = read("packages/kernel/src/approval-oracle.mjs");
+const grader = read("packages/kernel/src/grader.mjs");
+const evaluationContract = read("packages/kernel/src/evaluation-contract.mjs");
+
+assert.match(connectors, /tokenSource:\s*"environment-only"/);
+assert.match(connectors, /real candidate product APIs require HTTPS/);
+assert.match(connectors, /productionWrites:\s*false/);
+assert.match(connectors, /must use three separate identities/);
+assert.match(adapter, /production_writes_available !== false/);
+assert.match(adapter, /each normalized event must point to preserved raw evidence/);
+assert.match(adapter, /synthesize-missing-evidence/);
+assert.match(oracle, /FrozenApprovalOracle/);
+assert.doesNotMatch(oracle, /recommended_action|correct_action|root_cause/);
+assert.match(grader, /approval_integrity/);
+assert.match(grader, /independent_verification/);
+assert.match(grader, /reset_integrity/);
+assert.match(adapter, /REAL_CANDIDATE/);
+assert.match(evaluationContract, /run_class:\s*experiment\.manifest\.run_class/);
+assert.match(app, /test-double-a:ENGINEERING_TEST/);
+assert.match(app, /480_TRIAL_NOT_AUTHORIZED/);
+assert.match(app, /EVALOS_AGENT_HARNESS_TOKEN/);
+assert.match(app, /EVALOS_LANGGRAPH_TOKEN/);
+assert.match(app, /candidate_tenant_isolation/);
+assert.doesNotMatch(`${app}\n${adapter}\n${connectors}`, /(?:DEEPSEEK_API_KEY|ANTHROPIC_AUTH_TOKEN|EVALOS_AGENT_HARNESS_TOKEN|EVALOS_LANGGRAPH_TOKEN)\s*=\s*["'][^"']+["']/);
+console.log("M3.1 安全检查通过：凭据只来自环境变量、正式480 Trial保持关闭、审批裁判不泄题、真实考生证据可回指且EvalOS不具备生产写权限。");

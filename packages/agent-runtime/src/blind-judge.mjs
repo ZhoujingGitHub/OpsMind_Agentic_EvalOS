@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { blindContentView, evaluationEvidenceTraceView } from "../../kernel/src/projections.mjs";
-import { deepSeekEnvironment } from "./deepseek-claude-adapter.mjs";
+import { deepSeekEnvironment } from "./claude-agent-sdk-runtime.mjs";
 
 const DEFAULT_MODEL = "deepseek-v4-flash";
 export const JUDGE_ROLES = Object.freeze(["outcome", "evidence", "trajectory"]);

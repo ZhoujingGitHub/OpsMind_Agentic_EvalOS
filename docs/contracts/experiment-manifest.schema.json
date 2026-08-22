@@ -1,14 +1,25 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://opsmind.local/contracts/experiment-manifest.schema.json",
-  "title": "OpsMind EvalOS Experiment Manifest 4.0",
+  "title": "OpsMind EvalOS Experiment Manifest 5.0",
   "type": "object",
-  "required": ["manifest_version", "milestone", "evaluation_mode", "evaluation_lane", "design", "name", "suite_ref", "dataset_ref", "case_refs", "case_partitions", "environment_seeds", "replicates_per_seed", "contestants", "model", "frozen_dependencies", "budget", "policy", "retry_policy", "capacity_policy", "statistics_policy"],
+  "required": ["manifest_version", "milestone", "run_class", "evaluation_mode", "evaluation_lane", "operating_modes", "execution_mode", "approval_oracle", "design", "name", "suite_ref", "dataset_ref", "case_refs", "case_partitions", "environment_seeds", "replicates_per_seed", "contestants", "model", "frozen_dependencies", "budget", "policy", "retry_policy", "capacity_policy", "statistics_policy"],
   "properties": {
-    "manifest_version": { "const": "4.0" },
-    "milestone": { "const": "M3.0" },
+    "manifest_version": { "const": "5.0" },
+    "milestone": { "const": "M3.1" },
+    "run_class": { "enum": ["ENGINEERING_TEST", "REAL_CANDIDATE"] },
     "evaluation_mode": { "enum": ["QUALIFICATION", "CAPACITY_REHEARSAL", "FORMAL"] },
-    "evaluation_lane": { "enum": ["AGENT_CAPABILITY", "PRODUCT_E2E"] },
+    "evaluation_lane": { "enum": ["ENGINEERING_TEST", "AGENT_CAPABILITY", "CONTROLLED_CLOSURE", "PRODUCT_RELIABILITY"] },
+    "operating_modes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["diagnosis_only", "human_collaboration", "controlled_auto"] } },
+    "execution_mode": { "enum": ["controlled_simulation", "replay_read_only"] },
+    "approval_oracle": {
+      "type": "object", "required": ["ref", "digest", "decision_source", "timeout_ms", "separation_of_duties"],
+      "properties": {
+        "ref": { "type": "string", "minLength": 1 }, "digest": { "$ref": "#/$defs/digest" },
+        "decision_source": { "const": "frozen_case_contract" }, "timeout_ms": { "type": "integer", "minimum": 1000 },
+        "separation_of_duties": { "const": true }
+      }, "additionalProperties": false
+    },
     "design": { "enum": ["single_system_acceptance", "paired_comparison"] },
     "name": { "type": "string", "minLength": 1 },
     "suite_ref": { "type": "string", "pattern": "^.+@.+$" },
@@ -28,11 +39,13 @@
     "contestants": {
       "type": "array", "minItems": 1, "maxItems": 2,
       "items": {
-        "type": "object", "required": ["ref", "adapter_contract_version", "adapter_version", "source_revision", "artifact_digest", "runtime_digest"],
+        "type": "object", "required": ["ref", "kind", "architecture", "adapter_contract_version", "adapter_version", "source_revision", "artifact_digest", "runtime_digest", "runtime_manifest_digest", "capability_contract_digest"],
         "properties": {
-          "ref": { "type": "string", "minLength": 1 }, "adapter_contract_version": { "const": "2.0" },
+          "ref": { "type": "string", "minLength": 1 }, "kind": { "enum": ["REAL_PRODUCT", "TEST_DOUBLE"] },
+          "architecture": { "type": "string", "minLength": 1 }, "adapter_contract_version": { "const": "3.0" },
           "adapter_version": { "type": "string", "minLength": 1 }, "source_revision": { "type": "string", "minLength": 7 },
-          "artifact_digest": { "$ref": "#/$defs/digest" }, "runtime_digest": { "$ref": "#/$defs/digest" }
+          "artifact_digest": { "$ref": "#/$defs/digest" }, "runtime_digest": { "$ref": "#/$defs/digest" },
+          "runtime_manifest_digest": { "$ref": "#/$defs/digest" }, "capability_contract_digest": { "$ref": "#/$defs/digest" }
         }, "additionalProperties": false
       }
     },
@@ -56,18 +69,18 @@
     },
     "budget": { "$ref": "#/$defs/budget" },
     "policy": {
-      "type": "object", "required": ["allowed_tools", "allowed_native_tools", "forbidden_actions", "heartbeat_ms", "result_contract", "action_approval"],
+      "type": "object", "required": ["allowed_tools", "allowed_native_tools", "forbidden_actions", "heartbeat_ms", "result_contract", "production_writes", "action_approval"],
       "properties": {
         "allowed_tools": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "allowed_native_tools": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "forbidden_actions": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "heartbeat_ms": { "type": "integer", "minimum": 1000, "maximum": 10000 }, "result_contract": { "type": "string", "minLength": 1 },
+        "production_writes": { "const": false },
         "action_approval": {
-          "type": "object", "required": ["mode", "max_writes_per_trial", "human_approval_required"],
+          "type": "object", "required": ["mode", "max_writes_per_trial"],
           "properties": {
-            "mode": { "const": "frozen-lab-preauthorization" },
-            "max_writes_per_trial": { "type": "integer", "minimum": 0, "maximum": 10 },
-            "human_approval_required": { "const": false }
+            "mode": { "const": "case-driven-approval-oracle" },
+            "max_writes_per_trial": { "type": "integer", "minimum": 0, "maximum": 10 }
           }, "additionalProperties": false
         }
       }, "additionalProperties": false
@@ -121,7 +134,9 @@
   },
   "allOf": [
     { "if": { "properties": { "design": { "const": "single_system_acceptance" } } }, "then": { "properties": { "contestants": { "minItems": 1, "maxItems": 1 } } } },
-    { "if": { "properties": { "design": { "const": "paired_comparison" } } }, "then": { "properties": { "contestants": { "minItems": 2, "maxItems": 2 } } } }
+    { "if": { "properties": { "design": { "const": "paired_comparison" } } }, "then": { "properties": { "contestants": { "minItems": 2, "maxItems": 2 } } } },
+    { "if": { "properties": { "run_class": { "const": "ENGINEERING_TEST" } } }, "then": { "properties": { "evaluation_lane": { "const": "ENGINEERING_TEST" }, "contestants": { "items": { "properties": { "kind": { "const": "TEST_DOUBLE" } } } } } } },
+    { "if": { "properties": { "run_class": { "const": "REAL_CANDIDATE" } } }, "then": { "properties": { "contestants": { "items": { "properties": { "kind": { "const": "REAL_PRODUCT" } } } } } } }
   ],
   "additionalProperties": false
 }

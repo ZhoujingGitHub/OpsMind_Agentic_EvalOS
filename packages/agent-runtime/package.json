@@ -1,6 +1,6 @@
 {
   "name": "@opsmind/agent-runtime",
-  "version": "0.3.0-m30",
+  "version": "0.3.1-m31",
   "private": true,
   "type": "module",
   "dependencies": {

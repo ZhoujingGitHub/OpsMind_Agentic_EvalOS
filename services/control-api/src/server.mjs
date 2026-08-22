@@ -16,6 +16,7 @@ const app = createApp({
   apiToken: process.env.EVALOS_API_TOKEN || undefined,
   allowedOrigin: process.env.EVALOS_ALLOWED_ORIGIN || undefined,
   bootstrapM3Design: true,
+  bootstrapEngineeringTestDesign: true,
 });
 
 const server = createServer(async (request, response) => {
