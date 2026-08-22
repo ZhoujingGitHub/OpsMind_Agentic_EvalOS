@@ -252,10 +252,21 @@ function productEvidence(events, extra = {}) {
 
 function finalOutcome({ status, conclusion, uncertainty, evidence = [] }) {
   const evidenceRefs = evidence.flatMap((item) => item?.evidence_ref ?? item?.evidence_id ?? item?.id ?? []).filter(Boolean);
-  const inconclusive = ["inconclusive", "insufficient_evidence", "waiting_data"].includes(String(status).toLowerCase());
+  const candidateTerminalStatus = String(status ?? "").toLowerCase();
+  const inconclusive = ["inconclusive", "insufficient_evidence", "waiting_data", "human_takeover", "denied",
+    "budget_exhausted"].includes(candidateTerminalStatus);
   return { status: inconclusive ? "inconclusive" : "resolved", root_cause: conclusion ?? uncertainty ?? "candidate-did-not-publish-a-conclusion",
     confidence: inconclusive ? 0 : 1, evidence_refs: [...new Set(evidenceRefs)], exclusions: [],
-    tool_failures_recovered: false, next_checks: inconclusive ? ["补充现场证据后重新评测"] : [], summary: conclusion ?? uncertainty ?? "" };
+    tool_failures_recovered: false, next_checks: inconclusive ? ["由确定性评分器结合冻结Case判断该安全停止是否正确"] : [],
+    summary: conclusion ?? uncertainty ?? "", candidate_terminal_status: candidateTerminalStatus };
+}
+
+function langGraphAdapterStatus(state) {
+  if (state === "completed") return "COMPLETED";
+  if (["insufficient_evidence", "human_takeover", "denied", "budget_exhausted"].includes(state)) return "INCONCLUSIVE";
+  if (state === "failed") return "FAILED";
+  if (state === "cancelled") return "CANCELLED";
+  return "RUNNING";
 }
 
 function timeWindow(value) {
@@ -518,13 +529,14 @@ export function createLangGraphProductConnector({ origin, token, approvalToken, 
         policy_decision_id: lifecycle.policy_decision?.decision_id, scope: lifecycle.proposal.scope_snapshot_id,
       }] : [];
       const state = String(detail.status ?? "").toLowerCase();
-      const terminal = ["completed", "insufficient_evidence", "failed", "cancelled"].includes(state);
+      const adapterStatus = langGraphAdapterStatus(state);
+      const terminal = adapterStatus !== "RUNNING";
       const projected = terminal ? projectionEvidence("langgraph-product", `langgraph:product-e2e:${runRef}`, projection)
         : { raw: [], normalized: [] };
       const binding = terminal ? evaluationBinding({ runRef, expected: expectedContexts.get(runRef),
         publicPayloads: [detail, projection, ...events],
         nativeClosures: lifecycle ? [projection] : [] }) : null;
-      return { run_ref: runRef, status: terminal ? (state === "completed" ? "COMPLETED" : state === "insufficient_evidence" ? "INCONCLUSIVE" : state.toUpperCase()) : "RUNNING",
+      return { run_ref: runRef, status: adapterStatus,
         next_cursor: journal.next_cursor ?? cursor, raw_events: [...translated.raw, ...projected.raw],
         normalized_events: [...translated.normalized, ...projected.normalized],
         approval_requests: approvalRequests, outcome: terminal ? finalOutcome({ status: state,

@@ -127,6 +127,45 @@ test("LangGraph连接器只调用产品公开接口，不在EvalOS内重建Graph
   assert.equal(fixture.requests.some((item) => /invoke|tool|mcp/i.test(item.url)), false);
 });
 
+test("LangGraph安全停止终态会进入评分而不是被误判为平台超时", async (t) => {
+  let terminalState = "human_takeover";
+  let submittedGoal = "";
+  const fixture = await fixtureServer({
+    "PUT /api/v1/automation/mode": async ({ body }) => body,
+    "POST /api/v1/candidates": async ({ body }) => { submittedGoal = body.goal;
+      return { investigation: { investigation_id: "safe-stop-run" } }; },
+    "GET /api/v1/investigations/safe-stop-run": async () => ({ status: terminalState,
+      objective: submittedGoal, conclusion: "安全边界要求转人工处理", evidence: [{ id: "evidence:safe-stop" }] }),
+    "GET /api/v1/investigations/safe-stop-run/journal": async () => ({ next_cursor: 9, items: [
+      { cursor: 8, event_type: "human_takeover.requested", timestamp: "2026-08-22T00:00:00Z" },
+      { cursor: 9, event_type: "archive.reconciled", timestamp: "2026-08-22T00:00:01Z" },
+    ] }),
+    "GET /api/v1/investigations/safe-stop-run/product-e2e": async () => ({
+      root_cause: "安全边界要求转人工处理", evidence: [{ id: "evidence:safe-stop" }],
+      public_events: [{ event_type: "human_takeover.requested" }, { event_type: "archive.reconciled" }],
+      archive_reconciled: true, archive_artifacts: [{ artifact_id: "archive:safe-stop" }],
+    }),
+  });
+  t.after(fixture.close);
+  const connector = createLangGraphProductConnector({ origin: fixture.origin, token: "fixture-token",
+    approvalToken: "approval-token", adminToken: "admin-token", tenantId: "tenant-eval-graph", attestation: ATTESTATION });
+  const executionContract = { execution_mode: "controlled_simulation", dataset_ref: "dataset@1", suite_ref: "suite@1",
+    evaluation_lane: "CONTROLLED_CLOSURE", model: { id: "frozen-model" }, budget: { wallclock_ms: 60000 }, tools: [], policy: {},
+    frozen_dependencies: {}, trial: { id: "safe-stop-trial", case_ref: "case@1", replicate_id: 1 },
+    case: { goal: "验证安全停止", visible: { operating_mode: "controlled_auto", time_window: "trial-relative" } } };
+  await connector.start({ executionContract });
+
+  for (const state of ["human_takeover", "denied", "budget_exhausted"]) {
+    terminalState = state;
+    const observation = await connector.observe({ runRef: "safe-stop-run", cursor: 0 });
+    assert.equal(observation.status, "INCONCLUSIVE", state);
+    assert.equal(observation.outcome.status, "inconclusive", state);
+    assert.equal(observation.outcome.candidate_terminal_status, state);
+    assert.equal(observation.evaluation_binding.complete, true);
+    assert.deepEqual(observation.artifact_refs, ["archive:safe-stop"]);
+  }
+});
+
 test("Agent+Harness连接器不会把Twin相对时间窗冒充成非法日期", async (t) => {
   const fixture = await fixtureServer({
     "POST /v2/investigation-candidates": async () => ({ investigation_id: "relative-window-run" }),
