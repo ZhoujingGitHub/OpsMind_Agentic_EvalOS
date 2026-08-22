@@ -301,6 +301,67 @@ test("M3冻结合同变更会新增可审计设计而不会覆盖历史或阻塞
   } finally { second.close(); }
 });
 
+test("多Seed新建评测会生成并绑定每个Seed下的独立Trial", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-api-multiseed-"));
+  const app = createApp({
+    databasePath: path.join(root, "control.sqlite"),
+    privateLabelDatabasePath: path.join(root, "private", "labels.sqlite"),
+    runtimeRoot: root,
+    artifactsRoot: root,
+    m2ArtifactsRoot: root,
+    m2ExecutorArtifactsRoot: root,
+    m2AgentArtifactsRoot: root,
+    m2QualificationArtifactsRoot: root,
+    apiToken: "admin-secret",
+    bootstrapEngineeringTestDesign: true,
+  });
+  try {
+    const source = app.store.listExperiments().find((item) => item.manifest.run_class === "ENGINEERING_TEST");
+    assert.ok(source);
+    const selection = {
+      request_kind: "NEW_EVALUATION",
+      evaluation_purpose: "PAIRED_COMPARISON",
+      mode: "QUICK_VALIDATION",
+      source_experiment_id: source.id,
+      case_refs: [manifest.case_refs[0]],
+      contestant_refs: manifest.contestants.map((item) => item.ref),
+      environment_seeds: [20260813, 20260814],
+      repetitions: 1,
+      requested_by: "seed-regression-test",
+      reason: "验证不同Seed不会被数据库误判为重复Trial",
+    };
+    const preflightResponse = await app.handler(new Request("http://local/api/workbench/run-requests/preflight", {
+      method: "POST",
+      headers: { authorization: "Bearer admin-secret", "content-type": "application/json" },
+      body: JSON.stringify(selection),
+    }));
+    assert.equal(preflightResponse.status, 200);
+    assert.equal((await preflightResponse.json()).preflight.total_trials, 4);
+
+    const createResponse = await app.handler(new Request("http://local/api/workbench/run-requests", {
+      method: "POST",
+      headers: { authorization: "Bearer admin-secret", "content-type": "application/json",
+        "idempotency-key": "multi-seed-request" },
+      body: JSON.stringify(selection),
+    }));
+    assert.equal(createResponse.status, 202);
+    const requestId = (await createResponse.json()).request.id;
+    let evaluationRequest;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      evaluationRequest = (await (await app.handler(new Request(`http://local/api/workbench/run-requests/${requestId}`, {
+        headers: { authorization: "Bearer admin-secret" },
+      }))).json()).request;
+      if (["COMPLETED", "FAILED"].includes(evaluationRequest.status)) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(evaluationRequest.status, "COMPLETED");
+    assert.equal(evaluationRequest.progress.total, 4);
+    assert.equal(evaluationRequest.progress.completed, 4);
+    assert.deepEqual([...new Set(evaluationRequest.items.map((item) => item.environment_seed))].sort(), [20260813, 20260814]);
+    assert.equal(evaluationRequest.items.every((item) => item.trial_id), true);
+  } finally { app.close(); }
+});
+
 test("可选专家管理必须启用管理员Token且不会获得排名权", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "evalos-api-reviewer-"));
   const app = createApp({ databasePath: path.join(root, "control.sqlite"), privateLabelDatabasePath: path.join(root, "private.sqlite"),

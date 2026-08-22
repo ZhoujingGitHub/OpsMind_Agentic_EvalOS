@@ -197,7 +197,12 @@ export class EvalStore {
     this.db = new DatabaseSync(this.databasePath);
     const migrations = [migrationPath, ...migrationPaths].filter(Boolean);
     if (!migrations.length) throw new Error("at least one database migration is required");
-    for (const migration of migrations) this.db.exec(readFileSync(migration, "utf8"));
+    for (const migration of migrations) {
+      const sql = readFileSync(migration, "utf8");
+      const targetVersion = Number(sql.match(/PRAGMA\s+user_version\s*=\s*(\d+)/i)?.[1] ?? 0);
+      const currentVersion = Number(this.db.prepare("PRAGMA user_version").get().user_version ?? 0);
+      if (!targetVersion || currentVersion < targetVersion) this.db.exec(sql);
+    }
   }
 
   close() { this.db.close(); }
@@ -860,12 +865,20 @@ export class EvalStore {
         requestedBy, reason, stableStringify(selection), stableStringify(preflight), now);
       const sourceTrials = this.listTrials(sourceExperimentId, { includeReplays: false });
       for (const caseRef of selection.case_refs) for (const contestantRef of selection.contestant_refs) {
-        const sourceTrial = [...sourceTrials].reverse().find((trial) => trial.case_ref === caseRef && trial.contestant_ref === contestantRef) ?? null;
-        for (let repeatIndex = 1; repeatIndex <= selection.repetitions; repeatIndex += 1) {
-          const itemId = entityId("eval-item", `${id}:${caseRef}:${contestantRef}:${repeatIndex}`);
-          this.db.prepare(`INSERT INTO evaluation_run_items(
-            id,request_id,case_ref,contestant_ref,repeat_index,source_trial_id,created_at
-          ) VALUES(?,?,?,?,?,?,?)`).run(itemId, id, caseRef, contestantRef, repeatIndex, sourceTrial?.id ?? null, now);
+        for (const environmentSeed of selection.environment_seeds) {
+          for (let repeatIndex = 1; repeatIndex <= selection.repetitions; repeatIndex += 1) {
+            const sourceTrial = [...sourceTrials].reverse().find((trial) => trial.case_ref === caseRef
+              && trial.contestant_ref === contestantRef && trial.environment_seed === environmentSeed
+              && trial.replicate_id === repeatIndex)
+              ?? [...sourceTrials].reverse().find((trial) => trial.case_ref === caseRef
+                && trial.contestant_ref === contestantRef && trial.environment_seed === environmentSeed)
+              ?? null;
+            const itemId = entityId("eval-item", `${id}:${caseRef}:${contestantRef}:s${environmentSeed}:r${repeatIndex}`);
+            this.db.prepare(`INSERT INTO evaluation_run_items(
+              id,request_id,case_ref,contestant_ref,environment_seed,repeat_index,source_trial_id,created_at
+            ) VALUES(?,?,?,?,?,?,?,?)`).run(itemId, id, caseRef, contestantRef, environmentSeed,
+              repeatIndex, sourceTrial?.id ?? null, now);
+          }
         }
       }
       return { request: this.getEvaluationRunRequest(id), created: true };
@@ -875,7 +888,8 @@ export class EvalStore {
   getEvaluationRunRequest(id) {
     const request = hydrateRunRequest(this.db.prepare("SELECT * FROM evaluation_run_requests WHERE id=?").get(id));
     if (!request) return null;
-    const items = this.db.prepare("SELECT * FROM evaluation_run_items WHERE request_id=? ORDER BY case_ref,contestant_ref,repeat_index").all(id)
+    const items = this.db.prepare(`SELECT * FROM evaluation_run_items WHERE request_id=?
+      ORDER BY case_ref,contestant_ref,environment_seed,repeat_index`).all(id)
       .map((item) => ({ ...item, trial: item.trial_id ? this.getTrial(item.trial_id) : null }));
     return { ...request, items };
   }
@@ -901,7 +915,8 @@ export class EvalStore {
       this.db.prepare("UPDATE evaluation_run_requests SET created_experiment_id=? WHERE id=? AND created_experiment_id IS NULL")
         .run(experimentId, id);
       for (const trial of trials) this.db.prepare(`UPDATE evaluation_run_items SET trial_id=? WHERE request_id=? AND case_ref=?
-        AND contestant_ref=? AND repeat_index=? AND trial_id IS NULL`).run(trial.id, id, trial.case_ref, trial.contestant_ref, trial.replicate_id);
+        AND contestant_ref=? AND environment_seed=? AND repeat_index=? AND trial_id IS NULL`).run(
+          trial.id, id, trial.case_ref, trial.contestant_ref, trial.environment_seed, trial.replicate_id);
     });
     return this.getEvaluationRunRequest(id);
   }

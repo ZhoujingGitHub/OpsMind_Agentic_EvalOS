@@ -69,7 +69,8 @@ export function createApp({
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_m15.sql"),
     migrationPaths: [path.join(ROOT, "infra", "migrations", "sqlite", "002_m25_workbench.sql"),
       path.join(ROOT, "infra", "migrations", "sqlite", "003_m26_run_control.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "004_m31_candidate_relay.sql")] });
+      path.join(ROOT, "infra", "migrations", "sqlite", "004_m31_candidate_relay.sql"),
+      path.join(ROOT, "infra", "migrations", "sqlite", "005_m31_seed_identity.sql")] });
   const labels = new PrivateLabelStore({ databasePath: privateLabelDatabasePath,
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const privateLabelHash = labels.publishRegistry(registry);
@@ -414,7 +415,8 @@ export function createApp({
       const baselineGrade = baselineTrial ? gradeFor(baselineTrial.id)?.result ?? null : null;
       const duration = (trial) => trial?.started_at && trial?.completed_at
         ? new Date(trial.completed_at).getTime() - new Date(trial.started_at).getTime() : null;
-      return { id: item.id, case_ref: item.case_ref, contestant_ref: item.contestant_ref, repeat_index: item.repeat_index,
+      return { id: item.id, case_ref: item.case_ref, contestant_ref: item.contestant_ref,
+        environment_seed: item.environment_seed, repeat_index: item.repeat_index,
         source_trial_id: item.source_trial_id, trial_id: item.trial_id, status: item.trial?.status ?? request.status,
         baseline: baselineTrial ? { score: baselineGrade?.total ?? null, passed: baselineGrade?.passed ?? null,
           duration_ms: duration(baselineTrial), tool_calls: Number(baselineTrial.usage?.tool_calls ?? 0),
