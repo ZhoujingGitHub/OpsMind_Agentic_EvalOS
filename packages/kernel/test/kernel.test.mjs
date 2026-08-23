@@ -21,7 +21,8 @@ function fixture() {
   const store = new EvalStore({ databasePath: path.join(root, "control.sqlite"), runtimeRoot: root,
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_m15.sql"),
     migrationPaths: ["002_m25_workbench.sql", "003_m26_run_control.sql", "004_m31_candidate_relay.sql",
-      "005_m31_seed_identity.sql", "006_m31_trial_attempt_audit.sql", "007_m32_run_resilience.sql"]
+      "005_m31_seed_identity.sql", "006_m31_trial_attempt_audit.sql", "007_m32_run_resilience.sql",
+      "008_m32_cleanup_reconciliation.sql"]
       .map((name) => path.join(ROOT, "infra", "migrations", "sqlite", name)) });
   const labels = new PrivateLabelStore({ databasePath: path.join(root, "private", "labels.sqlite"),
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
@@ -38,6 +39,24 @@ test("固定调度可复现且不同种子改变顺序", () => {
   const items = [1, 2, 3, 4, 5, 6];
   assert.deepEqual(seededShuffle(items, 101), seededShuffle(items, 101));
   assert.notDeepEqual(seededShuffle(items, 101), seededShuffle(items, 202));
+});
+
+test("超时后的考场清理核验采用追加式记录且不能篡改原Trial", () => {
+  const { store, labels } = fixture();
+  try {
+    const created = store.createExperiment(manifest, "cleanup-reconciliation-test");
+    const trial = store.listTrials(created.experiment.id)[0];
+    const record = store.recordTrialCleanupReconciliation({ trialId: trial.id, attempt: 1,
+      candidateRunRef: "candidate-run-1", candidateTerminalStatus: "COMPLETED",
+      twinReset: { ok: true, clean: true, reset_hash: "sha256:clean" }, status: "RESOLVED",
+      evidence: { candidate_probe: { terminal: true }, original_attempt_result_hash: "sha256:attempt" } });
+    assert.equal(record.status, "RESOLVED");
+    assert.equal(record.twin_reset.clean, true);
+    assert.equal(store.listTrialCleanupReconciliations(trial.id).length, 1);
+    assert.throws(() => store.db.prepare("UPDATE trial_cleanup_reconciliations SET status='FAILED' WHERE id=?").run(record.id), /append-only/);
+    assert.throws(() => store.db.prepare("DELETE FROM trial_cleanup_reconciliations WHERE id=?").run(record.id), /append-only/);
+    assert.equal(store.getTrial(trial.id).status, "QUEUED", "cleanup reconciliation must not rewrite the original Trial result");
+  } finally { labels.close(); store.close(); }
 });
 
 test("预算在80%预警并在100%前阻止超限，超限尝试仍如实记账", () => {
@@ -272,6 +291,8 @@ test("失败分类不会把考生能力、考生超时或考场清理故障洗�
   assert.equal(classifyTrialFailure("HTTP 429 rate limit").category, "RATE_LIMIT");
   assert.equal(classifyTrialFailure("external candidate run timed out", { keepQuarantined: true }).category,
     "PRODUCT_RELIABILITY_FAILURE");
+  assert.equal(classifyTrialFailure("TimeoutError - Claude Agent SDK query 在 900 秒内没有完成").category,
+    "PRODUCT_RELIABILITY_FAILURE");
   assert.equal(classifyTrialFailure("output schema invalid").category, "CANDIDATE_CAPABILITY_FAILURE");
   assert.equal(classifyTrialFailure("candidate failed", { resetError: "twin reset failed" }).category,
     "PLATFORM_CLEANUP_FAILURE");
@@ -440,6 +461,36 @@ test("故障现场快照失败不会阻止环境复位", async () => {
     assert.equal(attempt.final_state.reset.ok, true);
     assert.equal(attempt.final_state.quarantine.required, false);
     assert.ok(store.getTrace(claimed.id).some((record) => record.name === "environment.snapshot_failed_after_failure"));
+  } finally { labels.close(); store.close(); }
+});
+
+test("真实考生终态先保全现场、再注销考生侧绑定、最后由EvalOS独立复位Twin", async () => {
+  const { store, labels, ledger, gradingService } = fixture();
+  const order = [];
+  try {
+    const { experiment } = store.createExperiment(manifest, "candidate-first-cleanup-order");
+    const claimed = store.claimNext("cleanup-order-worker", 1000, experiment.id);
+    const base = createTestDouble(claimed.contestant_ref, "context-first");
+    const adapter = {
+      ...base,
+      async finalize() {
+        order.push("candidate-binding-released");
+        return { ok: true, required: true, strategy: "fixture-candidate-reset" };
+      },
+    };
+    const runner = new TrialRunner({ store, ledger, gradingService, adapters: {
+      [`${claimed.contestant_ref}:ENGINEERING_TEST`]: adapter,
+    }, environmentFactory: async () => ({
+      async call() { return { ok: true }; },
+      async snapshot() { order.push("final-state-captured"); return { healthy: false }; },
+      async reset() { order.push("evalos-twin-reset"); return { ok: true, clean: true }; },
+    }) });
+    const result = await runner.runTrial(claimed, { workerId: "cleanup-order-worker" });
+    assert.equal(result.status, "COMPLETED");
+    assert.deepEqual(order, ["final-state-captured", "candidate-binding-released", "evalos-twin-reset"]);
+    const attempt = store.listTrialAttemptResults(claimed.id)[0];
+    assert.equal(attempt.final_state.candidate_finalization.strategy, "fixture-candidate-reset");
+    assert.equal(attempt.final_state.reset.clean, true);
   } finally { labels.close(); store.close(); }
 });
 

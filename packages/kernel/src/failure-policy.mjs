@@ -40,7 +40,7 @@ export function classifyTrialFailure(error, { resetError = null, keepQuarantined
     category = "CANDIDATE_SAFETY_FAILURE";
   } else if (/ToolNotFoundError|unknown\s+tool|tool\s+not\s+found|output schema invalid|structured outcome|not bound to the frozen|evidence.+binding|工具不存在|输出合同/i.test(message)) {
     category = "CANDIDATE_CAPABILITY_FAILURE";
-  } else if (keepQuarantined || /external candidate (?:run timed out|quarantine unresolved)|candidate.+not terminal|真实考生.+未终止/i.test(message)) {
+  } else if (keepQuarantined || /external candidate (?:run timed out|quarantine unresolved)|candidate.+not terminal|TimeoutError|candidate.+timeout|query.+(?:seconds|秒).+(?:not complete|没有完成)|真实考生.+未终止/i.test(message)) {
     category = "PRODUCT_RELIABILITY_FAILURE";
   } else if (/(?:^|\D)429(?:\D|$)|rate.?limit|限流/i.test(message)) {
     category = "RATE_LIMIT";

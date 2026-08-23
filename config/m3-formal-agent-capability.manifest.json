@@ -269,8 +269,8 @@
     "output_tokens": 32768,
     "model_calls": 32,
     "tool_calls": 24,
-    "wallclock_ms": 300000,
-    "compute_ms": 300000,
+    "wallclock_ms": 3000000,
+    "compute_ms": 3000000,
     "storage_bytes": 10485760,
     "cost_usd": 1
   },

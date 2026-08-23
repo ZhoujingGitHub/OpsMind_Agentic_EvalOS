@@ -12,7 +12,7 @@ import {
   createCaseInvestigator, createLangGraphProductConnector, judgeRecordAndSummarize,
 } from "../../../packages/agent-runtime/src/index.mjs";
 import { ExternalProductTwinEnvironment, ProtocolTwinEnvironment, SshTwinClient,
-  SshTwinManagerClient } from "../../../packages/twin-runtime/src/index.mjs";
+  SshTwinManagerClient, managedTwinTrialId } from "../../../packages/twin-runtime/src/index.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const ANALYSIS_BUDGET = Object.freeze({ wallclock_ms: 300000, cost_usd: 2, max_turns: 32, max_tool_calls: 24 });
@@ -20,6 +20,7 @@ const ANALYSIS_BUDGET = Object.freeze({ wallclock_ms: 300000, cost_usd: 2, max_t
 const CANDIDATE_RELAY_PATHS = Object.freeze({
   "agent-harness-v2": [
     "^/v2/auth/me$", "^/v2/evaluation/controlled-remediation-contract$", "^/v2/investigation-runtime$",
+    "^/v2/protocol-lab$",
     "^/v2/remediation/context$", "^/v2/remediation/mode$", "^/v2/investigation-candidates$",
     "^/v2/investigations/[A-Za-z0-9_-]+$", "^/v2/investigations/[A-Za-z0-9_-]+/execution-log(?:\\?.*)?$",
     "^/v2/actions(?:\\?.*)?$", "^/v2/evaluation/actions/[A-Za-z0-9_-]+$", "^/v2/actions/[A-Za-z0-9_-]+/approval$",
@@ -38,6 +39,80 @@ function json(response, status = 200, headers = {}) {
 
 function publicTrial(trial) {
   return blindTrialView(trial);
+}
+
+const NON_MEANINGFUL_PROGRESS_EVENTS = new Set(["runner.heartbeat", "candidate.poll.heartbeat", "candidate.progress.checkpoint", "budget.check"]);
+
+function isMeaningfulProgressRecord(item) {
+  if (NON_MEANINGFUL_PROGRESS_EVENTS.has(String(item?.name))) return false;
+  if (item?.name !== "candidate.raw_event") return true;
+  const publicEventType = String(item?.payload?.payload?.event_type ?? "").toLowerCase();
+  return !publicEventType.endsWith(".heartbeat") && publicEventType !== "heartbeat";
+}
+
+function parsedTime(value) {
+  const parsed = value ? new Date(value).getTime() : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function trialLiveProgressView(trial, experiment, trace, nowMs = Date.now()) {
+  const trialStatus = String(trial?.status ?? "UNKNOWN");
+  const terminal = new Set(["COMPLETED", "FAILED", "CANCELLED"]).has(trialStatus);
+  const queued = trialStatus === "QUEUED";
+  const startedAtMs = parsedTime(trial?.started_at);
+  const endedAtMs = parsedTime(trial?.completed_at);
+  const elapsedMs = startedAtMs === null ? 0 : Math.max(0, (endedAtMs ?? nowMs) - startedAtMs);
+  const totalBudgetMs = Number(experiment?.manifest?.budget?.wallclock_ms);
+  const budgetMs = Number.isFinite(totalBudgetMs) && totalBudgetMs > 0 ? totalBudgetMs : null;
+  const records = Array.isArray(trace) ? trace : [];
+  const latest = records.at(-1) ?? null;
+  const latestMeaningful = [...records].reverse().find(isMeaningfulProgressRecord) ?? null;
+  const latestAtMs = parsedTime(latest?.timestamp);
+  const meaningfulAtMs = parsedTime(latestMeaningful?.timestamp);
+  const activityAgeMs = latestAtMs === null ? null : Math.max(0, nowMs - latestAtMs);
+  const meaningfulAgeMs = meaningfulAtMs === null ? null : Math.max(0, nowMs - meaningfulAtMs);
+  const isRunning = trialStatus === "RUNNING";
+  const stopping = isRunning && records.some((item) => item?.name === "candidate.run.quarantine_started");
+  const liveness = terminal ? "TERMINAL" : queued ? "NOT_STARTED"
+    : !isRunning ? "UNKNOWN" : activityAgeMs === null || activityAgeMs > 60000 ? "NO_HEARTBEAT" : "LIVE";
+  const meaningfulSilenceMs = meaningfulAgeMs ?? elapsedMs;
+  const progressState = terminal ? "TERMINAL"
+    : queued ? "QUEUED"
+    : !isRunning ? "WAITING"
+    : stopping ? "STOPPING"
+      : liveness === "NO_HEARTBEAT" || meaningfulSilenceMs > 600000 ? "STALLED"
+      : meaningfulSilenceMs > 300000 ? "WAITING" : "ACTIVE";
+  const checkpointMs = 900000;
+  const nextCheckpointMs = terminal || startedAtMs === null ? null
+    : Math.min(budgetMs ?? Number.POSITIVE_INFINITY, (Math.floor(elapsedMs / checkpointMs) + 1) * checkpointMs);
+  const latestDisplay = latest ? explainTraceRecord(latest) : null;
+  const meaningfulDisplay = latestMeaningful ? explainTraceRecord(latestMeaningful) : null;
+  return {
+    contract: "evalos-live-progress.1", observable: true, status: trialStatus,
+    progress_state: progressState, liveness, started_at: trial?.started_at ?? null,
+    elapsed_ms: elapsedMs, total_budget_ms: budgetMs,
+    remaining_ms: budgetMs === null ? null : Math.max(0, budgetMs - elapsedMs),
+    budget_ratio: budgetMs === null ? null : Math.min(1, elapsedMs / budgetMs),
+    checkpoint_interval_ms: checkpointMs, next_checkpoint_ms: Number.isFinite(nextCheckpointMs) ? nextCheckpointMs : null,
+    activity: { last_at: latest?.timestamp ?? null, age_ms: activityAgeMs,
+      event_code: latest?.name ?? null, summary_zh: latestDisplay?.summary_zh ?? "尚未产生运行事件" },
+    meaningful_progress: { last_at: latestMeaningful?.timestamp ?? null, age_ms: meaningfulAgeMs,
+      event_code: latestMeaningful?.name ?? null, summary_zh: meaningfulDisplay?.summary_zh ?? "尚未产生实质进展" },
+    counters: {
+      trace_records: records.length,
+      liveness_heartbeats: records.filter((item) => item.name === "candidate.poll.heartbeat").length,
+      progress_checkpoints: records.filter((item) => item.name === "candidate.progress.checkpoint").length,
+      tool_results: records.filter((item) => item.span_kind === "TOOL" && item.record_type === "SPAN_END").length,
+      candidate_events: records.filter((item) =>
+        (item.actor === "external-candidate" || item.name === "candidate.raw_event") && isMeaningfulProgressRecord(item)).length,
+    },
+    interpretation_zh: progressState === "QUEUED" ? "正在等待独立考场和安全隔离槽位；真实考生尚未开始作答，50分钟 Trial 预算也尚未计时。"
+      : progressState === "ACTIVE" ? "真实考生在线，最近5分钟内有新的外显调查进展。"
+      : progressState === "WAITING" ? "真实考生仍在线，但已超过5分钟没有新证据或动作；页面继续观察，不自动判失败。"
+        : progressState === "STOPPING" ? "已发出安全停止，系统正在等待真实考生进入终态，随后复位考场并保留全部证据。"
+        : progressState === "STALLED" ? "运行可能卡住：心跳中断，或已超过10分钟没有实质进展；需要保留证据并关注安全停止。"
+          : "本次Trial已经进入终态，进展时间线作为只追加证据保留。",
+  };
 }
 
 export function evaluationRunName(sourceName, mode) {
@@ -64,6 +139,8 @@ export function createApp({
   formalM3RunEnabled = process.env.EVALOS_M3_FORMAL_RUN_ENABLED === "1",
   candidateRelayConfig = null,
   engineeringAdapterOverrides = {},
+  cleanupConnectorOverrides = {},
+  twinManagerClientOverride = null,
 } = {}) {
   const registry = createEvalRegistry({ m15Cases: CASES, m2Cases: M2_CASES, m3Cases: M3_CASES });
   const store = new EvalStore({ databasePath, runtimeRoot,
@@ -73,7 +150,8 @@ export function createApp({
       path.join(ROOT, "infra", "migrations", "sqlite", "004_m31_candidate_relay.sql"),
       path.join(ROOT, "infra", "migrations", "sqlite", "005_m31_seed_identity.sql"),
       path.join(ROOT, "infra", "migrations", "sqlite", "006_m31_trial_attempt_audit.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "007_m32_run_resilience.sql")] });
+      path.join(ROOT, "infra", "migrations", "sqlite", "007_m32_run_resilience.sql"),
+      path.join(ROOT, "infra", "migrations", "sqlite", "008_m32_cleanup_reconciliation.sql")] });
   const labels = new PrivateLabelStore({ databasePath: privateLabelDatabasePath,
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const privateLabelHash = labels.publishRegistry(registry);
@@ -152,16 +230,19 @@ export function createApp({
     const connector = config.create({ origin: config.origin, token: config.token,
       approvalToken: config.approvalToken, adminToken: config.adminToken, tenantId,
       requestTransport: relayTransport,
+      declaredRuntimeLimits: relayCandidates[config.ref]?.evaluation_limits ?? null,
       attestation: { source_revision: frozen.source_revision, artifact_digest: frozen.artifact_digest } });
     const adapter = createCandidateAdapterV4({ id: config.ref, connector });
     realCandidateConnectors[config.ref] = connector;
     for (const lane of adapter.supportedEvaluationLanes) adapters[`${config.ref}:${lane}`] = adapter;
   }
+  Object.assign(realCandidateConnectors, cleanupConnectorOverrides);
   const liveDeepSeekAvailable = Boolean(process.env.DEEPSEEK_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN ?? process.env.ANTHROPIC_API_KEY);
   const adapterFor = (ref, lane) => adapters[`${ref}:${lane}`] ?? adapters[ref];
-  const twinConfigured = Boolean(process.env.EVALOS_TWIN_HOST && process.env.EVALOS_TWIN_SSH_KEY && process.env.EVALOS_TWIN_KNOWN_HOSTS);
-  const twinClient = twinConfigured ? new SshTwinClient() : null;
-  const twinManagerClient = twinConfigured ? new SshTwinManagerClient() : null;
+  const twinEnvironmentConfigured = Boolean(process.env.EVALOS_TWIN_HOST && process.env.EVALOS_TWIN_SSH_KEY && process.env.EVALOS_TWIN_KNOWN_HOSTS);
+  const twinConfigured = Boolean(twinManagerClientOverride || twinEnvironmentConfigured);
+  const twinClient = twinEnvironmentConfigured ? new SshTwinClient() : null;
+  const twinManagerClient = twinManagerClientOverride ?? (twinConfigured ? new SshTwinManagerClient() : null);
   const runner = new TrialRunner({ store, ledger, adapters, gradingService, approvalOracle,
     environmentFactory: ({ caseSpec, trial }) => {
       if (caseSpec.source?.level !== "L2") return createCaseEnvironment(caseSpec);
@@ -204,7 +285,66 @@ export function createApp({
       reset_error: attempt.final_state?.reset_error ?? null,
     },
     created_at: attempt.created_at,
-  });  const gradeFor = (trialId) => store.listGraderRuns(trialId).find((item) => item.dimension === "overall") ?? null;
+  });
+  const cleanupNeedsReconciliation = (attempt) => Boolean(attempt && (
+    attempt.final_state?.reset?.ok === false
+    || attempt.final_state?.quarantine?.required === true && attempt.final_state?.quarantine?.released !== true
+  ));
+  const successfulCleanup = (trialId, attempt) => store.listTrialCleanupReconciliations(trialId)
+    .find((item) => item.attempt === Number(attempt) && item.status === "RESOLVED") ?? null;
+  const reconcileTrialCleanup = async (trialId) => {
+    const trial = store.getTrial(trialId);
+    if (!trial) throw new Error("trial not found");
+    const attempt = store.listTrialAttemptResults(trialId).at(-1);
+    if (!cleanupNeedsReconciliation(attempt)) return { status: "NOT_REQUIRED", trial_id: trialId };
+    const existing = successfulCleanup(trialId, attempt.attempt);
+    if (existing) return existing;
+    const runRef = attempt.final_state?.quarantine?.candidate_run_ref;
+    if (!runRef) throw new Error("cleanup reconciliation is missing the exact candidate run reference");
+    const connector = realCandidateConnectors[trial.contestant_ref];
+    if (!connector || typeof connector.probeRun !== "function") throw new Error("candidate cleanup probe is not configured");
+    if (!twinManagerClient) throw new Error("Twin manager is not configured for cleanup reconciliation");
+    const candidate = await connector.probeRun({ runRef });
+    if (candidate.terminal !== true) {
+      const error = new Error("真实考生仍在运行，考场继续隔离；平台不会提前复位或交给下一场评测");
+      error.code = "CLEANUP_NOT_READY";
+      throw error;
+    }
+    let reset;
+    try {
+      reset = await twinManagerClient.invoke({ operation: "reset", contestant_ref: trial.contestant_ref,
+        trial_id: managedTwinTrialId(trial.contestant_ref, trial.id) });
+    } catch (error) {
+      reset = { ok: false, clean: false, error: error?.message ?? String(error) };
+    }
+    const resolved = reset?.ok === true && reset?.clean === true;
+    const reconciliation = store.recordTrialCleanupReconciliation({ trialId, attempt: attempt.attempt,
+      candidateRunRef: runRef, candidateTerminalStatus: candidate.status, twinReset: reset,
+      status: resolved ? "RESOLVED" : "FAILED", error: resolved ? null : reset?.error ?? "Twin reset did not prove a clean baseline",
+      evidence: { contract: "evalos-cleanup-reconciliation.1", candidate_probe: candidate,
+        managed_twin_trial_id: managedTwinTrialId(trial.contestant_ref, trial.id), original_attempt_result_hash: attempt.result_hash } });
+    ledger.append({ entityType: "trial", entityId: trialId,
+      action: resolved ? "trial.cleanup_reconciled" : "trial.cleanup_reconciliation_failed",
+      payload: { reconciliation_id: reconciliation.id, record_hash: reconciliation.record_hash,
+        attempt: attempt.attempt, candidate_run_ref: runRef, candidate_terminal_status: candidate.status,
+        twin_reset: reset } });
+    if (!resolved) throw new Error(`考场复位仍未通过：${reconciliation.error}`);
+    return reconciliation;
+  };
+  let cleanupReconciliationRunning = false;
+  const reconcilePendingCleanups = async () => {
+    if (cleanupReconciliationRunning || !twinConfigured) return;
+    cleanupReconciliationRunning = true;
+    try {
+      for (const trial of store.listTrials(null, { includeReplays: false })) {
+        const attempt = store.listTrialAttemptResults(trial.id).at(-1);
+        if (!cleanupNeedsReconciliation(attempt) || successfulCleanup(trial.id, attempt.attempt)) continue;
+        try { await reconcileTrialCleanup(trial.id); }
+        catch (error) { if (error?.code !== "CLEANUP_NOT_READY") console.error("cleanup reconciliation failed", trial.id, error); }
+      }
+    } finally { cleanupReconciliationRunning = false; }
+  };
+  const gradeFor = (trialId) => store.listGraderRuns(trialId).find((item) => item.dimension === "overall") ?? null;
   const evaluationMode = (experiment) => experiment?.manifest?.evaluation_mode ?? "FORMAL";
   const workbenchExperiments = () => store.listExperiments().map((experiment) => {
     const summary = store.experimentSummary(experiment.id);
@@ -231,7 +371,8 @@ export function createApp({
         ? experiment.manifest.contestants?.map(({ ref, kind, architecture, adapter_version, source_revision, artifact_digest }) =>
           ({ ref, kind, architecture, adapter_version, source_revision, artifact_digest }))
         : store.listBlinds(experiment.id).map(({ blind_id }) => ({ ref: blind_id, kind: "BLINDED" })),
-      progress: { completed: summary.completed_trials, failed: summary.failed_trials, total: summary.trial_count,
+      progress: { completed: summary.terminal_trials, succeeded: summary.completed_trials,
+        failed: summary.failed_trials, cancelled: summary.cancelled_trials, total: summary.trial_count,
         rate: summary.completion_rate }, average_score: summary.average_score,
       analyses: trials.reduce((sum, trial) => sum + store.listAnalysisRuns(trial.id).length, 0),
       created_at: experiment.created_at, started_at: experiment.started_at, completed_at: experiment.completed_at };
@@ -383,7 +524,8 @@ export function createApp({
           error: "真实产品连接器或开考检查未配置" };
       }
       try {
-        return { ref: contestant.ref, kind: contestant.kind, ...(await adapter.preflight({ contestant })) };
+        return { ref: contestant.ref, kind: contestant.kind,
+          ...(await adapter.preflight({ contestant, requiresTwin: needsTwin, budget: source.manifest.budget })) };
       } catch (error) {
         return { ref: contestant.ref, kind: contestant.kind, ready: false,
           error: String(error?.message ?? error) };
@@ -400,6 +542,8 @@ export function createApp({
       ...(missingAdapters.length ? [`参评适配器未就绪：${missingAdapters.join("、")}`] : []),
       ...runClassViolations,
       ...failedCandidateChecks.map((item) => `真实考生开考检查失败（${item.ref}）：${item.error ?? "产品未就绪或冻结指纹不一致"}`),
+      ...(mode === "FORMAL" ? candidateChecks.filter((item) => item.kind === "REAL_PRODUCT" && item.budget?.aligned !== true)
+        .map((item) => `正式评测预算合同未冻结或不一致（${item.ref}）：考生必须在 Trial 的 ${source.manifest.budget?.wallclock_ms ?? "未知"}ms 时间预算内自行终止`) : []),
       ...(needsTwin && !twinConfigured ? ["所选 L2 Case 需要数字孪生环境，但 Twin 尚未配置"] : []),
       ...(mode === "FORMAL" && effectiveConcurrency < requestedConcurrency
         ? [`正式评测并发资格未通过：冻结配置要求 ${requestedConcurrency} 并发，当前隔离环境只能安全支持 ${effectiveConcurrency} 并发`] : []),
@@ -421,9 +565,13 @@ export function createApp({
         isolation_note: effectiveConcurrency < requestedConcurrency
           ? "当前按安全隔离槽位降为串行/低并发执行；不会让不同工作模式共享同一租户并发切换。"
           : "每个并发任务均有冻结的隔离边界。" },
-      readiness: { model_and_adapter: missingAdapters.length === 0, twin: !needsTwin || twinConfigured,
+      readiness: { model_and_adapter: missingAdapters.length === 0,
+        twin: !needsTwin || (twinConfigured && candidateChecks.filter((item) => item.kind === "REAL_PRODUCT")
+          .every((item) => item.twin?.ready === true)),
         run_class_separation: runClassViolations.length === 0,
         external_candidate_api: failedCandidateChecks.length === 0,
+        candidate_budget_alignment: candidateChecks.filter((item) => item.kind === "REAL_PRODUCT")
+          .every((item) => item.budget?.aligned !== false),
         candidate_fingerprint: failedCandidateChecks.every((item) => !/drift/i.test(item.error ?? "")),
         approval_identity_separation: candidateChecks.filter((item) => item.kind === "REAL_PRODUCT")
           .every((item) => item.credentials?.identities_separated === true),
@@ -623,10 +771,14 @@ export function createApp({
     } catch (error) {
       const request = store.getEvaluationRunRequest(requestId);
       if (request && request.status !== "CANCELLED") {
-        const finished = store.finishEvaluationRunRequest(requestId, "FAILED", error?.message ?? error);
-        const report = runRequestView(finished).decision_report;
+        const closure = store.closeEvaluationRunAfterFailure(requestId, error?.message ?? error);
+        const report = runRequestView(closure.request).decision_report;
         ledger.append({ entityType: "evaluation_run_request", entityId: requestId, action: "evaluation.request.failed",
-          payload: { error: String(error?.message ?? error), decision_report_digest: sha256(report),
+          payload: { error: String(error?.message ?? error),
+            cancelled_queued_trials: closure.cancelled_queued_trials,
+            cancelled_running_trials: closure.cancelled_running_trials,
+            experiment_status_changed: closure.experiment_status_changed,
+            decision_report_digest: sha256(report),
             conclusion_code: report.conclusion_code } });
       }
     } finally {
@@ -634,8 +786,17 @@ export function createApp({
     }
   };  const scheduleEvaluationRequest = (id, delayMs = 0) => setTimeout(() => void executeEvaluationRequest(id), delayMs);
   runner.recover();
-  for (const request of store.listEvaluationRunRequests().filter((item) => ["QUEUED", "RUNNING"].includes(item.status))) {
-    scheduleEvaluationRequest(request.id, request.status === "RUNNING" ? 1000 : 0);
+  for (const request of store.listEvaluationRunRequests().filter((item) => item.status === "FAILED" && item.created_experiment_id)) {
+    const closure = store.closeEvaluationRunAfterFailure(request.id, request.error);
+    if (closure.cancelled_queued_trials || closure.cancelled_running_trials || closure.experiment_status_changed) {
+      ledger.append({ entityType: "evaluation_run_request", entityId: request.id,
+        action: "evaluation.request.failure_lifecycle_reconciled",
+        payload: { experiment_id: request.created_experiment_id,
+          cancelled_queued_trials: closure.cancelled_queued_trials,
+          cancelled_running_trials: closure.cancelled_running_trials,
+          experiment_status_changed: closure.experiment_status_changed,
+          original_error: request.error } });
+    }
   }
 
   const operationsHealth = () => {
@@ -649,10 +810,14 @@ export function createApp({
     for (const attempt of attemptHistory) {
       const category = attempt?.failure?.category;
       if (category) failureCategories[category] = (failureCategories[category] ?? 0) + 1;
-    }    const unresolvedCleanup = latestAttempts.filter(({ attempt }) => attempt && (
+    }
+    const reconciliations = store.listTrialCleanupReconciliations();
+    const resolvedCleanupKeys = new Set(reconciliations.filter((item) => item.status === "RESOLVED")
+      .map((item) => `${item.trial_id}:${item.attempt}`));
+    const unresolvedCleanup = latestAttempts.filter(({ trial, attempt }) => attempt && (
       attempt.cleanup?.reset_ok === false
       || attempt.cleanup?.quarantine_required && attempt.cleanup?.quarantine_released !== true
-    )).length;
+    ) && !resolvedCleanupKeys.has(`${trial.id}:${attempt.attempt}`)).length;
     const incompleteUsage = trials.filter((trial) => trial.status === "COMPLETED"
       && trial.usage?.measurement?.complete === false).length;
     const now = Date.now();
@@ -683,6 +848,7 @@ export function createApp({
       },
       evidence: {
         unresolved_cleanup_trials: unresolvedCleanup,
+        reconciled_cleanup_trials: resolvedCleanupKeys.size,
         incomplete_candidate_usage_trials: incompleteUsage,
       },
       failure_categories: failureCategories,
@@ -756,13 +922,18 @@ export function createApp({
             continue;
           }
           try {
-            const check = await adapter.preflight({ contestant: frozen });
+            const check = await adapter.preflight({ contestant: frozen, requiresTwin: true,
+              budget: frozenM31Manifest.budget });
+            const budgetUnknown = check.budget?.aligned == null;
             items.push({ ref, kind: "REAL_PRODUCT", configured: true, ready: check.ready,
               architecture: check.architecture, source_revision: check.source_revision,
-              status_label: check.ready ? "可以参加资格试运行" : "产品未就绪",
-              explanation: check.ready ? "外部产品可达，冻结版本一致，提交/审批/管理身份相互独立且遵守最小权限。"
-                : "产品健康状态、身份隔离、最小权限或评测租户未达到开考要求。",
-              health: check.health, isolation: check.isolation, credentials: check.credentials });
+              status_label: check.ready ? (budgetUnknown ? "资格试跑可用，正式评测未放行" : "可以参加资格试运行") : "产品未就绪",
+              explanation: check.ready ? (budgetUnknown
+                ? "外部产品、身份隔离和数字孪生均已就绪，可以进行少量不计分资格试跑；但产品尚未公开最长运行时间，正式评测不能放行。"
+                : "外部产品可达，版本指纹一致，评测身份相互独立，数字孪生已连接，且候选超时没有超过 Trial 时间预算。")
+                : "产品健康、数字孪生、身份隔离、最小权限、评测租户或候选超时预算未达到开考要求。",
+              health: check.health, isolation: check.isolation, credentials: check.credentials,
+              twin: check.twin, budget: check.budget });
           } catch (error) {
             items.push({ ref, kind: "REAL_PRODUCT", configured: true, ready: false, status_label: "开考检查失败",
               explanation: String(error?.message ?? error) });
@@ -963,10 +1134,13 @@ export function createApp({
         return json({ error: "authenticated workbench session required" }, 401, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/workbench/run-templates") {
+        const requestedSourceExperimentId = url.searchParams.get("source_experiment_id");
         return json({ items: store.listExperiments().filter((item) => item.manifest.manifest_version === "6.0"
-          && ((store.listTrials(item.id, { includeReplays: false }).length === 0
-              && (item.manifest.evaluation_mode === "FORMAL" || item.manifest.run_class === "ENGINEERING_TEST"))
-            || item.status === "COMPLETED" || store.experimentSummary(item.id).completion_rate === 1))
+          && (requestedSourceExperimentId
+            ? item.id === requestedSourceExperimentId
+            : ((store.listTrials(item.id, { includeReplays: false }).length === 0
+                && (item.manifest.evaluation_mode === "FORMAL" || item.manifest.run_class === "ENGINEERING_TEST"))
+              || item.status === "COMPLETED" || store.experimentSummary(item.id).completion_rate === 1)))
           .map((item) => ({ id: item.id, name: item.name,
             status: store.listTrials(item.id, { includeReplays: false }).length === 0 ? "FROZEN" : item.status,
             dataset_ref: item.dataset_ref,
@@ -1140,6 +1314,15 @@ export function createApp({
         return snapshot ? json({ snapshot: safeSnapshot(snapshot, { includeFiles: true }) }, 200, cors)
           : json({ error: "frozen source snapshot not found" }, 404, cors);
       }
+      const workbenchTrialCleanupMatch = url.pathname.match(/^\/api\/workbench\/trials\/([^/]+)\/reconcile-cleanup$/);
+      if (request.method === "POST" && workbenchTrialCleanupMatch) {
+        const trialId = decodeURIComponent(workbenchTrialCleanupMatch[1]);
+        try { return json({ reconciliation: await reconcileTrialCleanup(trialId) }, 200, cors); }
+        catch (error) {
+          if (error?.code === "CLEANUP_NOT_READY") return json({ error: error.message }, 409, cors);
+          throw error;
+        }
+      }
       const workbenchTrialMatch = url.pathname.match(/^\/api\/workbench\/trials\/([^/]+)$/);
       if (request.method === "GET" && workbenchTrialMatch) {
         const trialId = decodeURIComponent(workbenchTrialMatch[1]);
@@ -1149,6 +1332,7 @@ export function createApp({
         const trace = store.getTrace(trial.id);
         return json({ trial: auditTrial(trial, experiment), case: store.getPublicCase(trial.case_ref),
           experiment: workbenchExperiments().find((item) => item.id === trial.experiment_id),
+          live_progress: trialLiveProgressView(trial, experiment, trace),
           evidence: { trace_records: trace.length, trace_hash: trial.trace_hash,
             actors: [...new Set(trace.map((item) => item.actor))],
             tools: trace.filter((item) => item.span_kind === "TOOL" && item.record_type === "SPAN_END").length,
@@ -1157,6 +1341,7 @@ export function createApp({
             id: item.id, role: item.judge_role, result: item.result, authority: "advisory_only", created_at: item.created_at })),
           source_snapshot: safeSnapshot(store.getTrialSourceSnapshot(trial.id)), analyses: store.listAnalysisRuns(trial.id),
           regrades: store.listRegradeRequests(trial.id), attempts: store.listTrialAttemptResults(trial.id).map(attemptView),
+          cleanup_reconciliations: store.listTrialCleanupReconciliations(trial.id),
         }, 200, cors);
       }
 
@@ -1264,7 +1449,13 @@ export function createApp({
   for (const request of store.listEvaluationRunRequests().filter((item) => ["QUEUED", "RUNNING"].includes(item.status))) {
     scheduleEvaluationRequest(request.id);
   }
-  return { handler, store, labels, ledger, runner, close: () => { labels.close(); store.close(); } };
+  const cleanupReconciliationTimer = twinConfigured ? setInterval(() => void reconcilePendingCleanups(), 30000) : null;
+  cleanupReconciliationTimer?.unref?.();
+  const cleanupReconciliationKickoff = twinConfigured ? setTimeout(() => void reconcilePendingCleanups(), 1000) : null;
+  cleanupReconciliationKickoff?.unref?.();
+  return { handler, store, labels, ledger, runner, reconcileTrialCleanup,
+    close: () => { if (cleanupReconciliationTimer) clearInterval(cleanupReconciliationTimer);
+      if (cleanupReconciliationKickoff) clearTimeout(cleanupReconciliationKickoff); labels.close(); store.close(); } };
 }
 
 export { publicTrial };

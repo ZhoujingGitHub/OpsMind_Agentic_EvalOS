@@ -41,9 +41,14 @@ test("Agent+Harness连接器只通过真实产品API提交任务并保留原始�
         : { user_id: "eval-administrator", tenant_id: "tenant-eval-harness", permissions: { manage_roles: true } },
     "GET /v2/evaluation/controlled-remediation-contract": async () => ({ contract: "controlled-remediation.1", operating_modes: ["diagnosis_only", "human_collaboration", "controlled_auto"] }),
     "GET /v2/investigation-runtime": async () => ({ runtime: "claude-agent-sdk", model: "deepseek-v4-flash" }),
+    "GET /v2/protocol-lab": async () => ({ configured: true, connected: true, slot_id: "harness-slot-1",
+      roles: ["环境控制", "只读诊断", "动作执行", "独立验证"], summary: "已连接5G数字孪生实验室。" }),
     "GET /v2/remediation/context": async () => ({ execution_environment: "controlled_simulation", production_writes_available: false }),
     "PUT /v2/remediation/mode": async ({ body }) => ({ ...body, production_writes_available: false }),
     "POST /v2/investigation-candidates": async ({ body }) => { submittedGoal = body.goal; return { investigation_id: "harness-run" }; },
+    "POST /v2/investigations/harness-run/protocol-lab/reset": async () => ({
+      trial_id: "ah-run", status: "reset", reset_hash: "reset-hash", production_network: false,
+    }),
     "GET /v2/investigations/harness-run": async () => ({ status: "resolved", objective: submittedGoal,
       usage: { input_tokens: 640, output_tokens: 96, model_calls: 3, result_bytes: 4096, cost_microunits: 25000 },
       tool_calls: [{ tool: "query_logs" }, { tool: "query_metrics" }],
@@ -58,13 +63,17 @@ test("Agent+Harness连接器只通过真实产品API提交任务并保留原始�
   });
   t.after(fixture.close);
   const connector = createAgentHarnessProductConnector({ origin: fixture.origin, token: "fixture-token",
-    approvalToken: "approval-token", adminToken: "admin-token", tenantId: "tenant-eval-harness", attestation: ATTESTATION });
+    approvalToken: "approval-token", adminToken: "admin-token", tenantId: "tenant-eval-harness", attestation: ATTESTATION,
+    declaredRuntimeLimits: { max_run_ms: 2700000, cancellation_supported: false, source: "fixture-deployment" } });
   const discovery = await connector.discover();
   assert.equal(discovery.architecture, "CLAUDE_AGENT_SDK_HARNESS");
   assert.equal(discovery.production_writes_available, false);
   const readiness = await connector.evaluationReadiness();
   assert.equal(readiness.identities_separated, true);
   assert.equal(readiness.least_privilege, true);
+  assert.equal(readiness.external_twin_ready, true);
+  assert.equal(readiness.twin.slot_id, "harness-slot-1");
+  assert.equal(readiness.budget_contract.max_run_ms, 2700000);
   const executionContract = { execution_mode: "controlled_simulation", trial: { id: "run" }, case: { goal: "调查AMF",
     visible: { operating_mode: "human_collaboration", time_window: "2026-08-22T00:00:00Z/2026-08-22T00:10:00Z" } } };
   const prepared = await connector.prepare({ executionContract });
@@ -73,6 +82,13 @@ test("Agent+Harness连接器只通过真实产品API提交任务并保留原始�
   assert.equal(started.run_ref, "harness-run");
   const observation = await connector.observe({ runRef: started.run_ref, cursor: 0, executionContract });
   assert.equal(observation.status, "COMPLETED");
+  assert.deepEqual(await connector.probeRun({ runRef: started.run_ref }), {
+    run_ref: "harness-run", status: "COMPLETED", terminal: true, raw_status: "resolved",
+  });
+  const finalization = await connector.finalize({ runRef: started.run_ref });
+  assert.equal(finalization.ok, true);
+  assert.equal(finalization.strategy, "candidate_protocol_lab_reset");
+  assert.equal(finalization.candidate_reset, true);
   assert.equal(observation.outcome.root_cause, "amf-service-stopped");
   assert.equal(observation.outcome.confidence, 0.87);
   assert.deepEqual(observation.outcome.exclusions, ["数据库故障"]);
@@ -96,6 +112,28 @@ test("Agent+Harness连接器只通过真实产品API提交任务并保留原始�
   assert.equal(JSON.stringify(intake.body).includes("allowed_tool_names"), false);
 });
 
+test("Agent+Harness连接器保留产品失败事件中的真实错误而不是降成unknown", async (t) => {
+  const fixture = await fixtureServer({
+    "GET /v2/investigations/failed-run": async () => ({ status: "failed" }),
+    "GET /v2/investigations/failed-run/execution-log": async () => ({ next_sequence: 2, items: [
+      { sequence: 1, event_type: "investigation.failed", created_at: "2026-08-23T00:00:00Z",
+        payload: { error_type: "TimeoutError", message: "Claude Agent SDK query 在 900 秒内没有完成。" } },
+    ] }),
+    "GET /v2/actions": async () => ({ items: [] }),
+  });
+  t.after(fixture.close);
+  const connector = createAgentHarnessProductConnector({ origin: fixture.origin, token: "fixture-token",
+    approvalToken: "approval-token", adminToken: "admin-token", tenantId: "tenant-eval-harness", attestation: ATTESTATION });
+  const observation = await connector.observe({ runRef: "failed-run", cursor: 0,
+    executionContract: { execution_mode: "controlled_simulation", evaluation_lane: "AGENT_CAPABILITY",
+      model: "deepseek-v4-flash", budget: { wallclock_ms: 3000000 }, trial: { id: "trial-failed",
+        case_ref: "M3-PUB-001@3.0.0", environment_seed: 2026081601, replicate_id: 1 },
+      case: { goal: "调查AMF", visible: { operating_mode: "diagnosis_only" } } } });
+  assert.equal(observation.status, "FAILED");
+  assert.deepEqual(observation.error, { code: "TimeoutError",
+    message: "Claude Agent SDK query 在 900 秒内没有完成。", source_event: "investigation.failed" });
+});
+
 test("LangGraph连接器只调用产品公开接口，不在EvalOS内重建Graph", async (t) => {
   let submittedGoal = "";
   const fixture = await fixtureServer({
@@ -104,7 +142,9 @@ test("LangGraph连接器只调用产品公开接口，不在EvalOS内重建Graph
       : request.headers.authorization === "Bearer approval-token"
         ? { subject: "eval-approver", roles: ["approver"], tenant_ids: ["tenant-eval-graph"] }
         : { subject: "eval-administrator", roles: ["tenant_admin"], tenant_ids: ["tenant-eval-graph"] },
-    "GET /health/ready": async () => ({ ready: true, architecture_type: "langgraph" }),
+    "GET /health/ready": async () => ({ ready: true, architecture_type: "langgraph", connectors: [
+      { connector_id: "open5gs-ueransim-protocol-lab", status: "healthy" },
+    ] }),
     "GET /api/v1/automation/overview": async () => ({ worker: "ready", checkpoint: "ready" }),
     "PUT /api/v1/automation/mode": async ({ body }) => ({ ...body, production_write_enabled: false }),
     "POST /api/v1/candidates": async ({ body }) => { submittedGoal = body.goal; return { investigation: { investigation_id: "graph-run" } }; },
@@ -126,6 +166,7 @@ test("LangGraph连接器只调用产品公开接口，不在EvalOS内重建Graph
   const readiness = await connector.evaluationReadiness();
   assert.equal(readiness.safe_parallelism, 1);
   assert.equal(readiness.least_privilege, true);
+  assert.equal(readiness.external_twin_ready, true);
   const executionContract = { execution_mode: "controlled_simulation", trial: { id: "run" }, case: { goal: "调查用户注册失败",
     visible: { operating_mode: "controlled_auto", time_window: "trial-relative" } } };
   const prepared = await connector.prepare({ executionContract });
@@ -134,6 +175,12 @@ test("LangGraph连接器只调用产品公开接口，不在EvalOS内重建Graph
   assert.equal(started.run_ref, "graph-run");
   const observation = await connector.observe({ runRef: started.run_ref, cursor: 0, executionContract });
   assert.equal(observation.status, "COMPLETED");
+  assert.deepEqual(await connector.probeRun({ runRef: started.run_ref }), {
+    run_ref: "graph-run", status: "COMPLETED", terminal: true, raw_status: "completed",
+  });
+  const finalization = await connector.finalize({ runRef: started.run_ref });
+  assert.equal(finalization.ok, true);
+  assert.equal(finalization.strategy, "candidate_worker_terminal_reset");
   assert.equal(observation.outcome.root_cause, "subscriber-profile-mismatch");
   assert.equal(observation.outcome.confidence, 0.74);
   assert.equal(observation.evaluation_binding.complete, true);
@@ -220,6 +267,9 @@ test("三个不同Token如果仍属于同一个超级管理员，也不能冒充
   const fixture = await fixtureServer({
     "GET /api/v1/me": async () => ({ subject: "platform-super-admin", roles: ["platform_admin"],
       tenant_ids: ["tenant-eval-graph"] }),
+    "GET /health/ready": async () => ({ status: "healthy", connectors: [
+      { connector_id: "open5gs-ueransim-protocol-lab", status: "healthy" },
+    ] }),
   });
   t.after(fixture.close);
   const connector = createLangGraphProductConnector({ origin: fixture.origin, token: "submitter-session",

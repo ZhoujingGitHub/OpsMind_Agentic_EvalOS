@@ -11,7 +11,21 @@ async function get(pathname, expectedType = null) {
   return response;
 }
 
-const health = await (await get("/health", /application\/json/)).json();
+async function waitForHealthyPlatform(timeoutMs = 60000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastHealth = null;
+  while (Date.now() < deadline) {
+    const response = await fetch(new URL("/health", base), { redirect: "manual" });
+    assert.equal(response.status, 200, `/health returned ${response.status}`);
+    assert.match(response.headers.get("content-type") ?? "", /application\/json/, "/health content type");
+    lastHealth = await response.json();
+    if (lastHealth.status === "ok") { checked.push("/health"); return lastHealth; }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  assert.fail(`platform did not recover to healthy state within ${timeoutMs}ms: ${JSON.stringify(lastHealth?.operations ?? lastHealth)}`);
+}
+
+const health = await waitForHealthyPlatform();
 assert.equal(health.status, "ok");
 assert.equal(health.milestone, "M3.1");
 assert.equal(health.formal_run.enabled, false, "formal 480 Trial must remain disabled");
@@ -22,6 +36,11 @@ assert.equal(overview.platform.candidate_execution, "external-real-products-only
 assert.equal(overview.platform.workflow_graph, null);
 assert.ok(overview.counts.datasets >= 1, "frozen datasets must be visible");
 assert.ok(overview.counts.cases >= 1, "versioned cases must be visible");
+
+const datasets = await (await get("/api/workbench/datasets", /application\/json/)).json();
+const frozenM3 = datasets.items.find((item) => item.dataset_ref === "m3-l2-agentic-formal@3.0.0");
+assert.ok(frozenM3, "M3.1 frozen dataset must be visible after every deployment");
+assert.equal(frozenM3.case_count, 80, "M3.1 frozen dataset must expose all 80 Cases before the console starts");
 
 const readiness = await (await get("/api/workbench/candidate-readiness", /application\/json/)).json();
 assert.equal(readiness.contract, "evalos-candidate-readiness.1");

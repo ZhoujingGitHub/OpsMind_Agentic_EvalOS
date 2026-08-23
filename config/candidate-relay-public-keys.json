@@ -3,6 +3,11 @@
   "candidates": {
     "agent-harness-v2": {
       "tenant_id": "tenant-ctyun-ops-demo",
+      "evaluation_limits": {
+        "max_run_ms": 2700000,
+        "cancellation_supported": false,
+        "source": "evalos-agent-harness-deployment-20260823-standard-5g-rca-budget"
+      },
       "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAB6LbPyIjJvq0lzjp7U6hwk0Clnm4E0OBtunUav4mkA8=\n-----END PUBLIC KEY-----\n"
     },
     "langgraph-v1": {

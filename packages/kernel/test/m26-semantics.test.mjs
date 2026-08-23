@@ -39,3 +39,34 @@ test("云端真实 Twin 事件与评分过滤器使用可理解的中英文语�
   assert.equal(protocol.title.zh, "调用工具：采集协议交互摘要");
   assert.equal(TRACE_FILTERS.some((item) => item.code === "EVALUATOR" && item.en === "Grader"), true);
 });
+
+test("真实考生公开进展被翻译成人话且不依赖隐式思维链", () => {
+  const display = explainTraceRecord({
+    record_type: "SPAN_EVENT", span_kind: "AGENT", name: "candidate.raw_event", actor: "external-candidate",
+    payload: { payload: { event_type: "agent.progress", payload: {
+      title: "核对核心网控制面状态", action_summary: "已排除无线侧单点故障",
+      next_step: "继续查询 AMF 进程和注册告警", visibility: "public_audit_summary",
+    } } },
+  });
+  assert.match(display.summary_zh, /Agent进展：核对核心网控制面状态/);
+  assert.match(display.summary_zh, /下一步：继续查询 AMF 进程和注册告警/);
+  assert.doesNotMatch(display.summary_zh, /chain.of.thought|思维链/i);
+});
+
+test("真实考生工具事件显示工具用途而非 raw event", () => {
+  const display = explainTraceRecord({
+    record_type: "SPAN_EVENT", span_kind: "AGENT", name: "candidate.raw_event", actor: "external-candidate",
+    payload: { payload: { event_type: "tool.called", payload: { name: "mcp__opsmind__query_logs" } } },
+  });
+  assert.equal(display.summary_zh, "正在调用工具：查询机器日志");
+});
+
+test("真实考生标准公开里程碑和Twin独立取证使用人话解释", () => {
+  const evidence = explainTraceRecord({ record_type: "SPAN_EVENT", span_kind: "AGENT",
+    name: "candidate.raw_event", actor: "external-candidate",
+    payload: { payload: { event_type: "evidence.collected", payload: {} } } });
+  assert.equal(evidence.summary_zh, "真实考生已采集一项新证据");
+  const capture = explainTraceRecord({ record_type: "SPAN_EVENT", span_kind: "INTERNAL",
+    name: "environment.independent_capture", actor: "twin-manager" });
+  assert.equal(capture.title.zh, "独立采集数字孪生现场证据");
+});

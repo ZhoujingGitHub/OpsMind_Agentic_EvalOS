@@ -26,6 +26,7 @@ from urllib.request import Request, urlopen
 PATHS = {
     "agent-harness-v2": [
         r"^/v2/auth/me$", r"^/v2/evaluation/controlled-remediation-contract$", r"^/v2/investigation-runtime$",
+        r"^/v2/protocol-lab$",
         r"^/v2/remediation/context$", r"^/v2/remediation/mode$", r"^/v2/investigation-candidates$",
         r"^/v2/investigations/[A-Za-z0-9_-]+$", r"^/v2/investigations/[A-Za-z0-9_-]+/execution-log(?:\?.*)?$",
         r"^/v2/actions(?:\?.*)?$", r"^/v2/evaluation/actions/[A-Za-z0-9_-]+$", r"^/v2/actions/[A-Za-z0-9_-]+/approval$",

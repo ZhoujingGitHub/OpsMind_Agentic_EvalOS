@@ -85,10 +85,50 @@ test("Candidate Adapter 4.0只做外部提交、事件翻译和证据保全，�
   assert.equal(outcome.__evalos_usage.values.input_tokens, 321);
   assert.deepEqual(outcome.__evalos_usage.observed_dimensions, ["input_tokens", "output_tokens", "model_calls"]);
   assert.ok(emitted.some(([name]) => name === "candidate.raw_event"));
+  assert.ok(emitted.some(([name]) => name === "candidate.poll.heartbeat"));
   assert.ok(emitted.some(([name]) => name === "conclusion.recorded"));
   assert.deepEqual(captures, ["conclusion.recorded"]);
   assert.deepEqual(CANDIDATE_ADAPTER_V4_RUNTIME.forbidden,
     ["invoke-candidate-internal-tools", "synthesize-missing-evidence", "change-official-score"]);
+});
+
+test("Candidate Adapter 4.0在开考前校验Twin与候选超时预算", async () => {
+  const fingerprints = {
+    source_revision: "abcdef1234567", artifact_digest: `sha256:${"1".repeat(64)}`,
+    runtime_digest: `sha256:${"2".repeat(64)}`, runtime_manifest_digest: `sha256:${"3".repeat(64)}`,
+    capability_contract_digest: `sha256:${"4".repeat(64)}`,
+  };
+  let twinReady = true;
+  let maxRunMs = 2700000;
+  const connector = {
+    kind: "fixture-external-product",
+    discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "CLAUDE_AGENT_SDK_HARNESS",
+      production_writes_available: false, health: { status: "healthy" }, ...fingerprints }),
+    evaluationReadiness: async () => ({ identities_separated: true, tenant_bound: true, least_privilege: true,
+      isolated_tenant_slots: 1, safe_parallelism: 1, external_twin_ready: twinReady,
+      twin: { configured: twinReady, connected: twinReady, slot_id: "harness-slot-1" },
+      budget_contract: { observable: true, max_run_ms: maxRunMs, cancellation_supported: false,
+        source: "fixture-deployment" } }),
+    start: async () => ({ run_ref: "unused", status: "RUNNING" }),
+    observe: async () => ({ run_ref: "unused", status: "RUNNING", raw_events: [], normalized_events: [] }),
+    cancel: async () => ({ supported: false }),
+  };
+  const contestant = { ref: "agent-harness-v2", kind: "REAL_PRODUCT",
+    architecture: "CLAUDE_AGENT_SDK_HARNESS", ...fingerprints };
+  const adapter = createCandidateAdapterV4({ id: "agent-harness-v2", connector });
+  const ready = await adapter.preflight({ contestant, requiresTwin: true, budget: { wallclock_ms: 3000000 } });
+  assert.equal(ready.ready, true);
+  assert.equal(ready.twin.ready, true);
+  assert.equal(ready.budget.aligned, true);
+  maxRunMs = 3300000;
+  const mismatch = await adapter.preflight({ contestant, requiresTwin: true, budget: { wallclock_ms: 3000000 } });
+  assert.equal(mismatch.ready, false);
+  assert.equal(mismatch.budget.aligned, false);
+  twinReady = false;
+  maxRunMs = 2700000;
+  const disconnected = await adapter.preflight({ contestant, requiresTwin: true, budget: { wallclock_ms: 3000000 } });
+  assert.equal(disconnected.ready, false);
+  assert.equal(disconnected.twin.ready, false);
 });
 
 test("Candidate Adapter超时后等待真实考生终态再释放隔离槽", async () => {

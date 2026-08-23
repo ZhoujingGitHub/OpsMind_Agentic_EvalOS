@@ -235,6 +235,19 @@ export class TrialRunner {
       emitWarnings(budget.consume({ wallclock_ms: Math.max(1, Math.round(performance.now() - start)) }));
       const usage = measuredUsage(budget.snapshot().usage, candidateUsage, experiment.manifest.run_class);
       environmentBeforeReset = typeof environment.snapshot === "function" ? await environment.snapshot() : {};
+      let candidateFinalization = null;
+      if (typeof adapter.finalize === "function") {
+        try {
+          candidateFinalization = await adapter.finalize({ outcome, executionContract, reason: "trial_completed" });
+          event("candidate.environment.release_completed", "candidate-adapter", candidateFinalization ?? { ok: true });
+        } catch (finalizationError) {
+          finalizationError.runRef = outcome.candidate_run_ref ?? finalizationError.runRef ?? null;
+          finalizationError.candidateTerminal = true;
+          finalizationError.candidateFinalizationAttempted = true;
+          finalizationError.haltQueue = true;
+          throw finalizationError;
+        }
+      }
       if (typeof environment.reset === "function") {
         environmentReset = await environment.reset();
         event("environment.reset", "environment", environmentReset ?? { ok: true });
@@ -300,7 +313,8 @@ export class TrialRunner {
       this.store.addArtifact(trial.id, "trial-result", artifactPath, digest, statSync(artifactPath).size);
       clearInterval(leaseTimer);
       this.store.completeTrial(trial.id, { usage, outcome,
-        finalState: { before_reset: environmentBeforeReset, reset: environmentReset }, traceHash });
+        finalState: { before_reset: environmentBeforeReset, candidate_finalization: candidateFinalization,
+          reset: environmentReset }, traceHash });
       this.ledger.append({
         entityType: "trial", entityId: trial.id, action: "trial.completed",
         payload: { experiment_id: trial.experiment_id, case_ref: trial.case_ref, environment_seed: trial.environment_seed,
@@ -316,6 +330,8 @@ export class TrialRunner {
       try { emitWarnings(budget.consume({ wallclock_ms: Math.max(1, Math.round(performance.now() - start)) })); } catch {}
       let resetErrorMessage = null;
       let snapshotErrorMessage = null;
+      let candidateFinalization = null;
+      let candidateFinalizationError = null;
       const keepQuarantined = error.keepEnvironmentQuarantined === true;
       const quarantineStarted = error.quarantineStarted === true || keepQuarantined;
       if (environment && environmentReset === null && typeof environment.reset === "function" && !keepQuarantined) {
@@ -325,6 +341,21 @@ export class TrialRunner {
           } catch (snapshotError) {
             snapshotErrorMessage = snapshotError.message;
             event("environment.snapshot_failed_after_failure", "environment", { error: snapshotError.message });
+          }
+        }
+        if (error.candidateTerminal === true && error.runRef && error.candidateFinalizationAttempted !== true &&
+            typeof adapter.finalize === "function") {
+          try {
+            candidateFinalization = await adapter.finalize({ runRef: error.runRef, executionContract,
+              reason: "trial_failed_after_candidate_terminal" });
+            event("candidate.environment.release_completed_after_failure", "candidate-adapter",
+              candidateFinalization ?? { ok: true });
+          } catch (finalizationError) {
+            candidateFinalizationError = finalizationError.message;
+            error.haltQueue = true;
+            event("candidate.environment.release_failed", "candidate-adapter", {
+              run_ref: error.runRef, error: candidateFinalizationError,
+            });
           }
         }
         try {
@@ -350,6 +381,7 @@ export class TrialRunner {
         keepQuarantined });
       const finalState = {
         before_reset: environmentBeforeReset,
+        candidate_finalization: candidateFinalization,
         reset: environmentReset,
         quarantine: {
           required: quarantineStarted,
@@ -357,6 +389,7 @@ export class TrialRunner {
           candidate_run_ref: error.runRef ?? null,
         },
         snapshot_error: snapshotErrorMessage,
+        candidate_finalization_error: candidateFinalizationError,
         reset_error: resetErrorMessage,
         failure_classification: failureClassification,
       };

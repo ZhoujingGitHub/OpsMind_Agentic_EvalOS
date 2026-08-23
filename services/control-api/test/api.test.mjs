@@ -3,16 +3,126 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createApp, evaluationRunName } from "../src/app.mjs";
+import { createApp, evaluationRunName, trialLiveProgressView } from "../src/app.mjs";
 import { createTestDouble, freezeSourceSnapshot } from "../../../packages/kernel/src/index.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "config", "m15-smoke.manifest.json"), "utf8"));
+const formalM3Manifest = JSON.parse(readFileSync(path.join(ROOT, "config", "m3-formal-agent-capability.manifest.json"), "utf8"));
+
+test("一小时级Trial持续展示在线心跳、实质进展和卡顿风险而不规定求解步骤", () => {
+  const startedAt = "2026-08-23T00:00:00.000Z";
+  const experiment = { manifest: { budget: { wallclock_ms: 3600000 } } };
+  const queued = trialLiveProgressView({ status: "QUEUED", started_at: null }, experiment, [], Date.now());
+  assert.equal(queued.progress_state, "QUEUED");
+  assert.equal(queued.liveness, "NOT_STARTED");
+  assert.match(queued.interpretation_zh, /尚未开始作答/);
+  const active = trialLiveProgressView({ status: "RUNNING", started_at: startedAt }, experiment, [
+    { name: "candidate.raw_event", actor: "external-candidate", span_kind: "AGENT", record_type: "SPAN_EVENT", timestamp: "2026-08-23T00:08:00.000Z" },
+    { name: "candidate.poll.heartbeat", actor: "candidate-adapter", span_kind: "INTERNAL", record_type: "SPAN_EVENT", timestamp: "2026-08-23T00:09:50.000Z" },
+  ], new Date("2026-08-23T00:10:00.000Z").getTime());
+  assert.equal(active.progress_state, "ACTIVE");
+  assert.equal(active.liveness, "LIVE");
+  assert.equal(active.elapsed_ms, 600000);
+  assert.equal(active.next_checkpoint_ms, 900000);
+  assert.equal(active.counters.liveness_heartbeats, 1);
+  const starting = trialLiveProgressView({ status: "RUNNING", started_at: startedAt }, experiment, [
+    { name: "candidate.poll.heartbeat", actor: "candidate-adapter", span_kind: "INTERNAL", record_type: "SPAN_EVENT", timestamp: "2026-08-23T00:00:20.000Z" },
+  ], new Date("2026-08-23T00:00:30.000Z").getTime());
+  assert.equal(starting.progress_state, "ACTIVE");
+  const stalled = trialLiveProgressView({ status: "RUNNING", started_at: startedAt }, experiment, [
+    { name: "candidate.raw_event", actor: "external-candidate", span_kind: "AGENT", record_type: "SPAN_EVENT", timestamp: "2026-08-23T00:01:00.000Z" },
+    { name: "candidate.poll.heartbeat", actor: "candidate-adapter", span_kind: "INTERNAL", record_type: "SPAN_EVENT", timestamp: "2026-08-23T00:14:50.000Z" },
+  ], new Date("2026-08-23T00:15:00.000Z").getTime());
+  assert.equal(stalled.progress_state, "STALLED");
+  assert.equal(stalled.liveness, "LIVE");
+  assert.match(stalled.interpretation_zh, /10分钟没有实质进展/);
+
+  const candidateHeartbeatOnly = trialLiveProgressView({ status: "RUNNING", started_at: startedAt }, experiment, [
+    { name: "candidate.raw_event", actor: "external-candidate", span_kind: "AGENT", record_type: "SPAN_EVENT",
+      timestamp: "2026-08-23T00:01:00.000Z", payload: { payload: { event_type: "agent.progress", payload: {
+        title: "完成第一轮取证", next_step: "等待模型汇总" } } } },
+    { name: "candidate.raw_event", actor: "external-candidate", span_kind: "AGENT", record_type: "SPAN_EVENT",
+      timestamp: "2026-08-23T00:14:55.000Z", payload: { payload: { event_type: "investigation.heartbeat", payload: {} } } },
+  ], new Date("2026-08-23T00:15:00.000Z").getTime());
+  assert.equal(candidateHeartbeatOnly.liveness, "LIVE");
+  assert.equal(candidateHeartbeatOnly.progress_state, "STALLED");
+  assert.equal(candidateHeartbeatOnly.counters.candidate_events, 1);
+  assert.match(candidateHeartbeatOnly.meaningful_progress.summary_zh, /完成第一轮取证/);
+
+  const stopping = trialLiveProgressView({ status: "RUNNING", started_at: startedAt }, experiment, [
+    { name: "candidate.run.quarantine_started", actor: "candidate-adapter", span_kind: "AGENT",
+      record_type: "SPAN_EVENT", timestamp: "2026-08-23T00:09:00.000Z" },
+  ], new Date("2026-08-23T00:10:30.000Z").getTime());
+  assert.equal(stopping.progress_state, "STOPPING");
+  assert.match(stopping.interpretation_zh, /等待真实考生进入终态/);
+});
 
 test("重评名称只保留一层用途前缀", () => {
   assert.equal(evaluationRunName("M3.1 双考生资格试运行", "QUICK_VALIDATION"), "快速验证 · M3.1 双考生资格试运行");
   assert.equal(evaluationRunName("快速验证 · M3.1 双考生资格试运行", "TARGETED_REGRESSION"), "定向回归 · M3.1 双考生资格试运行");
   assert.equal(evaluationRunName("定向回归 · M3.1 双考生资格试运行", "FORMAL"), "正式评测 · M3.1 双考生资格试运行");
+});
+
+test("后续安全复位会解除平台健康阻塞但不会改写失败Trial", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-cleanup-health-"));
+  const app = createApp({ databasePath: path.join(root, "control.sqlite"),
+    privateLabelDatabasePath: path.join(root, "private", "labels.sqlite"), runtimeRoot: root,
+    apiToken: "admin-secret" });
+  try {
+    const created = app.store.createExperiment(manifest, "cleanup-health-test");
+    const trial = app.store.claimNext("cleanup-test-worker", 30000, created.experiment.id);
+    app.store.failTrial(trial.id, "external candidate quarantine unresolved: timed out", { finalState: {
+      quarantine: { required: true, released: false, candidate_run_ref: "candidate-run-timeout" },
+      failure_classification: { category: "PRODUCT_RELIABILITY_FAILURE", owner: "CANDIDATE" },
+    } });
+    let health = await (await app.handler(new Request("http://local/api/workbench/operations-health", {
+      headers: { authorization: "Bearer admin-secret" } }))).json();
+    assert.equal(health.status, "degraded");
+    assert.equal(health.evidence.unresolved_cleanup_trials, 1);
+    app.store.recordTrialCleanupReconciliation({ trialId: trial.id, attempt: 1,
+      candidateRunRef: "candidate-run-timeout", candidateTerminalStatus: "COMPLETED",
+      twinReset: { ok: true, clean: true }, status: "RESOLVED",
+      evidence: { original_attempt_result_hash: app.store.listTrialAttemptResults(trial.id)[0].result_hash } });
+    health = await (await app.handler(new Request("http://local/api/workbench/operations-health", {
+      headers: { authorization: "Bearer admin-secret" } }))).json();
+    assert.equal(health.status, "ok");
+    assert.equal(health.evidence.unresolved_cleanup_trials, 0);
+    assert.equal(health.evidence.reconciled_cleanup_trials, 1);
+    assert.equal(app.store.getTrial(trial.id).status, "FAILED");
+  } finally { app.close(); }
+});
+
+test("清理核验必须先确认真实考生终态，再通过受限Twin管理器恢复干净基线", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-cleanup-reconcile-"));
+  const caseRef = formalM3Manifest.case_refs[0];
+  const contestant = formalM3Manifest.contestants[0];
+  const smallManifest = { ...formalM3Manifest, name: "清理核验测试", design: "single_system_acceptance",
+    evaluation_mode: "QUALIFICATION", contestants: [contestant], case_refs: [caseRef], environment_seeds: [2026082301],
+    replicates_per_seed: 1, case_partitions: { public: [caseRef], hidden: [], safety: [], regression: [] } };
+  const resetCalls = [];
+  const app = createApp({ databasePath: path.join(root, "control.sqlite"),
+    privateLabelDatabasePath: path.join(root, "private", "labels.sqlite"), runtimeRoot: root,
+    apiToken: "admin-secret", cleanupConnectorOverrides: { [contestant.ref]: {
+      probeRun: async ({ runRef }) => ({ run_ref: runRef, status: "COMPLETED", terminal: true, raw_status: "resolved" }),
+    } }, twinManagerClientOverride: { invoke: async (request) => { resetCalls.push(request); return { ok: true, clean: true,
+      operation: "reset", reset_hash: "sha256:clean" }; } } });
+  try {
+    const created = app.store.createExperiment(smallManifest, "cleanup-reconcile-test");
+    const trial = app.store.claimNext("cleanup-test-worker", 30000, created.experiment.id);
+    app.store.failTrial(trial.id, "external candidate quarantine unresolved: timed out", { finalState: {
+      quarantine: { required: true, released: false, candidate_run_ref: "candidate-run-terminal-later" },
+      failure_classification: { category: "PRODUCT_RELIABILITY_FAILURE", owner: "CANDIDATE" },
+    } });
+    const reconciliation = await app.reconcileTrialCleanup(trial.id);
+    assert.equal(reconciliation.status, "RESOLVED");
+    assert.equal(reconciliation.candidate_terminal_status, "COMPLETED");
+    assert.equal(resetCalls.length, 1);
+    assert.equal(resetCalls[0].operation, "reset");
+    assert.match(resetCalls[0].trial_id, /^(?:ah-|lg-)/);
+    assert.equal(app.store.getTrial(trial.id).status, "FAILED");
+    assert.equal(app.ledger.entries().at(-1).action, "trial.cleanup_reconciled");
+  } finally { app.close(); }
 });
 
 test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏身份和标签", async () => {
@@ -120,6 +230,9 @@ test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏
     const templates = await (await app.handler(new Request("http://local/api/workbench/run-templates", {
       headers: { authorization: "Bearer admin-secret" } }))).json();
     assert.deepEqual(templates.items[0].case_refs, manifest.case_refs);
+    const rerunTemplate = await (await app.handler(new Request(`http://local/api/workbench/run-templates?source_experiment_id=${firstBody.experiment.id}`, {
+      headers: { authorization: "Bearer admin-secret" } }))).json();
+    assert.deepEqual(rerunTemplate.items.map((item) => item.id), [firstBody.experiment.id]);
     const selectionBody = { request_kind: "RERUN_FROZEN", evaluation_purpose: "RERUN_FROZEN",
       mode: "QUICK_VALIDATION", source_experiment_id: firstBody.experiment.id,
       case_refs: [manifest.case_refs[0]], contestant_refs: manifest.contestants.map((item) => item.ref),
@@ -315,6 +428,71 @@ test("评测任务只对冻结允许的瞬态限流自动重试一次并保留�
     }))).json();
     assert.equal(health.failure_categories.RATE_LIMIT, 1);
     assert.equal(health.retry_history.retried_trials, 1);
+  } finally { app.close(); }
+});
+
+test("真实能力门禁失败后收口未开考Trial并关闭实验，不留下假运行中任务", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-api-failure-closure-"));
+  const fatalAdapter = (id) => {
+    const base = createTestDouble(id, "context-first");
+    return { ...base, async execute() {
+      const error = new Error("candidate product terminal isolation failure");
+      error.haltQueue = true;
+      throw error;
+    } };
+  };
+  const app = createApp({
+    databasePath: path.join(root, "control.sqlite"),
+    privateLabelDatabasePath: path.join(root, "private.sqlite"),
+    runtimeRoot: root,
+    apiToken: "control-secret",
+    bootstrapEngineeringTestDesign: true,
+    engineeringAdapterOverrides: {
+      "test-double-a:ENGINEERING_TEST": fatalAdapter("test-double-a"),
+      "test-double-b:ENGINEERING_TEST": fatalAdapter("test-double-b"),
+    },
+  });
+  try {
+    const source = app.store.listExperiments().find((item) => item.manifest.run_class === "ENGINEERING_TEST");
+    const response = await app.handler(new Request("http://local/api/workbench/run-requests", {
+      method: "POST",
+      headers: { authorization: "Bearer control-secret", "content-type": "application/json",
+        "idempotency-key": "terminal-failure-closes-work" },
+      body: JSON.stringify({ request_kind: "NEW_EVALUATION", evaluation_purpose: "PAIRED_COMPARISON",
+        mode: "QUICK_VALIDATION", source_experiment_id: source.id, case_refs: source.manifest.case_refs,
+        contestant_refs: source.manifest.contestants.map((item) => item.ref),
+        environment_seeds: [source.manifest.environment_seeds[0]], repetitions: 1,
+        requested_by: "failure-closure-test", reason: "验证能力门禁失败后的任务状态完整收口" }),
+    }));
+    assert.equal(response.status, 202);
+    const id = (await response.json()).request.id;
+    let request;
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      request = (await (await app.handler(new Request(`http://local/api/workbench/run-requests/${id}`, {
+        headers: { authorization: "Bearer control-secret" },
+      }))).json()).request;
+      if (request.status === "FAILED" && request.progress.completed === request.progress.total) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(request.status, "FAILED");
+    assert.equal(request.progress.completed, request.progress.total);
+    const trials = app.store.listTrials(request.created_experiment_id, { includeReplays: false });
+    assert.equal(trials.some((trial) => trial.status === "FAILED"), true);
+    assert.equal(trials.some((trial) => trial.status === "CANCELLED"), true);
+    assert.equal(trials.some((trial) => ["QUEUED", "RUNNING"].includes(trial.status)), false);
+    assert.equal(app.store.getExperiment(request.created_experiment_id).status, "FAILED");
+    const experiments = await (await app.handler(new Request("http://local/api/workbench/experiments", {
+      headers: { authorization: "Bearer control-secret" },
+    }))).json();
+    const experiment = experiments.items.find((item) => item.id === request.created_experiment_id);
+    assert.equal(experiment.progress.completed, experiment.progress.total);
+    assert.equal(experiment.progress.succeeded, 0);
+    assert.equal(experiment.progress.failed, 1);
+    assert.equal(experiment.progress.cancelled, experiment.progress.total - 1);
+    assert.equal(experiment.average_score, null);
+    const failureEvent = app.ledger.entries().find((item) => item.entity_id === id
+      && item.action === "evaluation.request.failed");
+    assert.equal(failureEvent.payload.cancelled_queued_trials > 0, true);
   } finally { app.close(); }
 });
 test("M3冻结设计可用于新建评测预检但不能绕过门禁直接启动480 Trial", async () => {

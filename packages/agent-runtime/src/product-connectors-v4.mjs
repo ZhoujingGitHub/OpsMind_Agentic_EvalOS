@@ -60,6 +60,16 @@ function tenantScoped(principal, tenantId, kind) {
   return Array.isArray(principal?.tenant_ids) && principal.tenant_ids.includes(tenantId);
 }
 
+function deploymentLimits(value) {
+  const maxRunMs = Number(value?.max_run_ms);
+  return Object.freeze({
+    observable: Number.isFinite(maxRunMs) && maxRunMs > 0,
+    max_run_ms: Number.isFinite(maxRunMs) && maxRunMs > 0 ? maxRunMs : null,
+    cancellation_supported: value?.cancellation_supported === true,
+    source: value?.source ?? "not-declared",
+  });
+}
+
 function client(origin, token, requestTimeoutMs, defaultHeaders = {}, requestTransport = null, credentialRole = "candidate_submitter") {
   if (requestTransport) {
     return {
@@ -371,6 +381,25 @@ function finalOutcome({ status, conclusion, uncertainty, evidence = [], hypothes
   };
 }
 
+function terminalFailure(detail = {}, events = []) {
+  const failedEvent = [...events].reverse().find((event) => {
+    const name = String(event?.event_type ?? event?.name ?? event?.action ?? "").toLowerCase();
+    const payload = event?.public_payload ?? event?.payload ?? {};
+    return /(?:failed|timeout|error)$/.test(name) || payload.is_error === true
+      || ["failed", "error", "timeout"].includes(String(payload.status ?? "").toLowerCase());
+  });
+  const payload = failedEvent?.public_payload ?? failedEvent?.payload ?? {};
+  const nested = payload.error && typeof payload.error === "object" ? payload.error : {};
+  const detailError = detail.error && typeof detail.error === "object" ? detail.error : {};
+  const code = detailError.code ?? detail.error_type ?? detail.error_code
+    ?? nested.code ?? payload.error_type ?? payload.code ?? "candidate_failed";
+  const message = detailError.message ?? detail.error_message ?? detail.failure_reason
+    ?? nested.message ?? payload.message ?? (typeof payload.error === "string" ? payload.error : null)
+    ?? detail.stop_reason ?? "真实考生以失败终态结束，但没有公开更具体的错误说明。";
+  return { code: String(code), message: String(message),
+    source_event: failedEvent?.event_type ?? failedEvent?.name ?? failedEvent?.action ?? null };
+}
+
 function langGraphAdapterStatus(state) {
   if (state === "completed") return "COMPLETED";
   if (["insufficient_evidence", "human_takeover", "denied", "budget_exhausted"].includes(state)) return "INCONCLUSIVE";
@@ -454,7 +483,7 @@ function discovery(attestation, architecture, capability, runtime, health = {}) 
 }
 
 export function createAgentHarnessProductConnector({ origin, token, approvalToken, adminToken, tenantId, attestation,
-  requestTransport = null, requestTimeoutMs = 30000 } = {}) {
+  requestTransport = null, requestTimeoutMs = 30000, declaredRuntimeLimits = null } = {}) {
   if (!tenantId) throw new Error("Agent+Harness evaluation tenant id is required");
   assertSeparatedIdentities(token, approvalToken, adminToken, requestTransport);
   const tenantHeaders = { "x-tenant-id": tenantId };
@@ -462,12 +491,14 @@ export function createAgentHarnessProductConnector({ origin, token, approvalToke
   const approvalApi = client(origin, approvalToken, requestTimeoutMs, tenantHeaders, requestTransport, "approval_oracle");
   const adminApi = client(origin, adminToken, requestTimeoutMs, tenantHeaders, requestTransport, "mode_administrator");
   const frozen = assertAttestation(attestation);
+  const runtimeLimits = deploymentLimits(declaredRuntimeLimits);
   const expectedContexts = new Map();
   return Object.freeze({
     kind: "agent-harness-product-api",
     async evaluationReadiness() {
-      const [submitter, approver, administrator] = await Promise.all([
+      const [submitter, approver, administrator, protocolLab] = await Promise.all([
         api.request("/v2/auth/me"), approvalApi.request("/v2/auth/me"), adminApi.request("/v2/auth/me"),
+        api.request("/v2/protocol-lab"),
       ]);
       const subjectIds = [submitter.user_id, approver.user_id, administrator.user_id];
       const identitiesSeparated = distinct(subjectIds);
@@ -483,6 +514,10 @@ export function createAgentHarnessProductConnector({ origin, token, approvalToke
         tenant_bound: tenantBound, isolated_tenant_slots: 1, safe_parallelism: 1,
         credential_checks: { distinct_subjects: identitiesSeparated, submitter_least_privilege: submitterScoped,
           approver_least_privilege: approverScoped, administrator_authorized: administratorScoped },
+        external_twin_ready: protocolLab.configured === true && protocolLab.connected === true,
+        twin: { configured: protocolLab.configured === true, connected: protocolLab.connected === true,
+          slot_id: protocolLab.slot_id ?? null, roles: protocolLab.roles ?? [], summary: protocolLab.summary ?? null },
+        budget_contract: runtimeLimits,
         production_writes_available: false };
     },
     async discover() {
@@ -562,18 +597,45 @@ export function createAgentHarnessProductConnector({ origin, token, approvalToke
           report: detail.report ?? {}, events: completeEvents }) : null,
         product_evidence: terminal ? productEvidence(completeEvents, { persistence: `investigation:${runRef}`, audit: `execution-log:${runRef}` }) : null,
         evaluation_binding: binding, candidate_usage: candidateUsageSnapshot(detail, completeEvents),
+        error: state === "failed" ? terminalFailure(detail, completeEvents) : null,
         artifact_refs: detail.report_ref ? [detail.report_ref] : [] };
     },
     async respondApproval({ request, decision }) {
       return approvalApi.request(`/v2/actions/${encodeURIComponent(request.action_id)}/approval`, { method: "POST",
         body: { decision: decision.decision === "APPROVE" ? "approved" : "rejected", comment: decision.reason_zh } });
     },
+    async probeRun({ runRef }) {
+      const detail = await api.request(`/v2/investigations/${encodeURIComponent(runRef)}`);
+      const rawStatus = String(detail.status ?? "").toLowerCase();
+      const status = rawStatus === "resolved" ? "COMPLETED"
+        : rawStatus === "inconclusive" ? "INCONCLUSIVE"
+          : rawStatus === "failed" ? "FAILED"
+            : rawStatus === "cancelled" ? "CANCELLED" : "RUNNING";
+      return { run_ref: runRef, status, terminal: status !== "RUNNING", raw_status: rawStatus };
+    },
+    async finalize({ runRef }) {
+      try {
+        const result = await api.request(`/v2/investigations/${encodeURIComponent(runRef)}/protocol-lab/reset`, {
+          method: "POST", body: {},
+        });
+        return { ok: true, run_ref: runRef, strategy: "candidate_protocol_lab_reset",
+          candidate_reset: true, result };
+      } catch (error) {
+        // A product run that never attached the protocol lab has nothing to release.
+        // This is different from a failed reset: 409 and transport failures remain fatal.
+        if (/HTTP 404:.*PROTOCOL_TRIAL_NOT_FOUND/.test(error?.message ?? "")) {
+          return { ok: true, run_ref: runRef, strategy: "no_candidate_protocol_trial",
+            candidate_reset: false, reason: "candidate_run_did_not_attach_protocol_trial" };
+        }
+        throw error;
+      }
+    },
     async cancel() { return { supported: false, reason: "candidate-product-does-not-expose-cancel-api" }; },
   });
 }
 
 export function createLangGraphProductConnector({ origin, token, approvalToken, adminToken, tenantId, attestation,
-  requestTransport = null, requestTimeoutMs = 30000 } = {}) {
+  requestTransport = null, requestTimeoutMs = 30000, declaredRuntimeLimits = null } = {}) {
   if (!tenantId) throw new Error("LangGraph evaluation tenant id is required");
   assertSeparatedIdentities(token, approvalToken, adminToken, requestTransport);
   const tenantHeaders = { "x-tenant-id": tenantId };
@@ -581,12 +643,14 @@ export function createLangGraphProductConnector({ origin, token, approvalToken, 
   const approvalApi = client(origin, approvalToken, requestTimeoutMs, tenantHeaders, requestTransport, "approval_oracle");
   const adminApi = client(origin, adminToken, requestTimeoutMs, tenantHeaders, requestTransport, "mode_administrator");
   const frozen = assertAttestation(attestation);
+  const runtimeLimits = deploymentLimits(declaredRuntimeLimits);
   const expectedContexts = new Map();
   return Object.freeze({
     kind: "langgraph-product-api",
     async evaluationReadiness() {
-      const [submitter, approver, administrator] = await Promise.all([
+      const [submitter, approver, administrator, ready] = await Promise.all([
         api.request("/api/v1/me"), approvalApi.request("/api/v1/me"), adminApi.request("/api/v1/me"),
+        api.request("/health/ready"),
       ]);
       const submitterRoles = roleSet(submitter);
       const approverRoles = roleSet(approver);
@@ -599,11 +663,20 @@ export function createLangGraphProductConnector({ origin, token, approvalToken, 
       const approverScoped = (approverRoles.has("approver") || approverRoles.has("tenant_admin")) &&
         !approverRoles.has("platform_admin") && !approverRoles.has("on_call");
       const administratorScoped = administratorRoles.has("tenant_admin") || administratorRoles.has("platform_admin");
+      const twinConnector = (ready.connectors ?? []).find((item) =>
+        /(?:open5gs|ueransim|protocol-lab)/i.test(String(item.connector_id ?? item.name ?? "")));
+      const externalTwinReady = Boolean(twinConnector) && ["healthy", "ready", "ok"]
+        .includes(String(twinConnector.status ?? "").toLowerCase());
       return { credential_roles: ["candidate_submitter", "approval_oracle", "mode_administrator"],
         identities_separated: identitiesSeparated, least_privilege: submitterScoped && approverScoped && administratorScoped,
         tenant_bound: tenantBound, isolated_tenant_slots: 1, safe_parallelism: 1,
         credential_checks: { distinct_subjects: identitiesSeparated, submitter_least_privilege: submitterScoped,
           approver_least_privilege: approverScoped, administrator_authorized: administratorScoped },
+        external_twin_ready: externalTwinReady,
+        twin: { configured: Boolean(twinConnector), connected: externalTwinReady,
+          connector_id: twinConnector?.connector_id ?? twinConnector?.name ?? null,
+          status: twinConnector?.status ?? null, summary: twinConnector?.public_message ?? null },
+        budget_contract: runtimeLimits,
         production_writes_available: false };
     },
     async discover() {
@@ -693,6 +766,19 @@ export function createLangGraphProductConnector({ origin, token, approvalToken, 
         reason: decision.reason_zh, proposal_digest: request.proposal_digest,
         environment_snapshot_digest: request.environment_snapshot_digest, policy_decision_id: request.policy_decision_id,
       } });
+    },
+    async probeRun({ runRef }) {
+      const detail = await api.request(`/api/v1/investigations/${encodeURIComponent(runRef)}`);
+      const rawStatus = String(detail.status ?? "").toLowerCase();
+      const status = langGraphAdapterStatus(rawStatus);
+      return { run_ref: runRef, status, terminal: status !== "RUNNING", raw_status: rawStatus };
+    },
+    async finalize({ runRef }) {
+      // LangGraph's production worker owns protocol-lab reset in its terminal
+      // archive path. EvalOS records that contract, then independently checks
+      // and idempotently resets its private Twin lease.
+      return { ok: true, run_ref: runRef, strategy: "candidate_worker_terminal_reset",
+        candidate_reset: true };
     },
     async cancel() { return { supported: false, reason: "candidate-product-does-not-expose-cancel-api" }; },
   });

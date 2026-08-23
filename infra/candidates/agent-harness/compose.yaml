@@ -20,9 +20,19 @@ services:
       ANTHROPIC_MODEL: deepseek-v4-flash
       OPSMIND_AGENT_MAX_TURNS: "32"
       OPSMIND_AGENT_MAX_BUDGET_USD: "1.00"
-      OPSMIND_AGENT_TIMEOUT_SECONDS: "900"
-      OPSMIND_AGENT_IDLE_TIMEOUT_SECONDS: "180"
+      # Keep the product's real open-ended investigation allowance. EvalOS owns
+      # a larger Trial envelope and cleanup reserve; the candidate is not made
+      # artificially less agentic merely to fit an undersized exam timeout.
+      OPSMIND_AGENT_TIMEOUT_SECONDS: "2700"
+      # A real 5G RCA model call may spend several minutes combining cross-domain
+      # evidence. Five minutes without public progress is a UI warning; ten
+      # minutes is the deployment-level stream idle stop, not an invisible hang.
+      OPSMIND_AGENT_IDLE_TIMEOUT_SECONDS: "600"
       OPSMIND_AGENT_MAX_RETRIES: "1"
+      # Claude Agent SDK uses this directory for resumable conversation state.
+      # The container root filesystem stays read-only; only this narrowly scoped
+      # state directory is writable and persistent across process restarts.
+      CLAUDE_CONFIG_DIR: /home/opsmind/.claude
       OPSMIND_MODEL_TOOL_EXECUTION_MODE: hybrid
       OPSMIND_PROACTIVE_SCHEDULER_ENABLED: "false"
       OPSMIND_MYSQL_ENABLED: "true"
@@ -35,12 +45,14 @@ services:
       OPSMIND_REDIS_PORT: "6379"
       OPSMIND_REDIS_DB: "3"
       OPSMIND_ACTION_WORKER_ID: agent-harness-evaluation
-      OPSMIND_PROTOCOL_LAB_ENABLED: ${OPSMIND_PROTOCOL_LAB_ENABLED:-false}
+      # This compose project is the dedicated EvalOS candidate deployment.  A
+      # missing Twin connection is a failed preflight, never a silent fallback.
+      OPSMIND_PROTOCOL_LAB_ENABLED: ${OPSMIND_PROTOCOL_LAB_ENABLED:-true}
       OPSMIND_PROTOCOL_LAB_HOST: ${OPSMIND_PROTOCOL_LAB_HOST:-114.215.189.185}
       OPSMIND_PROTOCOL_LAB_PORT: "22"
       OPSMIND_PROTOCOL_LAB_COMMAND: /usr/local/sbin/opsmind-harness-labctl
       OPSMIND_PROTOCOL_LAB_CONSUMER_ID: opsmind-harness
-      OPSMIND_PROTOCOL_LAB_SLOT_ID: agent-harness-slot-1
+      OPSMIND_PROTOCOL_LAB_SLOT_ID: harness-slot-1
       OPSMIND_PROTOCOL_LAB_CONTROL_USER: ${OPSMIND_PROTOCOL_LAB_CONTROL_USER:-opsmind_ah_control}
       OPSMIND_PROTOCOL_LAB_OBSERVER_USER: ${OPSMIND_PROTOCOL_LAB_OBSERVER_USER:-opsmind_ah_observer}
       OPSMIND_PROTOCOL_LAB_ACTION_USER: ${OPSMIND_PROTOCOL_LAB_ACTION_USER:-opsmind_ah_action}
@@ -52,6 +64,7 @@ services:
       OPSMIND_PROTOCOL_LAB_VERIFIER_KEY: /run/secrets/protocol_lab_verifier_key
     volumes:
       - /srv/opsmind-agent-harness/data/workspaces:/app/test-workspaces
+      - /srv/opsmind-agent-harness/data/claude-state:/home/opsmind/.claude
       - /srv/opsmind-agent-harness/secrets/deepseek_api_key:/run/secrets/deepseek_api_key:ro
       - /srv/opsmind-agent-harness/secrets/mysql_password:/run/secrets/mysql_password:ro
       - /srv/opsmind-agent-harness/secrets/redis_password:/run/secrets/redis_password:ro
@@ -64,5 +77,15 @@ services:
       - /srv/opsmind-agent-harness/secrets/protocol_lab_verifier_key:/run/secrets/protocol_lab_verifier_key:ro
     security_opt:
       - no-new-privileges:true
+      # Claude Agent SDK 的原生 Bash/Edit/Write 由 Bubblewrap 再做一层
+      # 用户命名空间隔离。阿里云宿主允许非特权 user namespace，但
+      # Docker 默认策略会在 Bubblewrap 建立隔离空间前拦截它。这里不
+      # 关闭整层防护，只加载基于 Moby 默认策略生成的最小差异规则：
+      # seccomp 仅额外允许创建用户命名空间及其内部挂载所需的
+      # clone/clone3/mount/pivot_root/umount2/unshare，AppArmor 仍保留
+      # /proc、/sys、AF_ALG 等默认拒绝规则。容器继续使用普通用户、
+      # 只读根文件系统、cap_drop=ALL 和 no-new-privileges。
+      - seccomp=/etc/docker/opsmind-agent-harness-bwrap-seccomp.json
+      - apparmor=opsmind-agent-harness-bwrap
     cap_drop:
       - ALL

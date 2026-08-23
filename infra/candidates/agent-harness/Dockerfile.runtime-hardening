@@ -1,0 +1,32 @@
+ARG BASE_IMAGE=opsmind-agent-harness:e40a8c4-evalos5
+FROM ${BASE_IMAGE}
+
+USER root
+
+# Harden the already frozen candidate artifact without rebuilding or changing
+# either OpsMind source repository. The resulting image receives its own image
+# digest and is deployed only after qualification jobs using the old wrapper
+# have reached a safe terminal/quarantined state.
+RUN sed -i \
+       -e 's#http://deb.debian.org/debian-security#http://mirrors.aliyun.com/debian-security#g' \
+       -e 's#http://deb.debian.org/debian#http://mirrors.aliyun.com/debian#g' \
+       /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::ForceIPv4=true \
+       -o Acquire::Retries=3 \
+       -o Acquire::http::Timeout=20 update \
+    && DEBIAN_FRONTEND=noninteractive apt-get \
+       -o Acquire::ForceIPv4=true \
+       -o Acquire::Retries=3 \
+       -o Acquire::http::Timeout=20 install -y --no-install-recommends \
+       bubblewrap \
+       openssh-client \
+       socat \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY entrypoint.sh /usr/local/bin/opsmind-agent-harness-entrypoint
+
+RUN chmod 0755 /usr/local/bin/opsmind-agent-harness-entrypoint \
+    && mkdir -p /home/opsmind/.claude \
+    && chown -R 10002:10002 /home/opsmind/.claude
+
+USER 10002:10002

@@ -1,0 +1,44 @@
+# OpsMind Agent+Harness evaluation container.
+#
+# Derived from github.com/moby/profiles/apparmor/template.go.  The default
+# Docker profile is retained except that mount and user namespaces are allowed
+# so the non-root Claude Agent SDK process can create its own Bubblewrap
+# sandbox.  The container still runs with cap_drop=ALL, no-new-privileges and a
+# read-only root filesystem; mounts therefore become possible only inside the
+# newly-created unprivileged user namespace.
+
+#include <tunables/global>
+
+profile opsmind-agent-harness-bwrap flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  network,
+  deny network alg,
+  capability,
+  file,
+  mount,
+  umount,
+  pivot_root,
+  signal (receive) peer=unconfined,
+  signal (receive) peer=runc,
+  signal (receive) peer=crun,
+  signal (send,receive) peer=opsmind-agent-harness-bwrap,
+
+  deny @{PROC}/* w,
+  deny @{PROC}/{[^1-9/],[^1-9/][^0-9/],[^1-9s/][^0-9y/][^0-9s/],[^1-9/][^0-9/][^0-9/][^0-9/]*}/** w,
+  deny @{PROC}/sys/[^k]** w,
+  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/devices/virtual/powercap/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+
+  ptrace (trace,tracedby,read,readby) peer=opsmind-agent-harness-bwrap,
+}

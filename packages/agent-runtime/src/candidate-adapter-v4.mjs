@@ -64,8 +64,8 @@ function assertProductEvidence(productEvidence) {
   }
 }
 
-export function createCandidateAdapterV4({ id, connector, pollIntervalMs = 500, timeoutMs = 300000,
-  quarantineTimeoutMs = 300000 } = {}) {
+export function createCandidateAdapterV4({ id, connector, pollIntervalMs = 500, timeoutMs = Number.POSITIVE_INFINITY,
+  quarantineTimeoutMs = 300000, progressHeartbeatMs = 30000 } = {}) {
   requiredString(id, "candidate id");
   if (!connector || typeof connector.discover !== "function" || typeof connector.start !== "function" ||
       typeof connector.observe !== "function" || typeof connector.cancel !== "function") {
@@ -77,15 +77,32 @@ export function createCandidateAdapterV4({ id, connector, pollIntervalMs = 500, 
     adapterContractVersion: "4.0",
     supportedEvaluationLanes: [...REAL_LANES],
     runtime: `external-real-product/${connector.kind ?? "product"}`,
-    async preflight({ contestant }) {
+    async finalize({ runRef, outcome, executionContract, reason = "trial_terminal" } = {}) {
+      const candidateRunRef = runRef ?? outcome?.candidate_run_ref;
+      if (!candidateRunRef) return { ok: true, required: false, reason: "candidate_run_ref_unavailable" };
+      if (typeof connector.finalize !== "function") {
+        return { ok: true, required: false, run_ref: candidateRunRef, reason: "connector_owns_no_finalizer" };
+      }
+      const result = await connector.finalize({ runRef: candidateRunRef, executionContract, reason });
+      if (result?.ok !== true) throw new Error("candidate product did not prove terminal environment release");
+      return { required: true, ...result };
+    },
+    async preflight({ contestant, requiresTwin = false, budget = null }) {
       const discovery = await connector.discover();
       assertDiscovery(discovery, contestant);
       const connectorReadiness = typeof connector.evaluationReadiness === "function"
         ? await connector.evaluationReadiness() : { isolated_tenant_slots: 1, safe_parallelism: 1 };
       const healthy = new Set(["reachable", "ready", "healthy", "ok"]).has(String(discovery.health?.status ?? "").toLowerCase());
+      const twinReady = connectorReadiness.external_twin_ready === true;
+      const trialWallclockMs = Number(budget?.wallclock_ms);
+      const candidateMaxRunMs = Number(connectorReadiness.budget_contract?.max_run_ms);
+      const budgetObservable = connectorReadiness.budget_contract?.observable === true &&
+        Number.isFinite(candidateMaxRunMs) && candidateMaxRunMs > 0;
+      const budgetAligned = Number.isFinite(trialWallclockMs) && trialWallclockMs > 0 && budgetObservable
+        ? candidateMaxRunMs <= trialWallclockMs : null;
       return {
         ready: healthy && connectorReadiness.identities_separated === true && connectorReadiness.tenant_bound === true &&
-          connectorReadiness.least_privilege === true,
+          connectorReadiness.least_privilege === true && (!requiresTwin || twinReady) && budgetAligned !== false,
         architecture: discovery.architecture,
         source_revision: discovery.source_revision,
         artifact_digest: discovery.artifact_digest,
@@ -100,6 +117,12 @@ export function createCandidateAdapterV4({ id, connector, pollIntervalMs = 500, 
         isolation: { tenant_bound: connectorReadiness.tenant_bound === true,
           isolated_tenant_slots: Number(connectorReadiness.isolated_tenant_slots ?? 0),
           safe_parallelism: Number(connectorReadiness.safe_parallelism ?? 1) },
+        twin: { required: requiresTwin, ready: twinReady, ...(connectorReadiness.twin ?? {}) },
+        budget: { trial_wallclock_ms: Number.isFinite(trialWallclockMs) ? trialWallclockMs : null,
+          candidate_max_run_ms: budgetObservable ? candidateMaxRunMs : null,
+          observable: budgetObservable, aligned: budgetAligned,
+          cancellation_supported: connectorReadiness.budget_contract?.cancellation_supported === true,
+          source: connectorReadiness.budget_contract?.source ?? "not-declared" },
         production_writes_available: discovery.production_writes_available,
       };
     },
@@ -132,6 +155,9 @@ export function createCandidateAdapterV4({ id, connector, pollIntervalMs = 500, 
       let finalObservation = null;
       let rawEventCount = 0;
       let normalizedEventCount = 0;
+      let lastProgressHeartbeatAt = 0;
+      const runStartedAt = Date.now();
+      let nextProgressCheckpointMs = 900000;
       const handledApprovalRefs = new Set();
       const deadline = Date.now() + Math.min(timeoutMs, executionContract.budget.wallclock_ms);
       try {
@@ -140,6 +166,22 @@ export function createCandidateAdapterV4({ id, connector, pollIntervalMs = 500, 
           if (cancellation?.requested) throw cancellationError(cancellation);
           if (typeof heartbeat === "function") await heartbeat();
           if (Date.now() >= deadline) throw new Error("external candidate run timed out");
+          if (Date.now() - lastProgressHeartbeatAt >= Math.max(1000, progressHeartbeatMs)) {
+            lastProgressHeartbeatAt = Date.now();
+            await emit("candidate.poll.heartbeat", "candidate-adapter", {
+              run_ref: runRef, status, cursor, raw_event_count: rawEventCount,
+              normalized_event_count: normalizedEventCount,
+            });
+          }
+          const runElapsedMs = Date.now() - runStartedAt;
+          if (runElapsedMs >= nextProgressCheckpointMs) {
+            await emit("candidate.progress.checkpoint", "candidate-adapter", {
+              run_ref: runRef, status, elapsed_ms: runElapsedMs,
+              checkpoint_ms: nextProgressCheckpointMs, raw_event_count: rawEventCount,
+              normalized_event_count: normalizedEventCount,
+            });
+            nextProgressCheckpointMs += 900000;
+          }
           const observation = assertObservation(await connector.observe({ runRef, cursor, executionContract }), runRef);
           cursor = observation.next_cursor ?? cursor;
           status = observation.status;
@@ -208,6 +250,7 @@ export function createCandidateAdapterV4({ id, connector, pollIntervalMs = 500, 
           error.quarantineStarted = true;
           error.quarantineReleased = true;
           error.runRef = runRef;
+          error.candidateTerminal = true;
           throw error;
         }
         const isolationError = new Error(`external candidate quarantine unresolved: ${error.message}`);
@@ -222,14 +265,27 @@ export function createCandidateAdapterV4({ id, connector, pollIntervalMs = 500, 
         throw isolationError;
       }
       if (status !== "COMPLETED" && status !== "INCONCLUSIVE") {
-        throw new Error(`external candidate run ended with ${status}: ${finalObservation?.error?.code ?? "unknown"}`);
+        const terminalError = finalObservation?.error ?? {};
+        const detail = [terminalError.code, terminalError.message].filter(Boolean).join(" - ") || "unknown";
+        const candidateError = new Error(`external candidate run ended with ${status}: ${detail}`);
+        candidateError.name = terminalError.code || "CandidateProductError";
+        candidateError.candidateUsage = finalObservation?.candidate_usage ?? null;
+        candidateError.runRef = runRef;
+        candidateError.candidateTerminal = true;
+        throw candidateError;
       }
       if (!finalObservation?.outcome || typeof finalObservation.outcome !== "object") {
-        throw new Error("external candidate completed without a structured outcome");
+        const error = new Error("external candidate completed without a structured outcome");
+        error.runRef = runRef;
+        error.candidateTerminal = true;
+        throw error;
       }
       if (!finalObservation?.evaluation_binding || finalObservation.evaluation_binding.complete !== true) {
         const binding = finalObservation?.evaluation_binding ?? { binding_strength: "UNBOUND" };
-        throw new Error(`external candidate result is not bound to the frozen Trial context: ${binding.binding_strength}`);
+        const error = new Error(`external candidate result is not bound to the frozen Trial context: ${binding.binding_strength}`);
+        error.runRef = runRef;
+        error.candidateTerminal = true;
+        throw error;
       }
       if (executionContract.evaluation_lane === "PRODUCT_RELIABILITY") assertProductEvidence(finalObservation.product_evidence);
       await emit("candidate.evaluation_binding.verified", "candidate-adapter", {

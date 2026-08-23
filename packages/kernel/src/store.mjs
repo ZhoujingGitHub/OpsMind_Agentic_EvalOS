@@ -563,6 +563,35 @@ export class EvalStore {
       final_state: parseJson(row.final_state_json, {}) }));
   }
 
+  recordTrialCleanupReconciliation({ trialId, attempt, candidateRunRef, candidateTerminalStatus,
+    twinReset, status, error = null, evidence = {} }) {
+    if (!trialId || !this.getTrial(trialId)) throw new Error("cleanup reconciliation requires an existing trial");
+    if (!Number.isInteger(Number(attempt)) || Number(attempt) < 1) throw new Error("cleanup reconciliation requires a positive attempt");
+    if (!candidateRunRef) throw new Error("cleanup reconciliation requires the exact candidate run reference");
+    if (!new Set(["RESOLVED", "FAILED"]).has(status)) throw new Error("cleanup reconciliation status must be RESOLVED or FAILED");
+    const canonical = { trial_id: trialId, attempt: Number(attempt), candidate_run_ref: String(candidateRunRef),
+      candidate_terminal_status: candidateTerminalStatus ? String(candidateTerminalStatus) : null,
+      twin_reset: twinReset ?? {}, status, error: error ? String(error) : null, evidence };
+    const recordHash = sha256(canonical);
+    const id = entityId("cleanup-reconciliation", `${trialId}:${attempt}:${status}:${recordHash}`);
+    const createdAt = isoNow();
+    this.db.prepare(`INSERT OR IGNORE INTO trial_cleanup_reconciliations(
+      id,trial_id,attempt,candidate_run_ref,candidate_terminal_status,twin_reset_json,status,error,evidence_json,record_hash,created_at
+    ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+      id, trialId, Number(attempt), String(candidateRunRef), canonical.candidate_terminal_status,
+      stableStringify(canonical.twin_reset), status, canonical.error, stableStringify(evidence), recordHash, createdAt,
+    );
+    return this.listTrialCleanupReconciliations(trialId).find((item) => item.id === id);
+  }
+
+  listTrialCleanupReconciliations(trialId = null) {
+    const rows = trialId === null
+      ? this.db.prepare("SELECT * FROM trial_cleanup_reconciliations ORDER BY trial_id,attempt,created_at").all()
+      : this.db.prepare("SELECT * FROM trial_cleanup_reconciliations WHERE trial_id=? ORDER BY attempt,created_at").all(trialId);
+    return rows.map((row) => ({ ...row, twin_reset: parseJson(row.twin_reset_json, {}),
+      evidence: parseJson(row.evidence_json, {}) }));
+  }
+
   retryFailedTrial(trialId, { maxRetries, allowedCategories, reason = "frozen infrastructure retry policy" }) {
     const current = this.getTrial(trialId);
     if (!current || current.status !== "FAILED") throw new Error(`only FAILED trial can be retried: ${trialId}`);
@@ -1022,6 +1051,38 @@ export class EvalStore {
     return this.getEvaluationRunRequest(id);
   }
 
+  closeEvaluationRunAfterFailure(id, error = null) {
+    const request = this.getEvaluationRunRequest(id);
+    if (!request) throw new Error(`evaluation run request not found: ${id}`);
+    if (["COMPLETED", "CANCELLED"].includes(request.status)) {
+      return { request, cancelled_queued_trials: 0, cancelled_running_trials: 0,
+        experiment_status_changed: false };
+    }
+    const failure = String(error ?? request.error ?? "evaluation request stopped after a terminal failure");
+    const skippedReason = `评测任务在前序 Trial 失败后停止；本 Trial 未执行。根因：${failure}`;
+    const now = isoNow();
+    let cancelledQueued = 0;
+    let cancelledRunning = 0;
+    let experimentStatusChanged = false;
+    this.transaction(() => {
+      this.db.prepare(`UPDATE evaluation_run_requests SET status='FAILED',
+        error=CASE WHEN error IS NULL OR error='' THEN ? ELSE error END,completed_at=COALESCE(completed_at,?)
+        WHERE id=? AND status IN ('QUEUED','RUNNING','FAILED')`).run(failure, now, id);
+      if (!request.created_experiment_id) return;
+      cancelledQueued = this.db.prepare(`UPDATE trials SET status='CANCELLED',error=?,completed_at=?
+        WHERE experiment_id=? AND status='QUEUED'`).run(skippedReason, now, request.created_experiment_id).changes;
+      cancelledRunning = this.db.prepare(`UPDATE trials SET status='CANCELLED',error=?,completed_at=?,
+        cancel_requested_at=COALESCE(cancel_requested_at,?),cancel_reason=COALESCE(cancel_reason,?)
+        WHERE experiment_id=? AND status='RUNNING'`).run(
+          skippedReason, now, now, skippedReason, request.created_experiment_id).changes;
+      experimentStatusChanged = this.db.prepare(`UPDATE experiments SET status='FAILED',updated_at=?,
+        completed_at=COALESCE(completed_at,?) WHERE id=? AND status NOT IN ('COMPLETED','CANCELLED','FAILED')`)
+        .run(now, now, request.created_experiment_id).changes === 1;
+    });
+    return { request: this.getEvaluationRunRequest(id), cancelled_queued_trials: cancelledQueued,
+      cancelled_running_trials: cancelledRunning, experiment_status_changed: experimentStatusChanged };
+  }
+
   requestEvaluationRunCancellation(id, reason = "operator requested evaluation cancellation") {
     const request = this.getEvaluationRunRequest(id);
     if (!request || !["QUEUED", "RUNNING"].includes(request.status)) {
@@ -1099,13 +1160,16 @@ export class EvalStore {
     const trials = this.listTrials(experimentId);
     const primary = trials.filter((trial) => trial.trial_kind === "PRIMARY");
     const completed = primary.filter((trial) => trial.status === "COMPLETED");
+    const terminal = primary.filter((trial) => ["COMPLETED", "FAILED", "CANCELLED"].includes(trial.status));
     const gradeRows = this.db.prepare(`SELECT g.result_json FROM grader_runs g JOIN trials t ON t.id=g.trial_id
       WHERE t.experiment_id=? AND t.trial_kind='PRIMARY' AND g.dimension='overall'`).all(experimentId);
     const scores = gradeRows.map((row) => Number(parseJson(row.result_json, {}).total ?? 0));
     return { experiment: this.getExperiment(experimentId), trial_count: primary.length, completed_trials: completed.length,
+      terminal_trials: terminal.length,
       failed_trials: primary.filter((trial) => trial.status === "FAILED").length,
-      completion_rate: primary.length ? completed.length / primary.length : 0,
+      cancelled_trials: primary.filter((trial) => trial.status === "CANCELLED").length,
+      completion_rate: primary.length ? terminal.length / primary.length : 0,
       replay_count: trials.length - primary.length,
-      average_score: scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0 };
+      average_score: scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null };
   }
 }
