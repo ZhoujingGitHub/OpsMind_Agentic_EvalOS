@@ -45,8 +45,8 @@ function trialSelect(where = "") {
 }
 
 function manifestRefs(manifest) {
-  if (manifest.manifest_version !== "5.0") throw new Error("EvalOS requires experiment manifest 5.0; legacy manifests are archived read-only and cannot execute");
-  if (manifest.milestone !== "M3.1") throw new Error("Manifest 5.0 requires milestone M3.1");
+  if (manifest.manifest_version !== "6.0") throw new Error("EvalOS requires experiment manifest 6.0; legacy manifests are archived read-only and cannot execute");
+  if (manifest.milestone !== "M3.1") throw new Error("Manifest 6.0 requires milestone M3.1");
   if (!["ENGINEERING_TEST", "REAL_CANDIDATE"].includes(manifest.run_class)) {
     throw new Error("run_class must be ENGINEERING_TEST or REAL_CANDIDATE");
   }
@@ -54,7 +54,7 @@ function manifestRefs(manifest) {
     throw new Error("evaluation_mode must be QUALIFICATION, CAPACITY_REHEARSAL, or FORMAL");
   }
   if (!["ENGINEERING_TEST", "AGENT_CAPABILITY", "CONTROLLED_CLOSURE", "PRODUCT_RELIABILITY"].includes(manifest.evaluation_lane)) {
-    throw new Error("evaluation_lane is not supported by Manifest 5.0");
+    throw new Error("evaluation_lane is not supported by Manifest 6.0");
   }
   if (manifest.run_class === "ENGINEERING_TEST" && manifest.evaluation_lane !== "ENGINEERING_TEST") {
     throw new Error("engineering test data must use the isolated ENGINEERING_TEST lane");
@@ -110,10 +110,10 @@ function manifestRefs(manifest) {
   }
   for (const contestant of manifest.contestants) {
     if (!contestant.ref || !["REAL_PRODUCT", "TEST_DOUBLE"].includes(contestant.kind) || !contestant.architecture ||
-        contestant.adapter_contract_version !== "3.0" || !contestant.adapter_version || !contestant.source_revision ||
+        contestant.adapter_contract_version !== "4.0" || !contestant.adapter_version || !contestant.source_revision ||
         !SHA256_DIGEST.test(contestant.artifact_digest) || !SHA256_DIGEST.test(contestant.runtime_digest) ||
         !SHA256_DIGEST.test(contestant.runtime_manifest_digest) || !SHA256_DIGEST.test(contestant.capability_contract_digest)) {
-      throw new Error("each contestant must freeze identity, kind, architecture, Adapter 3.0, source, runtime and capability fingerprints");
+      throw new Error("each contestant must freeze identity, kind, architecture, Adapter 4.0, source, runtime and capability fingerprints");
     }
   }
   const contestantKinds = new Set(manifest.contestants.map((item) => item.kind));
@@ -126,7 +126,7 @@ function manifestRefs(manifest) {
   }
   if (!manifest.model || !manifest.frozen_dependencies || !manifest.budget || !manifest.policy ||
       !manifest.retry_policy || !manifest.capacity_policy || !manifest.statistics_policy) {
-    throw new Error("Manifest 5.0 must freeze model, dependencies, budget, policy, retry, capacity, and statistics");
+    throw new Error("Manifest 6.0 must freeze model, dependencies, budget, policy, retry, capacity, and statistics");
   }
   assertExactKeys(manifest.model, ["provider", "id", "interface", "sdk", "thinking", "temperature", "max_turns"], "model");
   if (manifest.model.provider !== "deepseek" || manifest.model.id !== "deepseek-v4-flash" ||
@@ -379,15 +379,42 @@ export class EvalStore {
   getTrial(id) { return hydrateTrial(this.db.prepare(trialSelect("WHERE t.id=?")).get(id)); }
 
   recoverExpiredLeases(now = isoNow()) {
-    const ids = this.db.prepare("SELECT id FROM trials WHERE status='RUNNING' AND lease_expires_at<?").all(now).map((row) => row.id);
-    if (ids.length) this.db.prepare(`UPDATE trials SET status='QUEUED',lease_owner=NULL,lease_expires_at=NULL,
-      error='recovered expired runner lease' WHERE status='RUNNING' AND lease_expires_at<?`).run(now);
-    return ids;
+    const rows = this.db.prepare(`SELECT id,attempt,cancel_requested_at,cancel_reason FROM trials
+      WHERE status='RUNNING' AND lease_expires_at<?`).all(now);
+    if (!rows.length) return [];
+    return this.transaction(() => {
+      for (const row of rows) {
+        const cancelled = Boolean(row.cancel_requested_at);
+        const status = cancelled ? "CANCELLED" : "INTERRUPTED";
+        const error = cancelled ? (row.cancel_reason ?? "operator cancellation observed during lease recovery")
+          : "runner lease expired before an immutable result was recorded";
+        const usage = {};
+        const finalState = { recovery: { reason: "expired_runner_lease", resumable: !cancelled,
+          recovered_at: now }, cancellation_requested_at: row.cancel_requested_at ?? null };
+        const traceHash = this.traceSemanticHash(row.id);
+        const result = { status, error, usage, final_state: finalState, trace_hash: traceHash };
+        const resultHash = sha256(result);
+        this.db.prepare(`INSERT OR IGNORE INTO trial_attempt_results(
+          id,trial_id,attempt,status,error,outcome_json,usage_json,final_state_json,trace_hash,result_hash,created_at
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+          entityId("attempt-result", `${row.id}:${row.attempt}:${resultHash}`), row.id, row.attempt, status, error,
+          null, stableStringify(usage), stableStringify(finalState), traceHash, resultHash, now,
+        );
+        if (cancelled) {
+          this.db.prepare(`UPDATE trials SET status='CANCELLED',error=?,completed_at=?,lease_owner=NULL,lease_expires_at=NULL
+            WHERE id=? AND status='RUNNING'`).run(error, now, row.id);
+        } else {
+          this.db.prepare(`UPDATE trials SET status='QUEUED',lease_owner=NULL,lease_expires_at=NULL,error=?
+            WHERE id=? AND status='RUNNING'`).run(error, row.id);
+        }
+      }
+      return rows.map((row) => row.id);
+    });
   }
 
   claimNext(workerId, leaseMs = 30000, experimentId = null) {
+    this.recoverExpiredLeases();
     return this.transaction(() => {
-      this.recoverExpiredLeases();
       const row = experimentId
         ? this.db.prepare("SELECT id FROM trials WHERE status='QUEUED' AND experiment_id=? ORDER BY run_order,created_at LIMIT 1").get(experimentId)
         : this.db.prepare("SELECT id FROM trials WHERE status='QUEUED' ORDER BY run_order,created_at LIMIT 1").get();
@@ -405,6 +432,12 @@ export class EvalStore {
       new Date(Date.now() + leaseMs).toISOString(), trialId, workerId,
     );
     if (result.changes !== 1) throw new Error(`trial lease lost: ${trialId}`);
+  }
+
+  isTrialCancellationRequested(trialId) {
+    const row = this.db.prepare("SELECT cancel_requested_at,cancel_reason FROM trials WHERE id=?").get(trialId);
+    return { requested: Boolean(row?.cancel_requested_at), requested_at: row?.cancel_requested_at ?? null,
+      reason: row?.cancel_reason ?? null };
   }
 
   forceExpireLease(trialId) { this.db.prepare("UPDATE trials SET lease_expires_at=? WHERE id=?").run("2000-01-01T00:00:00.000Z", trialId); }
@@ -501,17 +534,49 @@ export class EvalStore {
     });
   }
 
-  listTrialAttemptResults(trialId) {
-    return this.db.prepare("SELECT * FROM trial_attempt_results WHERE trial_id=? ORDER BY attempt,created_at").all(trialId)
-      .map((row) => ({ ...row, outcome: parseJson(row.outcome_json, null), usage: parseJson(row.usage_json, {}),
-        final_state: parseJson(row.final_state_json, {}) }));
+  cancelTrial(trialId, reason, { usage = {}, finalState = {}, traceHash = null } = {}) {
+    const normalizedReason = String(reason || "evaluation cancelled");
+    const stableTraceHash = traceHash ?? sha256([]);
+    const result = { status: "CANCELLED", error: normalizedReason, usage, final_state: finalState,
+      trace_hash: stableTraceHash };
+    const resultHash = sha256(result);
+    this.transaction(() => {
+      const current = this.db.prepare("SELECT status,attempt FROM trials WHERE id=?").get(trialId);
+      if (!current || current.status !== "RUNNING") throw new Error(`only a running trial may be cancelled: ${trialId}`);
+      const now = isoNow();
+      this.db.prepare(`INSERT INTO trial_attempt_results(
+        id,trial_id,attempt,status,error,outcome_json,usage_json,final_state_json,trace_hash,result_hash,created_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+        entityId("attempt-result", `${trialId}:${current.attempt}:${resultHash}`), trialId, current.attempt, "CANCELLED",
+        normalizedReason, null, stableStringify(usage), stableStringify(finalState), stableTraceHash, resultHash, now,
+      );
+      this.db.prepare(`UPDATE trials SET status='CANCELLED',error=?,completed_at=?,lease_owner=NULL,lease_expires_at=NULL
+        WHERE id=? AND status='RUNNING'`).run(normalizedReason, now, trialId);
+    });
   }
 
-  retryFailedTrial(trialId, reason) {
+  listTrialAttemptResults(trialId = null) {
+    const rows = trialId === null
+      ? this.db.prepare("SELECT * FROM trial_attempt_results ORDER BY trial_id,attempt,created_at").all()
+      : this.db.prepare("SELECT * FROM trial_attempt_results WHERE trial_id=? ORDER BY attempt,created_at").all(trialId);
+    return rows.map((row) => ({ ...row, outcome: parseJson(row.outcome_json, null), usage: parseJson(row.usage_json, {}),
+      final_state: parseJson(row.final_state_json, {}) }));
+  }
+
+  retryFailedTrial(trialId, { maxRetries, allowedCategories, reason = "frozen infrastructure retry policy" }) {
     const current = this.getTrial(trialId);
     if (!current || current.status !== "FAILED") throw new Error(`only FAILED trial can be retried: ${trialId}`);
-    if (current.attempt >= 3) throw new Error(`trial retry limit reached: ${trialId}`);
-    this.db.prepare("UPDATE trials SET status='QUEUED',error=?,completed_at=NULL WHERE id=?").run(`approved infrastructure retry: ${reason}`, trialId);
+    const retryLimit = Number(maxRetries);
+    if (!Number.isInteger(retryLimit) || retryLimit < 0) throw new Error("a non-negative frozen retry limit is required");
+    const latestAttempt = this.listTrialAttemptResults(trialId).at(-1);
+    const failure = latestAttempt?.final_state?.failure_classification;
+    if (!failure?.retryable || !failure.policy_code) throw new Error(`trial failure is not retryable: ${failure?.category ?? "unclassified"}`);
+    if (!Array.isArray(allowedCategories) || !allowedCategories.includes(failure.policy_code)) {
+      throw new Error(`trial failure is outside frozen retry categories: ${failure.policy_code}`);
+    }
+    if (current.attempt > retryLimit) throw new Error(`trial retry limit reached: ${trialId}`);
+    this.db.prepare(`UPDATE trials SET status='QUEUED',error=?,completed_at=NULL,cancel_requested_at=NULL,cancel_reason=NULL
+      WHERE id=?`).run(`scheduled infrastructure retry (${failure.policy_code}): ${reason}`, trialId);
     return this.getTrial(trialId);
   }
 
@@ -957,9 +1022,33 @@ export class EvalStore {
     return this.getEvaluationRunRequest(id);
   }
 
-  cancelQueuedTrials(experimentId, reason = "operator cancelled queued evaluation work") {
-    return this.db.prepare(`UPDATE trials SET status='CANCELLED',error=?,completed_at=?
-      WHERE experiment_id=? AND status='QUEUED'`).run(reason, isoNow(), experimentId).changes;
+  requestEvaluationRunCancellation(id, reason = "operator requested evaluation cancellation") {
+    const request = this.getEvaluationRunRequest(id);
+    if (!request || !["QUEUED", "RUNNING"].includes(request.status)) {
+      throw new Error("only queued or running evaluation work may be cancelled");
+    }
+    let queuedTrials = 0;
+    let runningTrials = 0;
+    const now = isoNow();
+    this.transaction(() => {
+      this.db.prepare(`UPDATE evaluation_run_requests SET cancel_requested_at=?,cancel_reason=?
+        WHERE id=? AND status IN ('QUEUED','RUNNING')`).run(now, reason, id);
+      if (!request.created_experiment_id) {
+        this.db.prepare(`UPDATE evaluation_run_requests SET status='CANCELLED',error=?,completed_at=?
+          WHERE id=? AND status IN ('QUEUED','RUNNING')`).run(reason, now, id);
+        return;
+      }
+      queuedTrials = this.db.prepare(`UPDATE trials SET status='CANCELLED',error=?,completed_at=?
+        WHERE experiment_id=? AND status='QUEUED'`).run(reason, now, request.created_experiment_id).changes;
+      runningTrials = this.db.prepare(`UPDATE trials SET cancel_requested_at=?,cancel_reason=?
+        WHERE experiment_id=? AND status='RUNNING'`).run(now, reason, request.created_experiment_id).changes;
+      if (runningTrials === 0) {
+        this.db.prepare(`UPDATE evaluation_run_requests SET status='CANCELLED',error=?,completed_at=?
+          WHERE id=? AND status='RUNNING'`).run(reason, now, id);
+      }
+    });
+    return { request: this.getEvaluationRunRequest(id), cancelled_queued_trials: queuedTrials,
+      cancellation_signalled_running_trials: runningTrials };
   }
 
   saveCaseSelectionSet({ name, datasetRef, caseRefs, requestedBy, reason }) {

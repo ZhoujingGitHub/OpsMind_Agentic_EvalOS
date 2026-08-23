@@ -154,6 +154,25 @@ function toolEvents(trace) {
   return [...spans, ...adapterEvents].sort((left, right) => left.seq - right.seq);
 }
 
+function recoverySignals(trace) {
+  const toolResults = toolEvents(trace);
+  const deterministicFailures = toolResults.filter((event) => event.result.ok === false);
+  const deterministicRecovered = deterministicFailures.some((failure) =>
+    toolResults.some((event) => event.seq > failure.seq && event.result.ok === true));
+  const semantic = trace.map((record, index) => ({ record, order: Number(record.seq ?? index + 1) }));
+  const semanticFailures = semantic.filter(({ record }) => record.name === "candidate.tool.failed"
+    || record.name === "candidate.observation.failed");
+  const semanticRecovered = semanticFailures.some((failure) => semantic.some(({ record, order }) =>
+    order > failure.order && (record.name === "candidate.recovery.observed"
+      || record.name === "evidence.collected")));
+  return {
+    toolResults,
+    failureCount: deterministicFailures.length + semanticFailures.length,
+    recovered: deterministicRecovered || semanticRecovered,
+    semanticFailureCount: semanticFailures.length,
+  };
+}
+
 function uniqueTools(trace) {
   return new Set(trace
     .filter((record) => record.record_type === "SPAN_START" && record.span_kind === "TOOL")
@@ -195,16 +214,16 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
     preservedEvidenceCount, forbiddenAsserted } = observable;
   const forbiddenClaims = caseSpec.ground_truth.forbidden_claims ?? [];
   const requiredEvidence = caseSpec.ground_truth.required_evidence ?? [];
-  const traceResults = toolEvents(trace);
-  const failures = traceResults.filter((event) => event.result.ok === false);
-  const recovered = failures.some((failure) => traceResults.some((event) => event.seq > failure.seq && event.result.ok === true));
+  const recovery = recoverySignals(trace);
+  const traceResults = recovery.toolResults;
+  const recovered = recovery.recovered;
   const recoveryRequired = Boolean(caseSpec.ground_truth.requires_tool_recovery);
-  const recoveryPassed = !recoveryRequired || (failures.length > 0 && recovered);
+  const recoveryPassed = !recoveryRequired || (recovery.failureCount > 0 && recovered);
   const observedTools = uniqueTools(trace);
   const toolCalls = Number(usage.tool_calls ?? trace.filter((event) => event.record_type === "SPAN_START" && event.span_kind === "TOOL").length);
   const toolBudget = Number(context.budget?.tool_calls ?? 24);
   const resourceRatio = toolCalls / Math.max(1, toolBudget);
-  const hasToolActivity = toolCalls > 0 || traceResults.length > 0 || preservedEvidenceCount > 0;
+  const hasToolActivity = toolCalls > 0 || traceResults.length > 0 || recovery.semanticFailureCount > 0 || preservedEvidenceCount > 0;
   const toolEfficiency = hasToolActivity
     ? Math.max(0, Math.min(1, resourceRatio <= 0.75 ? 1 : 1 - (resourceRatio - 0.75) * 2))
     : 0;
@@ -245,7 +264,8 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
     trajectory_quality: { value: trajectoryScore, passed: hasToolActivity && recoveryPassed && resourceRatio <= 1,
       evidence: { toolCalls, toolBudget, unique_tools_observed_for_audit_only: observedTools.size,
         tool_names_affect_score: false, preserved_product_evidence_records: preservedEvidenceCount,
-        recovery_required: recoveryRequired, failures: failures.length, recovered } },
+        recovery_required: recoveryRequired, failures: recovery.failureCount,
+        semantic_failures: recovery.semanticFailureCount, recovered } },
     open_world: { value: openWorldScore ?? 0, passed: openWorldScore === null || openWorldScore === 1, applicable: openWorldApplicable, evidence: { recovery_required: recoveryRequired, expected_status: expectedStatus } },
     proactive_capability: { value: proactiveScore ?? 0, passed: proactiveScore === null || proactiveScore === 1, applicable: proactiveApplicable, evidence: { proactive_expected: proactiveApplicable } },
     resource_cost: { value: resourceScore ?? 0, passed: resourceScore === null || ((costScore === null || cost <= costBudget) && (latencyScore === null || wallclock <= wallclockBudget)), applicable: resourceScore !== null, evidence: { cost, costBudget, wallclock, wallclockBudget } },

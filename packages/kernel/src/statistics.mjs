@@ -129,3 +129,71 @@ export function clusteredPairedBootstrap(pairs, { iterations = 5000, confidence 
     iterations,
   };
 }
+
+export function evaluationDecisionReport({ requestStatus, mode, items, contestantOrder, repetitions = 1,
+  confidence = 0.95, iterations = 5000, seed = "evalos-decision-report" }) {
+  const terminalStatuses = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
+  const contestants = [...new Set(contestantOrder ?? items.map((item) => item.contestant_ref))];
+  const valid = items.filter((item) => item.status === "COMPLETED" && Number.isFinite(Number(item.current?.score)));
+  const failureCounts = {};
+  for (const item of items) {
+    const category = item.failure?.category ?? (item.status === "FAILED" ? "UNCLASSIFIED_NON_RETRYABLE" : null);
+    if (category) failureCounts[category] = (failureCounts[category] ?? 0) + 1;
+  }
+  const contestantSummaries = Object.fromEntries(contestants.map((contestant) => {
+    const selected = items.filter((item) => item.contestant_ref === contestant);
+    const scored = valid.filter((item) => item.contestant_ref === contestant);
+    const scores = scored.map((item) => Number(item.current.score));
+    const reliability = reliabilityMetrics(scored.map((item) => ({ case_id: item.case_ref,
+      passed: Boolean(item.current.passed) })), Math.max(1, Number(repetitions)));
+    return [contestant, { trials: selected.length, scored_trials: scored.length,
+      failed_trials: selected.filter((item) => item.status === "FAILED").length,
+      cancelled_trials: selected.filter((item) => item.status === "CANCELLED").length,
+      average_score: scores.length ? round(scores.reduce((sum, value) => sum + value, 0) / scores.length, 2) : null,
+      pass_rate: scored.length ? round(scored.filter((item) => item.current.passed).length / scored.length) : null,
+      reliability }];
+  }));
+  let comparison = null;
+  if (contestants.length === 2) {
+    const [first, second] = contestants;
+    const keyOf = (item) => `${item.case_ref}|${item.environment_seed}|${item.repeat_index}`;
+    const firstByKey = new Map(valid.filter((item) => item.contestant_ref === first).map((item) => [keyOf(item), item]));
+    const secondByKey = new Map(valid.filter((item) => item.contestant_ref === second).map((item) => [keyOf(item), item]));
+    const pairs = [...firstByKey].filter(([key]) => secondByKey.has(key)).map(([key, left]) => ({
+      case_id: left.case_ref, v1: Number(left.current.score), v2: Number(secondByKey.get(key).current.score),
+    }));
+    const bootstrap = pairs.length ? clusteredPairedBootstrap(pairs, { confidence, iterations, seed }) : null;
+    const interval = bootstrap?.interval ?? null;
+    const clearlyDifferent = Boolean(interval && (interval[0] > 0 || interval[1] < 0));
+    comparison = { first_contestant: first, second_contestant: second,
+      score_delta_definition: `${second} - ${first}`, paired_trials: pairs.length,
+      expected_pairs: Math.min(items.filter((item) => item.contestant_ref === first).length,
+        items.filter((item) => item.contestant_ref === second).length),
+      clustered_bootstrap: bootstrap, clearly_different: clearlyDifferent,
+      observed_leader: bootstrap?.mean_delta > 0 ? second : bootstrap?.mean_delta < 0 ? first : null,
+      formal_winner: null };;
+  }
+  const terminal = items.filter((item) => terminalStatuses.has(item.status)).length;
+  const unresolvedEvidence = items.filter((item) => item.status === "COMPLETED" && (!item.trace_hash
+    || item.cleanup?.reset_ok === false || item.cleanup?.quarantine_required && item.cleanup?.quarantine_released !== true)).length;
+  const usageIncomplete = items.filter((item) => item.current?.usage_measurement?.complete === false).length;
+  const ready = requestStatus === "COMPLETED" && terminal === items.length && unresolvedEvidence === 0
+    && (!comparison || comparison.paired_trials === comparison.expected_pairs);
+  const authority = mode === "FORMAL" && ready ? "FORMAL_DECISION" : "DIAGNOSTIC_ONLY";
+  if (comparison && authority === "FORMAL_DECISION" && comparison.clearly_different) {
+    comparison = { ...comparison, formal_winner: comparison.observed_leader };
+  }  const conclusionCode = !ready ? "INCOMPLETE_EVIDENCE"
+    : authority !== "FORMAL_DECISION" ? "QUALIFICATION_NO_WINNER"
+      : comparison?.clearly_different ? "FORMAL_SIGNIFICANT_DIFFERENCE" : "FORMAL_NO_CLEAR_DIFFERENCE";
+  const explanationZh = conclusionCode === "INCOMPLETE_EVIDENCE" ? "任务或证据尚未完整，当前不能比较胜负。"
+    : conclusionCode === "QUALIFICATION_NO_WINNER" ? "这是资格或回归试跑，只用于发现问题，不产生正式胜负。"
+      : conclusionCode === "FORMAL_SIGNIFICANT_DIFFERENCE" ? `正式配对结果的置信区间不跨 0，${comparison.formal_winner} 的得分优势具有统计意义。`
+        : "正式配对结果的置信区间跨 0，现有证据不足以认定两名考生存在明确差异。";
+  return { contract: "evalos-decision-report.1", request_status: requestStatus, mode, ready,
+    decision_authority: authority, conclusion_code: conclusionCode, explanation_zh: explanationZh,
+    sample: { trials: items.length, terminal_trials: terminal, scored_trials: valid.length,
+      cases: new Set(items.map((item) => item.case_ref)).size, repetitions },
+    evidence_quality: { unresolved_evidence_trials: unresolvedEvidence, usage_incomplete_trials: usageIncomplete,
+      note_zh: usageIncomplete ? "部分考生公开接口没有提供完整 Token/费用数据；平台明确标为未知，不按 0 计算。" : "本报告所需用量维度均已记录。" },
+    failure_counts: failureCounts, contestants: contestantSummaries, comparison };
+}

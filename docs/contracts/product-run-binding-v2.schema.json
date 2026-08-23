@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsmind.local/contracts/product-run-binding-v2.schema.json",
+  "title": "OpsMind EvalOS External Product Run Binding 2.0",
+  "description": "证明外部真实考生返回的结果确实属于本次冻结Trial，而不是其他Case、Seed、预算或工作模式下的历史结果。",
+  "type": "object",
+  "required": [
+    "contract",
+    "run_ref",
+    "expected_context_digest",
+    "binding_strength",
+    "receipt_checks",
+    "native_conformance",
+    "complete"
+  ],
+  "properties": {
+    "contract": {
+      "const": "evalos-product-run-binding.2"
+    },
+    "run_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "expected_context_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "binding_strength": {
+      "enum": [
+        "UNBOUND",
+        "CONTROL_PLANE_RECEIPT"
+      ]
+    },
+    "receipt_checks": {
+      "type": "object",
+      "required": [
+        "run_ref",
+        "trial_id",
+        "case_ref",
+        "context_digest",
+        "receipt_digest"
+      ],
+      "properties": {
+        "run_ref": {
+          "type": "boolean"
+        },
+        "trial_id": {
+          "type": "boolean"
+        },
+        "case_ref": {
+          "type": "boolean"
+        },
+        "context_digest": {
+          "type": "boolean"
+        },
+        "receipt_digest": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "native_conformance": {
+      "type": "object",
+      "required": [
+        "observed",
+        "checks",
+        "mismatches"
+      ],
+      "properties": {
+        "observed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "checks": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "mismatches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "complete": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}

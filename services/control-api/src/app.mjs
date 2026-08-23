@@ -5,10 +5,10 @@ import {
   CASES, M2_CASES, M3_CASES, CandidateRelayBroker, DeterministicGradingService, EvalStore, EvaluationLedger, FrozenApprovalOracle, PrivateLabelStore, TrialRunner,
   auditableGraderRunView, blindExperimentView, blindGraderRunView, blindTraceView, blindTrialView,
   expertCalibrationFromConsensusSamples, createEvalRegistry, createCaseEnvironment, createTestDouble,
-  evaluationEvidenceTraceView, explainTraceRecord, TRACE_FILTERS, readSnapshotFile, sha256,
+  evaluationDecisionReport, evaluationEvidenceTraceView, explainTraceRecord, TRACE_FILTERS, readSnapshotFile, sha256,
 } from "../../../packages/kernel/src/index.mjs";
 import {
-  BLIND_JUDGE_VERSION, CASE_INVESTIGATOR_RUNTIME, createAgentHarnessProductConnector, createCandidateAdapterV3,
+  BLIND_JUDGE_VERSION, CASE_INVESTIGATOR_RUNTIME, createAgentHarnessProductConnector, createCandidateAdapterV4,
   createCaseInvestigator, createLangGraphProductConnector, judgeRecordAndSummarize,
 } from "../../../packages/agent-runtime/src/index.mjs";
 import { ExternalProductTwinEnvironment, ProtocolTwinEnvironment, SshTwinClient,
@@ -63,6 +63,7 @@ export function createApp({
   m3DesignManifest = null,
   formalM3RunEnabled = process.env.EVALOS_M3_FORMAL_RUN_ENABLED === "1",
   candidateRelayConfig = null,
+  engineeringAdapterOverrides = {},
 } = {}) {
   const registry = createEvalRegistry({ m15Cases: CASES, m2Cases: M2_CASES, m3Cases: M3_CASES });
   const store = new EvalStore({ databasePath, runtimeRoot,
@@ -71,7 +72,8 @@ export function createApp({
       path.join(ROOT, "infra", "migrations", "sqlite", "003_m26_run_control.sql"),
       path.join(ROOT, "infra", "migrations", "sqlite", "004_m31_candidate_relay.sql"),
       path.join(ROOT, "infra", "migrations", "sqlite", "005_m31_seed_identity.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "006_m31_trial_attempt_audit.sql")] });
+      path.join(ROOT, "infra", "migrations", "sqlite", "006_m31_trial_attempt_audit.sql"),
+      path.join(ROOT, "infra", "migrations", "sqlite", "007_m32_run_resilience.sql")] });
   const labels = new PrivateLabelStore({ databasePath: privateLabelDatabasePath,
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const privateLabelHash = labels.publishRegistry(registry);
@@ -121,11 +123,15 @@ export function createApp({
         execution_authorized: false,
       } });
   }
-  const adapters = {
+  for (const key of Object.keys(engineeringAdapterOverrides)) {
+    if (!/^test-double-[ab]:ENGINEERING_TEST$/.test(key)) {
+      throw new Error("adapter overrides are restricted to named ENGINEERING_TEST test doubles");
+    }
+  }  const adapters = {
     "test-double-a:ENGINEERING_TEST": createTestDouble("test-double-a", "context-first"),
     "test-double-b:ENGINEERING_TEST": createTestDouble("test-double-b", "metric-first"),
-  };
-  const frozenCandidate = (ref) => frozenM31Manifest.contestants.find((item) => item.ref === ref);
+    ...engineeringAdapterOverrides,
+  };  const frozenCandidate = (ref) => frozenM31Manifest.contestants.find((item) => item.ref === ref);
   const realCandidateConnectors = {};
   const connectorConfigs = [
     { ref: "agent-harness-v2", origin: process.env.EVALOS_AGENT_HARNESS_ORIGIN,
@@ -147,7 +153,7 @@ export function createApp({
       approvalToken: config.approvalToken, adminToken: config.adminToken, tenantId,
       requestTransport: relayTransport,
       attestation: { source_revision: frozen.source_revision, artifact_digest: frozen.artifact_digest } });
-    const adapter = createCandidateAdapterV3({ id: config.ref, connector });
+    const adapter = createCandidateAdapterV4({ id: config.ref, connector });
     realCandidateConnectors[config.ref] = connector;
     for (const lane of adapter.supportedEvaluationLanes) adapters[`${config.ref}:${lane}`] = adapter;
   }
@@ -186,8 +192,9 @@ export function createApp({
         ? Math.max(0, new Date(trial.completed_at).getTime() - new Date(trial.started_at).getTime()) : null };
   };
   const attemptView = (attempt) => ({
-    id: attempt.id, attempt: attempt.attempt, status: attempt.status, error: attempt.error,
+    id: attempt.id, trial_id: attempt.trial_id, attempt: attempt.attempt, status: attempt.status, error: attempt.error,
     usage: attempt.usage, trace_hash: attempt.trace_hash, result_hash: attempt.result_hash,
+    failure: attempt.final_state?.failure_classification ?? null,
     cleanup: {
       reset_ok: attempt.final_state?.reset?.ok ?? null,
       reset_clean: attempt.final_state?.reset?.clean ?? null,
@@ -197,8 +204,7 @@ export function createApp({
       reset_error: attempt.final_state?.reset_error ?? null,
     },
     created_at: attempt.created_at,
-  });
-  const gradeFor = (trialId) => store.listGraderRuns(trialId).find((item) => item.dimension === "overall") ?? null;
+  });  const gradeFor = (trialId) => store.listGraderRuns(trialId).find((item) => item.dimension === "overall") ?? null;
   const evaluationMode = (experiment) => experiment?.manifest?.evaluation_mode ?? "FORMAL";
   const workbenchExperiments = () => store.listExperiments().map((experiment) => {
     const summary = store.experimentSummary(experiment.id);
@@ -253,12 +259,19 @@ export function createApp({
       latest_status: latest?.status ?? "NEVER_RUN", compatible_experiment_id: compatible?.id ?? null,
       latest_trial_id: trials.filter((trial) => trial.status === "COMPLETED").at(-1)?.id ?? null };
   });
-  const workbenchTrials = () => store.listTrials(null, { includeReplays: false }).map((trial) => {
+  const workbenchTrials = () => {
+    const attemptsByTrial = new Map();
+    for (const attempt of store.listTrialAttemptResults().map(attemptView)) {
+      const attempts = attemptsByTrial.get(attempt.trial_id) ?? [];
+      attempts.push(attempt);
+      attemptsByTrial.set(attempt.trial_id, attempts);
+    }
+    return store.listTrials(null, { includeReplays: false }).map((trial) => {
     const experiment = store.getExperiment(trial.experiment_id);
     const grade = gradeFor(trial.id);
     const trace = store.getTrace(trial.id);
     const snapshot = store.getTrialSourceSnapshot(trial.id);
-    const attempts = store.listTrialAttemptResults(trial.id).map(attemptView);
+    const attempts = attemptsByTrial.get(trial.id) ?? [];
     return {
       id: trial.id,
       experiment_id: trial.experiment_id,
@@ -285,7 +298,8 @@ export function createApp({
       latest_cleanup: attempts.at(-1)?.cleanup ?? null,
       completed_at: trial.completed_at,
     };
-  });
+    });
+  };
 
   const preflightEvaluation = async (body) => {
     const mode = body.mode ?? "QUICK_VALIDATION";
@@ -294,7 +308,7 @@ export function createApp({
     if (!new Set(["RERUN_FROZEN", "NEW_EVALUATION"]).has(requestKind)) throw new Error("必须明确选择按原配置重新评测或新建评测");
     const source = store.getExperiment(body.source_experiment_id);
     if (!source) throw new Error("source experiment is required");
-    if (source.manifest.manifest_version !== "5.0") throw new Error("冻结参评配置属于旧版只读历史；M3.1 只执行 Manifest 5.0，请选择新版实验配置");
+    if (source.manifest.manifest_version !== "6.0") throw new Error("冻结参评配置属于旧版只读历史；M3.1 只执行 Manifest 6.0，请选择新版实验配置");
     const suite = store.listSuites().find((item) => item.suite_ref === source.suite_ref);
     const caseRefs = [...new Set(body.case_refs ?? [])];
     if (!caseRefs.length) throw new Error("at least one case is required");
@@ -424,25 +438,56 @@ export function createApp({
     };
   };
 
+  const decisionReportCache = new Map();
+  const cachedDecisionReport = (key, factory) => {
+    if (decisionReportCache.has(key)) return decisionReportCache.get(key);
+    const value = factory();
+    decisionReportCache.set(key, value);
+    if (decisionReportCache.size > 256) decisionReportCache.delete(decisionReportCache.keys().next().value);
+    return value;
+  };
   const runRequestView = (request) => {
     if (!request) return null;
+    const measuredValue = (trial, name) => {
+      if (!trial?.usage || !Object.prototype.hasOwnProperty.call(trial.usage, name)) return null;
+      const value = Number(trial.usage[name]);
+      return Number.isFinite(value) ? value : null;
+    };
+    const measurementView = (trial) => {
+      if (!trial) return null;
+      return trial.usage?.measurement ?? {
+        source: "candidate_not_reported",
+        observed_dimensions: [],
+        unavailable_dimensions: ["input_tokens", "output_tokens", "model_calls", "tool_calls", "compute_ms", "storage_bytes", "cost_usd"],
+        platform_wallclock_observed: measuredValue(trial, "wallclock_ms") !== null,
+        complete: false,
+      };
+    };
+    const latestAttemptByTrial = new Map();
+    for (const attempt of store.listTrialAttemptResults().map(attemptView)) latestAttemptByTrial.set(attempt.trial_id, attempt);
+    const latestAttempt = (trial) => trial ? latestAttemptByTrial.get(trial.id) ?? null : null;
     const itemViews = request.items.map((item) => {
       const currentGrade = item.trial_id ? gradeFor(item.trial_id)?.result ?? null : null;
       const baselineTrial = item.source_trial_id ? store.getTrial(item.source_trial_id) : null;
       const baselineGrade = baselineTrial ? gradeFor(baselineTrial.id)?.result ?? null : null;
+      const baselineAttempt = latestAttempt(baselineTrial);
+      const currentAttempt = latestAttempt(item.trial);
       const duration = (trial) => trial?.started_at && trial?.completed_at
         ? new Date(trial.completed_at).getTime() - new Date(trial.started_at).getTime() : null;
       return { id: item.id, case_ref: item.case_ref, contestant_ref: item.contestant_ref,
         environment_seed: item.environment_seed, repeat_index: item.repeat_index,
         source_trial_id: item.source_trial_id, trial_id: item.trial_id, status: item.trial?.status ?? request.status,
+        attempt: item.trial?.attempt ?? null, failure: currentAttempt?.failure ?? null,
+        trace_hash: currentAttempt?.trace_hash ?? null, cleanup: currentAttempt?.cleanup ?? null,
         baseline: baselineTrial ? { score: baselineGrade?.total ?? null, passed: baselineGrade?.passed ?? null,
-          duration_ms: duration(baselineTrial), tool_calls: Number(baselineTrial.usage?.tool_calls ?? 0),
-          cost_usd: baselineTrial.usage?.cost_usd ?? null,
+          duration_ms: duration(baselineTrial), tool_calls: measuredValue(baselineTrial, "tool_calls"),
+          cost_usd: measuredValue(baselineTrial, "cost_usd"), usage_measurement: measurementView(baselineTrial),
+          failure: baselineAttempt?.failure ?? null,
           hard_gates_passed: Object.values(baselineGrade?.hard_gates ?? {}).filter(Boolean).length,
           hard_gates_total: Object.keys(baselineGrade?.hard_gates ?? {}).length } : null,
         current: item.trial ? { score: currentGrade?.total ?? null, passed: currentGrade?.passed ?? null,
-          duration_ms: duration(item.trial), tool_calls: Number(item.trial.usage?.tool_calls ?? 0),
-          cost_usd: item.trial.usage?.cost_usd ?? null,
+          duration_ms: duration(item.trial), tool_calls: measuredValue(item.trial, "tool_calls"),
+          cost_usd: measuredValue(item.trial, "cost_usd"), usage_measurement: measurementView(item.trial),
           hard_gates_passed: Object.values(currentGrade?.hard_gates ?? {}).filter(Boolean).length,
           hard_gates_total: Object.keys(currentGrade?.hard_gates ?? {}).length, error: item.trial.error } : null };
     });
@@ -455,14 +500,28 @@ export function createApp({
         current_stability_range: currentScores.length > 1 ? Number((Math.max(...currentScores) - Math.min(...currentScores)).toFixed(2)) : null,
         current_pass_rate: currentScores.length ? caseItems.filter((item) => item.current?.passed).length / currentScores.length : null };
     });
+    const statisticsPolicy = store.getExperiment(request.created_experiment_id ?? request.source_experiment_id)
+      ?.manifest?.statistics_policy ?? {};
+    const reportKey = sha256({ request_id: request.id, request_status: request.status,
+      item_state: itemViews.map((item) => ({ id: item.id, status: item.status, attempt: item.attempt,
+        score: item.current?.score ?? null, passed: item.current?.passed ?? null, failure: item.failure,
+        trace_hash: item.trace_hash, cleanup: item.cleanup, usage_complete: item.current?.usage_measurement?.complete ?? null })),
+      statistics_policy: statisticsPolicy });
+    const decisionReport = cachedDecisionReport(reportKey, () => evaluationDecisionReport({
+      requestStatus: request.status, mode: request.mode, items: itemViews,
+      contestantOrder: request.selection.contestant_refs, repetitions: request.selection.repetitions,
+      confidence: Number(statisticsPolicy.confidence_level ?? 0.95),
+      seed: `evaluation-request:${request.id}`,
+    }));
     return { id: request.id, mode: request.mode, status: request.status, requested_by: request.requested_by, reason: request.reason,
       source_experiment_id: request.source_experiment_id, created_experiment_id: request.created_experiment_id,
       selection: request.selection, preflight: request.preflight, error: request.error, created_at: request.created_at,
-      started_at: request.started_at, completed_at: request.completed_at, progress: {
+      started_at: request.started_at, completed_at: request.completed_at,
+      cancel_requested_at: request.cancel_requested_at, cancel_reason: request.cancel_reason,
+      progress: {
         completed: itemViews.filter((item) => ["COMPLETED", "FAILED", "CANCELLED"].includes(item.status)).length,
-        total: itemViews.length }, case_summaries: caseSummaries, items: itemViews };
+        total: itemViews.length }, case_summaries: caseSummaries, decision_report: decisionReport, items: itemViews };
   };
-
   const activeEvaluationRequests = new Set();
   const executeEvaluationRequest = async (requestId) => {
     if (activeEvaluationRequests.has(requestId)) return;
@@ -495,27 +554,143 @@ export function createApp({
             affects_official_score: request.mode === "FORMAL", requested_by: request.requested_by, reason: request.reason } });
       }
       store.setExperimentStatus(experiment.id, "RUNNING");
-      await runner.runUntilIdle({ experimentId: experiment.id });
+      const effectiveConcurrency = Math.max(1, Math.min(
+        Number(request.preflight?.budget?.effective_concurrency ?? 1),
+        Number(experiment.manifest.capacity_policy?.runner_workers ?? 1),
+        Number(experiment.manifest.capacity_policy?.twin_slots ?? 1),
+      ));
+      await runner.runUntilIdle({ experimentId: experiment.id, concurrency: effectiveConcurrency });
       request = store.getEvaluationRunRequest(request.id);
-      if (request.status === "CANCELLED") {
+      let currentTrials = store.listTrials(experiment.id, { includeReplays: false });
+      if (request.cancel_requested_at || request.status === "CANCELLED") {
+        const terminalTrials = currentTrials.filter((trial) => ["COMPLETED", "FAILED", "CANCELLED"].includes(trial.status));
         store.setExperimentStatus(experiment.id, "CANCELLED");
+        const finished = request.status === "CANCELLED" ? request
+          : store.finishEvaluationRunRequest(request.id, "CANCELLED", request.cancel_reason);
+        const report = runRequestView(finished).decision_report;
+        ledger.append({ entityType: "evaluation_run_request", entityId: request.id, action: "evaluation.request.cancelled",
+          payload: { experiment_id: experiment.id, completed_trials: terminalTrials.length,
+            total_trials: currentTrials.length, cancellation_requested_at: request.cancel_requested_at,
+            decision_report_digest: sha256(report), conclusion_code: report.conclusion_code } });
+        return;
+      }
+
+      const retryPolicy = experiment.manifest.retry_policy;
+      const scheduledRetries = [];
+      for (const trial of currentTrials.filter((item) => item.status === "FAILED")) {
+        const latestAttempt = store.listTrialAttemptResults(trial.id).at(-1);
+        const failure = latestAttempt?.final_state?.failure_classification;
+        const eligible = failure?.retryable === true && failure.policy_code
+          && retryPolicy.retryable_categories.includes(failure.policy_code)
+          && trial.attempt <= retryPolicy.max_infrastructure_retries;
+        if (!eligible) continue;
+        store.retryFailedTrial(trial.id, {
+          maxRetries: retryPolicy.max_infrastructure_retries,
+          allowedCategories: retryPolicy.retryable_categories,
+          reason: "evaluation request frozen retry policy",
+        });
+        scheduledRetries.push({ trial_id: trial.id, from_attempt: trial.attempt, next_attempt: trial.attempt + 1,
+          category: failure.category, policy_code: failure.policy_code });
+        ledger.append({ entityType: "trial", entityId: trial.id, action: "trial.infrastructure_retry_scheduled",
+          payload: { request_id: request.id, experiment_id: experiment.id, from_attempt: trial.attempt,
+            next_attempt: trial.attempt + 1, failure_category: failure.category,
+            policy_code: failure.policy_code, max_infrastructure_retries: retryPolicy.max_infrastructure_retries } });
+      }
+      if (scheduledRetries.length) {
+        ledger.append({ entityType: "evaluation_run_request", entityId: request.id,
+          action: "evaluation.request.infrastructure_retries_scheduled",
+          payload: { experiment_id: experiment.id, retries: scheduledRetries } });
+        scheduleEvaluationRequest(request.id, 1000);
+        return;
+      }
+
+      currentTrials = store.listTrials(experiment.id, { includeReplays: false });
+      const terminalTrials = currentTrials.filter((trial) => ["COMPLETED", "FAILED", "CANCELLED"].includes(trial.status));
+      if (terminalTrials.length < currentTrials.length) {
+        scheduleEvaluationRequest(request.id, 1000);
       } else {
         const summary = store.experimentSummary(experiment.id);
         const status = summary.failed_trials ? "FAILED" : "COMPLETED";
         store.setExperimentStatus(experiment.id, status);
-        store.finishEvaluationRunRequest(request.id, status);
+        const finished = store.finishEvaluationRunRequest(request.id, status);
+        const report = runRequestView(finished).decision_report;
         ledger.append({ entityType: "evaluation_run_request", entityId: request.id, action: `evaluation.request.${status.toLowerCase()}`,
-          payload: { experiment_id: experiment.id, completed_trials: summary.completed_trials, failed_trials: summary.failed_trials } });
+          payload: { experiment_id: experiment.id, completed_trials: summary.completed_trials,
+            failed_trials: summary.failed_trials, decision_report_digest: sha256(report),
+            decision_authority: report.decision_authority, conclusion_code: report.conclusion_code,
+            formal_winner: report.comparison?.formal_winner ?? null } });
       }
     } catch (error) {
       const request = store.getEvaluationRunRequest(requestId);
-      if (request && request.status !== "CANCELLED") store.finishEvaluationRunRequest(requestId, "FAILED", error?.message ?? error);
+      if (request && request.status !== "CANCELLED") {
+        const finished = store.finishEvaluationRunRequest(requestId, "FAILED", error?.message ?? error);
+        const report = runRequestView(finished).decision_report;
+        ledger.append({ entityType: "evaluation_run_request", entityId: requestId, action: "evaluation.request.failed",
+          payload: { error: String(error?.message ?? error), decision_report_digest: sha256(report),
+            conclusion_code: report.conclusion_code } });
+      }
     } finally {
       activeEvaluationRequests.delete(requestId);
     }
-  };
-  const scheduleEvaluationRequest = (id) => setTimeout(() => void executeEvaluationRequest(id), 0);
+  };  const scheduleEvaluationRequest = (id, delayMs = 0) => setTimeout(() => void executeEvaluationRequest(id), delayMs);
+  runner.recover();
+  for (const request of store.listEvaluationRunRequests().filter((item) => ["QUEUED", "RUNNING"].includes(item.status))) {
+    scheduleEvaluationRequest(request.id, request.status === "RUNNING" ? 1000 : 0);
+  }
 
+  const operationsHealth = () => {
+    const requests = store.listEvaluationRunRequests();
+    const trials = store.listTrials(null, { includeReplays: false });
+    const attemptHistory = store.listTrialAttemptResults().map(attemptView);
+    const latestByTrial = new Map();
+    for (const attempt of attemptHistory) latestByTrial.set(attempt.trial_id, attempt);
+    const latestAttempts = trials.map((trial) => ({ trial, attempt: latestByTrial.get(trial.id) ?? null }));
+    const failureCategories = {};
+    for (const attempt of attemptHistory) {
+      const category = attempt?.failure?.category;
+      if (category) failureCategories[category] = (failureCategories[category] ?? 0) + 1;
+    }    const unresolvedCleanup = latestAttempts.filter(({ attempt }) => attempt && (
+      attempt.cleanup?.reset_ok === false
+      || attempt.cleanup?.quarantine_required && attempt.cleanup?.quarantine_released !== true
+    )).length;
+    const incompleteUsage = trials.filter((trial) => trial.status === "COMPLETED"
+      && trial.usage?.measurement?.complete === false).length;
+    const now = Date.now();
+    const expiredRunningLeases = trials.filter((trial) => trial.status === "RUNNING"
+      && trial.lease_expires_at && new Date(trial.lease_expires_at).getTime() < now).length;
+    const ledgerState = ledger.verify();
+    const degraded = unresolvedCleanup > 0 || expiredRunningLeases > 0 || !ledgerState.valid;
+    return {
+      contract: "evalos-operations-health.1",
+      status: degraded ? "degraded" : "ok",
+      explanation_zh: degraded
+        ? "平台存在需要处理的复位、隔离、租约或账本问题；在恢复健康前不应启动正式评测。"
+        : "任务调度、考场清理和证据账本均未发现阻塞性问题。",
+      requests: {
+        queued: requests.filter((item) => item.status === "QUEUED").length,
+        running: requests.filter((item) => item.status === "RUNNING").length,
+        completed: requests.filter((item) => item.status === "COMPLETED").length,
+        failed: requests.filter((item) => item.status === "FAILED").length,
+        cancelled: requests.filter((item) => item.status === "CANCELLED").length,
+      },
+      trials: {
+        queued: trials.filter((item) => item.status === "QUEUED").length,
+        running: trials.filter((item) => item.status === "RUNNING").length,
+        completed: trials.filter((item) => item.status === "COMPLETED").length,
+        failed: trials.filter((item) => item.status === "FAILED").length,
+        cancelled: trials.filter((item) => item.status === "CANCELLED").length,
+        expired_running_leases: expiredRunningLeases,
+      },
+      evidence: {
+        unresolved_cleanup_trials: unresolvedCleanup,
+        incomplete_candidate_usage_trials: incompleteUsage,
+      },
+      failure_categories: failureCategories,
+      retry_history: { attempts: attemptHistory.length, retried_trials: trials.filter((item) => item.attempt > 1).length },
+      ledger: ledgerState,
+      formal_release_blocked: degraded || !formalM3RunEnabled,
+    };
+  };
   const handler = async (request) => {
     const url = new URL(request.url);
     const origin = request.headers.get("origin");
@@ -547,12 +722,16 @@ export function createApp({
         return json(candidateRelay.complete(candidateRef, decodeURIComponent(relayCompleteMatch[2]), body), 200, cors);
       }
       if (request.method === "GET" && url.pathname === "/health") {
-        return json({ status: "ok", service: "opsmind-evalos-control-api", contract: "evalos.6", milestone: "M3.1",
-          ledger: ledger.verify(),
+        const operations = operationsHealth();
+        return json({ status: operations.status, service: "opsmind-evalos-control-api", contract: "evalos.7", milestone: "M3.1",
+          ledger: operations.ledger, operations,
           formal_run: { enabled: formalM3RunEnabled, guard: "480_TRIAL_NOT_AUTHORIZED" },
           twin: { configured: twinConfigured } }, 200, cors);
       }
-      if (request.method === "GET" && url.pathname === "/api/runtime/capabilities") {
+      if (request.method === "GET" && url.pathname === "/api/workbench/operations-health") {
+        if (!isAdmin(request)) return json({ error: "authenticated workbench session required" }, 401, cors);
+        return json(operationsHealth(), 200, cors);
+      }      if (request.method === "GET" && url.pathname === "/api/runtime/capabilities") {
         return json({ contract: "evalos-runtime-capabilities.3", milestone: "M3.1",
           eval_intelligence_enabled: liveDeepSeekAvailable,
           candidate_execution: "external-real-products-only", adapters: Object.keys(adapters),
@@ -784,7 +963,7 @@ export function createApp({
         return json({ error: "authenticated workbench session required" }, 401, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/workbench/run-templates") {
-        return json({ items: store.listExperiments().filter((item) => item.manifest.manifest_version === "5.0"
+        return json({ items: store.listExperiments().filter((item) => item.manifest.manifest_version === "6.0"
           && ((store.listTrials(item.id, { includeReplays: false }).length === 0
               && (item.manifest.evaluation_mode === "FORMAL" || item.manifest.run_class === "ENGINEERING_TEST"))
             || item.status === "COMPLETED" || store.experimentSummary(item.id).completion_rate === 1))
@@ -802,7 +981,7 @@ export function createApp({
         return json({ preflight: await preflightEvaluation(await request.json()) }, 200, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/workbench/run-requests") {
-        return json({ contract: "evalos-run-request-list.1", items: store.listEvaluationRunRequests().map(runRequestView) }, 200, cors);
+        return json({ contract: "evalos-run-request-list.2", items: store.listEvaluationRunRequests().map(runRequestView) }, 200, cors);
       }
       if (request.method === "POST" && url.pathname === "/api/workbench/run-requests") {
         const body = await request.json();
@@ -828,12 +1007,18 @@ export function createApp({
         const requestItem = store.getEvaluationRunRequest(id);
         if (!requestItem) return json({ error: "evaluation run request not found" }, 404, cors);
         if (!["QUEUED", "RUNNING"].includes(requestItem.status)) return json({ error: "only queued or running evaluation work may be cancelled" }, 409, cors);
-        const cancelledTrials = requestItem.created_experiment_id ? store.cancelQueuedTrials(requestItem.created_experiment_id) : 0;
-        const cancelled = store.finishEvaluationRunRequest(id, "CANCELLED", "operator cancelled remaining queued work");
-        ledger.append({ entityType: "evaluation_run_request", entityId: id, action: "evaluation.request.cancelled",
-          payload: { requested_by: requestItem.requested_by, reason: requestItem.reason, cancelled_queued_trials: cancelledTrials,
-            running_trial_policy: "finish-current-then-reset" } });
-        return json({ request: runRequestView(cancelled), cancelled_queued_trials: cancelledTrials }, 200, cors);
+        let body = {};
+        try { body = await request.json(); } catch {}
+        const cancellationReason = String(body.reason ?? "operator requested safe cancellation").trim();
+        const cancellation = store.requestEvaluationRunCancellation(id, cancellationReason);
+        ledger.append({ entityType: "evaluation_run_request", entityId: id, action: "evaluation.request.cancellation_requested",
+          payload: { requested_by: requestItem.requested_by, reason: cancellationReason,
+            cancelled_queued_trials: cancellation.cancelled_queued_trials,
+            cancellation_signalled_running_trials: cancellation.cancellation_signalled_running_trials,
+            running_trial_policy: "request-candidate-cancel-then-wait-terminal-reset" } });
+        return json({ request: runRequestView(cancellation.request),
+          cancelled_queued_trials: cancellation.cancelled_queued_trials,
+          cancellation_signalled_running_trials: cancellation.cancellation_signalled_running_trials }, 202, cors);
       }
       const runRequestMatch = url.pathname.match(/^\/api\/workbench\/run-requests\/([^/]+)$/);
       if (request.method === "GET" && runRequestMatch) {
@@ -883,8 +1068,8 @@ export function createApp({
         return json({ contract: "evalos-workbench.4", milestone: "M3.1", platform: {
           core: "Claude Agent SDK + DeepSeek + MCP + Skills + Harness", workflow_graph: null,
           official_score_source: "deterministic_code_grader", ai_analysis_authority: "diagnostic_only",
-          candidate_execution: "external-real-products-only", candidate_adapter_contract: "3.0",
-          trace_contract: "3.0", grader_contract: "5.1", formal_480_enabled: false,
+          candidate_execution: "external-real-products-only", candidate_adapter_contract: "4.0",
+          trace_contract: "4.0", grader_contract: "5.1", formal_480_enabled: false,
         }, counts: { datasets: store.listDatasets().length, cases: store.listCases().length,
           experiments: experiments.length, trials: trials.length, completed_trials: trials.filter((item) => item.status === "COMPLETED").length,
           analysis_runs: store.listAnalysisRuns().length, evaluation_tasks: store.listEvaluationRunRequests().length }, score: {

@@ -21,9 +21,17 @@ function requiredString(value, label) {
   return value;
 }
 
+function cancellationError(cancellation) {
+  const error = new Error(cancellation?.reason || "evaluation cancellation requested");
+  error.name = "TrialCancellationError";
+  error.cancelled = true;
+  error.cancellationRequestedAt = cancellation?.requested_at ?? null;
+  return error;
+}
+
 function assertDiscovery(discovery, contestant) {
   if (!discovery || discovery.candidate_kind !== "REAL_PRODUCT") {
-    throw new Error("Candidate Adapter 3.0 accepts only an external REAL_PRODUCT discovery document");
+    throw new Error("Candidate Adapter 4.0 accepts only an external REAL_PRODUCT discovery document");
   }
   for (const field of ["source_revision", "artifact_digest", "runtime_digest", "runtime_manifest_digest", "capability_contract_digest"]) {
     if (discovery[field] !== contestant[field]) throw new Error(`candidate discovery drift: ${field}`);
@@ -56,17 +64,17 @@ function assertProductEvidence(productEvidence) {
   }
 }
 
-export function createCandidateAdapterV3({ id, connector, pollIntervalMs = 500, timeoutMs = 300000,
+export function createCandidateAdapterV4({ id, connector, pollIntervalMs = 500, timeoutMs = 300000,
   quarantineTimeoutMs = 300000 } = {}) {
   requiredString(id, "candidate id");
   if (!connector || typeof connector.discover !== "function" || typeof connector.start !== "function" ||
       typeof connector.observe !== "function" || typeof connector.cancel !== "function") {
-    throw new Error("Candidate Adapter 3.0 requires discover/start/observe/cancel connector methods");
+    throw new Error("Candidate Adapter 4.0 requires discover/start/observe/cancel connector methods");
   }
   return Object.freeze({
     id,
-    adapterVersion: "candidate-adapter-3.0.0",
-    adapterContractVersion: "3.0",
+    adapterVersion: "candidate-adapter-4.0.0",
+    adapterContractVersion: "4.0",
     supportedEvaluationLanes: [...REAL_LANES],
     runtime: `external-real-product/${connector.kind ?? "product"}`,
     async preflight({ contestant }) {
@@ -95,11 +103,11 @@ export function createCandidateAdapterV3({ id, connector, pollIntervalMs = 500, 
         production_writes_available: discovery.production_writes_available,
       };
     },
-    async execute({ trial, executionContract, emit, requestApproval, captureEnvironment }) {
+    async execute({ trial, executionContract, emit, requestApproval, captureEnvironment, shouldCancel, heartbeat }) {
       if (executionContract.run_class !== "REAL_CANDIDATE" || executionContract.contestant.kind !== "REAL_PRODUCT") {
-        throw new Error("Candidate Adapter 3.0 refuses test doubles and non-real runs");
+        throw new Error("Candidate Adapter 4.0 refuses test doubles and non-real runs");
       }
-      if (!REAL_LANES.has(executionContract.evaluation_lane)) throw new Error("Candidate Adapter 3.0 refuses this evaluation lane");
+      if (!REAL_LANES.has(executionContract.evaluation_lane)) throw new Error("Candidate Adapter 4.0 refuses this evaluation lane");
       const discovery = await connector.discover();
       assertDiscovery(discovery, executionContract.contestant);
       await emit("candidate.discovery.verified", "candidate-adapter", {
@@ -114,7 +122,11 @@ export function createCandidateAdapterV3({ id, connector, pollIntervalMs = 500, 
       }
       const started = await connector.start({ executionContract });
       const runRef = requiredString(started?.run_ref, "external candidate run_ref");
-      await emit("candidate.run.submitted", "candidate-adapter", { run_ref: runRef, status: started.status ?? "QUEUED" });
+      await emit("candidate.run.submitted", "candidate-adapter", {
+        run_ref: runRef,
+        status: started.status ?? "QUEUED",
+        binding_receipt: started.binding_receipt ?? null,
+      });
       let cursor = started.cursor ?? null;
       let status = started.status ?? "QUEUED";
       let finalObservation = null;
@@ -124,6 +136,9 @@ export function createCandidateAdapterV3({ id, connector, pollIntervalMs = 500, 
       const deadline = Date.now() + Math.min(timeoutMs, executionContract.budget.wallclock_ms);
       try {
         while (!TERMINAL.has(status)) {
+          const cancellation = typeof shouldCancel === "function" ? await shouldCancel() : { requested: false };
+          if (cancellation?.requested) throw cancellationError(cancellation);
+          if (typeof heartbeat === "function") await heartbeat();
           if (Date.now() >= deadline) throw new Error("external candidate run timed out");
           const observation = assertObservation(await connector.observe({ runRef, cursor, executionContract }), runRef);
           cursor = observation.next_cursor ?? cursor;
@@ -166,7 +181,8 @@ export function createCandidateAdapterV3({ id, connector, pollIntervalMs = 500, 
           if (!TERMINAL.has(status)) await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
         }
       } catch (error) {
-        const cancellation = await connector.cancel({ runRef, reason: "evalos_adapter_failure" })
+        error.candidateUsage = finalObservation?.candidate_usage ?? error.candidateUsage ?? null;
+        const cancellation = await connector.cancel({ runRef, reason: error.cancelled ? "evalos_operator_cancellation" : "evalos_adapter_failure" })
           .catch((cancelError) => ({ supported: false, error: cancelError?.message ?? String(cancelError) }));
         await emit("candidate.run.quarantine_started", "candidate-adapter", {
           run_ref: runRef, cause: error.message, cancellation_supported: cancellation?.supported === true,
@@ -202,6 +218,7 @@ export function createCandidateAdapterV3({ id, connector, pollIntervalMs = 500, 
         isolationError.quarantineReleased = false;
         isolationError.runRef = runRef;
         isolationError.observationError = lastObservationError?.message ?? null;
+        isolationError.candidateUsage = error.candidateUsage ?? null;
         throw isolationError;
       }
       if (status !== "COMPLETED" && status !== "INCONCLUSIVE") {
@@ -232,13 +249,14 @@ export function createCandidateAdapterV3({ id, connector, pollIntervalMs = 500, 
         product_evidence: finalObservation.product_evidence ?? null,
         artifact_refs: finalObservation.artifact_refs ?? [],
         adapter_translation_digest: digest({ runRef, cursor, status }),
+        __evalos_usage: finalObservation.candidate_usage ?? null,
       };
     },
   });
 }
 
-export const CANDIDATE_ADAPTER_V3_RUNTIME = Object.freeze({
-  contract: "3.0",
+export const CANDIDATE_ADAPTER_V4_RUNTIME = Object.freeze({
+  contract: "4.0",
   candidate_kind: "REAL_PRODUCT",
   lanes: [...REAL_LANES],
   role: "submit-translate-preserve-evidence",

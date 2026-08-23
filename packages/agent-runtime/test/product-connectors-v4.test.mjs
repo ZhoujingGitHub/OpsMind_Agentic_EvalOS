@@ -45,7 +45,14 @@ test("Agent+Harness连接器只通过真实产品API提交任务并保留原始�
     "PUT /v2/remediation/mode": async ({ body }) => ({ ...body, production_writes_available: false }),
     "POST /v2/investigation-candidates": async ({ body }) => { submittedGoal = body.goal; return { investigation_id: "harness-run" }; },
     "GET /v2/investigations/harness-run": async () => ({ status: "resolved", objective: submittedGoal,
-      report: { root_cause: "amf-service-stopped", summary: "AMF服务停止" }, evidence: [{ evidence_id: "evidence:h1" }] }),
+      usage: { input_tokens: 640, output_tokens: 96, model_calls: 3, result_bytes: 4096, cost_microunits: 25000 },
+      tool_calls: [{ tool: "query_logs" }, { tool: "query_metrics" }],
+      report: { summary: "AMF服务停止", evidence_ids: ["evidence:h1"], missing_evidence: ["复核AMF启动状态"] },
+      hypotheses: [
+        { cause: "amf-service-stopped", confidence: 0.87, status: "leading", supporting_evidence_ids: ["evidence:h1"] },
+        { cause: "数据库故障", confidence: 0.1, status: "rejected", counter_evidence_ids: ["evidence:h1"] },
+      ],
+      evidence: [{ evidence_id: "evidence:h1" }] }),
     "GET /v2/investigations/harness-run/execution-log": async () => ({ next_sequence: 2, items: [{ sequence: 1, event_type: "evidence.collected", created_at: "2026-08-22T00:00:00Z", evidence_ref: "evidence:h1" }] }),
     "GET /v2/actions": async () => ({ items: [] }),
   });
@@ -64,11 +71,17 @@ test("Agent+Harness连接器只通过真实产品API提交任务并保留原始�
   assert.equal(prepared.operating_mode, "human_collaboration");
   const started = await connector.start({ executionContract });
   assert.equal(started.run_ref, "harness-run");
-  const observation = await connector.observe({ runRef: started.run_ref, cursor: 0 });
+  const observation = await connector.observe({ runRef: started.run_ref, cursor: 0, executionContract });
   assert.equal(observation.status, "COMPLETED");
   assert.equal(observation.outcome.root_cause, "amf-service-stopped");
+  assert.equal(observation.outcome.confidence, 0.87);
+  assert.deepEqual(observation.outcome.exclusions, ["数据库故障"]);
+  assert.deepEqual(observation.outcome.next_checks, ["复核AMF启动状态"]);
   assert.equal(observation.evaluation_binding.complete, true);
-  assert.equal(observation.evaluation_binding.binding_strength, "PUBLIC_TASK_CONTEXT");
+  assert.equal(observation.evaluation_binding.binding_strength, "CONTROL_PLANE_RECEIPT");
+  assert.deepEqual(observation.candidate_usage.values, { input_tokens: 640, output_tokens: 96, model_calls: 3,
+    tool_calls: 2, storage_bytes: 4096, cost_usd: 0.025 });
+  assert.equal(observation.candidate_usage.complete, true);
   assert.equal(observation.raw_events[0].source_system, "agent-harness-product");
   assert.deepEqual(observation.normalized_events[0].raw_source_refs, [observation.raw_events[0].source_ref]);
   const intake = fixture.requests.find((item) => item.method === "POST" && item.url === "/v2/investigation-candidates");
@@ -78,6 +91,9 @@ test("Agent+Harness连接器只通过真实产品API提交任务并保留原始�
   assert.ok(fixture.requests.every((item) => item.tenantId === "tenant-eval-harness"));
   assert.ok(fixture.requests.some((item) => item.authorization === "Bearer admin-token"));
   assert.equal(fixture.requests.some((item) => /tool|mcp/i.test(item.url)), false);
+  assert.equal(intake.body.goal, "调查AMF");
+  assert.equal(intake.body.goal.includes("EvalOS冻结评测上下文"), false);
+  assert.equal(JSON.stringify(intake.body).includes("allowed_tool_names"), false);
 });
 
 test("LangGraph连接器只调用产品公开接口，不在EvalOS内重建Graph", async (t) => {
@@ -93,7 +109,11 @@ test("LangGraph连接器只调用产品公开接口，不在EvalOS内重建Graph
     "PUT /api/v1/automation/mode": async ({ body }) => ({ ...body, production_write_enabled: false }),
     "POST /api/v1/candidates": async ({ body }) => { submittedGoal = body.goal; return { investigation: { investigation_id: "graph-run" } }; },
     "GET /api/v1/investigations/graph-run": async () => ({ status: "completed", objective: submittedGoal,
-      conclusion: "subscriber-profile-mismatch", evidence: [{ id: "evidence:g1" }] }),
+      budget_usage: { input_tokens: 710, output_tokens: 110, model_calls: 4, tool_calls: 5 },
+      conclusion: "subscriber-profile-mismatch",
+      hypotheses: [{ statement: "subscriber-profile-mismatch", confidence: 0.74, status: "supported",
+        supporting_evidence_ids: ["evidence:g1"] }],
+      evidence: [{ id: "evidence:g1" }] }),
     "GET /api/v1/investigations/graph-run/journal": async () => ({ next_cursor: 3, items: [{ cursor: 2, event_type: "investigation.completed", timestamp: "2026-08-22T00:00:00Z" }] }),
     "GET /api/v1/investigations/graph-run/product-e2e": async () => ({ root_cause: "subscriber-profile-mismatch", evidence: [{ id: "evidence:g1" }], public_events: [{ event_type: "archive.reconciled" }], archive_reconciled: true, archive_artifacts: [{ artifact_id: "archive:g1" }] }),
   });
@@ -112,11 +132,15 @@ test("LangGraph连接器只调用产品公开接口，不在EvalOS内重建Graph
   assert.equal(prepared.operating_mode, "controlled_auto");
   const started = await connector.start({ executionContract });
   assert.equal(started.run_ref, "graph-run");
-  const observation = await connector.observe({ runRef: started.run_ref, cursor: 0 });
+  const observation = await connector.observe({ runRef: started.run_ref, cursor: 0, executionContract });
   assert.equal(observation.status, "COMPLETED");
   assert.equal(observation.outcome.root_cause, "subscriber-profile-mismatch");
+  assert.equal(observation.outcome.confidence, 0.74);
   assert.equal(observation.evaluation_binding.complete, true);
-  assert.equal(observation.evaluation_binding.binding_strength, "PUBLIC_TASK_CONTEXT");
+  assert.equal(observation.evaluation_binding.binding_strength, "CONTROL_PLANE_RECEIPT");
+  assert.deepEqual(observation.candidate_usage.values, { input_tokens: 710, output_tokens: 110, model_calls: 4, tool_calls: 5 });
+  assert.deepEqual(observation.candidate_usage.unavailable_dimensions, ["storage_bytes", "cost_usd"]);
+  assert.equal(observation.candidate_usage.complete, false);
   assert.deepEqual(observation.artifact_refs, ["archive:g1"]);
   const intake = fixture.requests.find((item) => item.method === "POST" && item.url === "/api/v1/candidates");
   assert.equal(intake.body.trigger_type, "user");
@@ -125,6 +149,8 @@ test("LangGraph连接器只调用产品公开接口，不在EvalOS内重建Graph
   assert.ok(fixture.requests.every((item) => item.tenantId === "tenant-eval-graph"));
   assert.ok(fixture.requests.some((item) => item.authorization === "Bearer admin-token"));
   assert.equal(fixture.requests.some((item) => /invoke|tool|mcp/i.test(item.url)), false);
+  assert.equal(intake.body.goal, "调查用户注册失败");
+  assert.equal(intake.body.goal.includes("EvalOS冻结评测上下文"), false);
 });
 
 test("LangGraph安全停止终态会进入评分而不是被误判为平台超时", async (t) => {
@@ -157,7 +183,7 @@ test("LangGraph安全停止终态会进入评分而不是被误判为平台超�
 
   for (const state of ["human_takeover", "denied", "budget_exhausted"]) {
     terminalState = state;
-    const observation = await connector.observe({ runRef: "safe-stop-run", cursor: 0 });
+    const observation = await connector.observe({ runRef: "safe-stop-run", cursor: 0, executionContract });
     assert.equal(observation.status, "INCONCLUSIVE", state);
     assert.equal(observation.outcome.status, "inconclusive", state);
     assert.equal(observation.outcome.candidate_terminal_status, state);

@@ -7,10 +7,12 @@ const read = (file) => readFileSync(path.join(root, file), "utf8");
 const app = read("services/control-api/src/app.mjs");
 const runtime = read("packages/agent-runtime/src/claude-agent-sdk-runtime.mjs");
 const intelligence = read("packages/agent-runtime/src/case-investigator.mjs");
-const adapter = read("packages/agent-runtime/src/candidate-adapter-v3.mjs");
-const connectors = read("packages/agent-runtime/src/product-connectors-v3.mjs");
+const adapter = read("packages/agent-runtime/src/candidate-adapter-v4.mjs");
+const connectors = read("packages/agent-runtime/src/product-connectors-v4.mjs");
 const runner = read("packages/kernel/src/runner.mjs");
 const grader = read("packages/kernel/src/grader.mjs");
+const failurePolicy = read("packages/kernel/src/failure-policy.mjs");
+const statistics = read("packages/kernel/src/statistics.mjs");
 const twinEnvironment = read("packages/twin-runtime/src/environment.mjs");
 const packageFiles = ["package.json", "packages/agent-runtime/package.json", "apps/console/package.json"]
   .map(read).join("\n");
@@ -25,9 +27,9 @@ assert.match(adapter, /submit-translate-preserve-evidence/);
 assert.doesNotMatch(adapter, /toolExecutor|environment\.call|invoke.*mcp/i);
 assert.match(connectors, /external-product-control-plane-client/);
 assert.match(connectors, /candidateCodeMutation:\s*false/);
-assert.match(connectors, /evalos-product-run-binding\.1/);
+assert.match(connectors, /evalos-product-run-binding\.2/);
 assert.match(adapter, /not bound to the frozen Trial context/);
-assert.equal(existsSync(path.join(root, "docs/contracts/product-run-binding-v1.schema.json")), true);
+assert.equal(existsSync(path.join(root, "docs/contracts/product-run-binding-v2.schema.json")), true);
 assert.match(app, /createAgentHarnessProductConnector/);
 assert.match(app, /createLangGraphProductConnector/);
 assert.match(app, /createTestDouble\("test-double-a"/);
@@ -43,7 +45,7 @@ const executableManifests = readdirSync(path.join(root, "config")).filter((name)
 for (const name of executableManifests) {
   const manifest = JSON.parse(read(name.startsWith("config/") ? name : `config/${name}`));
   if (name === "m3-formal-agent-capability.manifest.json" || name === "m15-smoke.manifest.json") {
-    assert.equal(manifest.manifest_version, "5.0", `当前可执行清单必须是 Manifest 5.0：${name}`);
+    assert.equal(manifest.manifest_version, "6.0", `当前可执行清单必须是 Manifest 6.0：${name}`);
   }
 }
 const formal = JSON.parse(read("config/m3-formal-agent-capability.manifest.json"));
@@ -63,4 +65,12 @@ for (const removed of [
 ]) assert.equal(existsSync(path.join(root, removed)), false, `旧考生分身仍存在：${removed}`);
 
 assert.doesNotMatch(`${app}\n${runner}`, /ProductToolBridgeRegistry|\/internal\/product-tool-bridge/);
-console.log("M3.1 架构检查通过：EvalOS 保持 Claude Agent SDK 开放式单 Agent，真实考生只通过外部产品接口参评，旧考生分身与 Adapter 2.0 已断代移除。");
+assert.match(failurePolicy, /CANDIDATE_CAPABILITY_FAILURE/);
+assert.match(failurePolicy, /PRODUCT_RELIABILITY_FAILURE/);
+assert.match(failurePolicy, /RATE_LIMIT/);
+assert.match(statistics, /QUALIFICATION_NO_WINNER/);
+assert.match(statistics, /FORMAL_DECISION/);
+assert.match(statistics, /clusteredPairedBootstrap/);
+assert.match(app, /trial.infrastructure_retry_scheduled/);
+assert.match(app, /decision_report_digest/);
+assert.match(app, /evalos-operations-health.1/);console.log("M3.1 架构检查通过：EvalOS 保持 Claude Agent SDK 开放式单 Agent，真实考生只通过外部产品接口参评，旧考生分身与 Adapter 2.0 已断代移除。");

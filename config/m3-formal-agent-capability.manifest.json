@@ -1,5 +1,5 @@
 {
-  "manifest_version": "5.0",
+  "manifest_version": "6.0",
   "milestone": "M3.1",
   "run_class": "REAL_CANDIDATE",
   "evaluation_mode": "FORMAL",
@@ -200,8 +200,8 @@
       "ref": "agent-harness-v2",
       "kind": "REAL_PRODUCT",
       "architecture": "CLAUDE_AGENT_SDK_HARNESS",
-      "adapter_contract_version": "3.0",
-      "adapter_version": "candidate-adapter-3.0.0",
+      "adapter_contract_version": "4.0",
+      "adapter_version": "candidate-adapter-4.0.0",
       "source_revision": "e40a8c4433ab293619f7185e555a5789030832ed",
       "artifact_digest": "sha256:4febaac2b2a6f5d3b7ec49d982a096e5cc7dc46d2c8f1c370138c4eb94dbd34f",
       "runtime_digest": "sha256:c9f079e1bfce0c0d6e858cfc583ac8d4a4f40fd6be44e83c1dd801cce1d98388",
@@ -212,8 +212,8 @@
       "ref": "langgraph-v1",
       "kind": "REAL_PRODUCT",
       "architecture": "LANGGRAPH_PRODUCT",
-      "adapter_contract_version": "3.0",
-      "adapter_version": "candidate-adapter-3.0.0",
+      "adapter_contract_version": "4.0",
+      "adapter_version": "candidate-adapter-4.0.0",
       "source_revision": "990c9b50d15b9ae15164e253a2a8de579e6e6a1f",
       "artifact_digest": "sha256:4cdd404bad016301c86fa580c48b866b87c0b6513799169b8b92b56ae980ae2e",
       "runtime_digest": "sha256:180658f75800118b6db26fe803282e42749baa3c2a6fb3a810753a00f5d38740",
@@ -260,7 +260,7 @@
       "digest": "sha256:d838c5e342fae081fa60afccb0b0ecbda01a6b2d08e4c3ba4182f1a32ad2d52b"
     },
     "product_adapter_contract": {
-      "ref": "evalos-candidate-adapter@3.0.0",
+      "ref": "evalos-candidate-adapter@4.0.0",
       "digest": "sha256:de5aee193c128cc2be95d2003ef94a9d3aeef7560f0b32115d70d43e148ad212"
     }
   },

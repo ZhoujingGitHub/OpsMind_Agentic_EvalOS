@@ -1,6 +1,6 @@
 import { sha256 } from "./utils.mjs";
 
-export const EVALUATION_ADAPTER_CONTRACT_VERSION = "3.0";
+export const EVALUATION_ADAPTER_CONTRACT_VERSION = "4.0";
 
 function descriptor(name, definition) {
   return {
@@ -15,14 +15,14 @@ function descriptor(name, definition) {
 }
 
 export function buildEvaluationContract({ experiment, trial, caseSpec, adapter }) {
-  if (experiment?.manifest?.manifest_version !== "5.0") throw new Error("Candidate Adapter 3.0 requires Manifest 5.0");
+  if (experiment?.manifest?.manifest_version !== "6.0") throw new Error("Candidate Adapter 4.0 requires Manifest 6.0");
   const contestant = experiment.manifest.contestants.find((item) => item.ref === trial.contestant_ref);
   if (!contestant) throw new Error(`contestant is not frozen in the manifest: ${trial.contestant_ref}`);
   if (contestant.adapter_contract_version !== EVALUATION_ADAPTER_CONTRACT_VERSION) {
-    throw new Error(`contestant ${contestant.ref} does not use Candidate Adapter contract 3.0`);
+    throw new Error(`contestant ${contestant.ref} does not use Candidate Adapter contract 4.0`);
   }
   if (adapter.adapterContractVersion !== EVALUATION_ADAPTER_CONTRACT_VERSION) {
-    throw new Error(`runtime adapter ${adapter.id} does not implement Candidate Adapter contract 3.0`);
+    throw new Error(`runtime adapter ${adapter.id} does not implement Candidate Adapter contract 4.0`);
   }
   if (contestant.adapter_version !== adapter.adapterVersion) {
     throw new Error(`runtime adapter version mismatch for ${contestant.ref}`);

@@ -100,6 +100,8 @@ function normalizedType(value) {
   const name = String(value ?? "").toLowerCase();
   if (/candidate|job.accept|task.receive|investigation.create/.test(name)) return "task.received";
   if (/investigation.start|run.start|worker.start/.test(name)) return "investigation.started";
+  if (/tool.*fail|post_tool_failure|observation.*fail/.test(name)) return "candidate.tool.failed";
+  if (/retry|recover|resume/.test(name)) return "candidate.recovery.observed";
   if (/tool|evidence|observation|metric|log|alarm|probe/.test(name)) return "evidence.collected";
   if (/conclusion|report|finalize|completed/.test(name)) return "conclusion.recorded";
   if (/proposal/.test(name)) return "action.proposed";
@@ -118,6 +120,50 @@ function normalizedType(value) {
   return null;
 }
 
+function candidateUsageSnapshot(...sources) {
+  const dimensions = ["input_tokens", "output_tokens", "model_calls", "tool_calls", "storage_bytes", "cost_usd"];
+  const snapshots = [];
+  const visit = (value, path = "root", depth = 0) => {
+    if (depth > 8 || value === null || value === undefined) return;
+    if (Array.isArray(value)) {
+      for (const item of value.slice(0, 5000)) visit(item, `${path}[]`, depth + 1);
+      return;
+    }
+    if (typeof value !== "object") return;
+    const usagePath = /(?:^|\.)(?:usage|budget_usage|model_usage|sdk_usage)$/i.test(path);
+    if (usagePath) snapshots.push(value);
+    for (const [key, nested] of Object.entries(value)) visit(nested, `${path}.${key}`, depth + 1);
+  };
+  for (const source of sources) visit(source);
+  const values = {};
+  for (const snapshot of snapshots) {
+    const candidates = {
+      input_tokens: snapshot.input_tokens,
+      output_tokens: snapshot.output_tokens,
+      model_calls: snapshot.model_calls,
+      tool_calls: snapshot.tool_calls,
+      storage_bytes: snapshot.storage_bytes ?? snapshot.result_bytes,
+      cost_usd: snapshot.cost_usd ?? (Number.isFinite(Number(snapshot.cost_microunits))
+        ? Number(snapshot.cost_microunits) / 1_000_000 : undefined),
+    };
+    for (const [name, raw] of Object.entries(candidates)) {
+      const number = Number(raw);
+      if (Number.isFinite(number) && number >= 0) values[name] = Math.max(values[name] ?? 0, number);
+    }
+  }
+  const directToolCalls = sources.map((source) => Array.isArray(source?.tool_calls) ? source.tool_calls.length : null)
+    .filter(Number.isFinite);
+  if (directToolCalls.length) values.tool_calls = Math.max(values.tool_calls ?? 0, ...directToolCalls);
+  const observedDimensions = dimensions.filter((name) => Object.hasOwn(values, name));
+  return {
+    source: observedDimensions.length ? "candidate_public_api" : "unavailable",
+    values,
+    observed_dimensions: observedDimensions,
+    unavailable_dimensions: dimensions.filter((name) => !observedDimensions.includes(name)),
+    complete: observedDimensions.length === dimensions.length,
+  };
+}
+
 function semanticPayload(event, eventName, sourceRef) {
   const nested = event?.payload && typeof event.payload === "object" && !Array.isArray(event.payload) ? event.payload : {};
   const publicPayload = event?.public_payload && typeof event.public_payload === "object" && !Array.isArray(event.public_payload)
@@ -125,73 +171,66 @@ function semanticPayload(event, eventName, sourceRef) {
   const source = { ...event, ...publicPayload, ...nested };
   const allowed = ["decision", "decision_code", "reason_code", "authorization_source", "risk_level", "action_id",
     "proposal_digest", "policy_decision_id", "ticket_id", "execution_id", "state_changed", "production_execution",
-    "verdict", "effective", "rolled_back", "status", "ok", "scope_digest", "runtime_manifest_digest"];
+    "verdict", "effective", "rolled_back", "status", "ok", "retryable", "attempt", "error_code",
+    "scope_digest", "runtime_manifest_digest"];
   return Object.fromEntries([["event_name", eventName], ["source_ref", sourceRef],
     ...allowed.filter((key) => source[key] !== undefined).map((key) => [key, source[key]])]);
-}
-
-const EVAL_CONTEXT_PREFIX = "[EvalOS冻结评测上下文｜不是求解提示] ";
-
-function findFrozenContext(value, seen = new Set()) {
-  if (typeof value === "string") {
-    const index = value.indexOf(EVAL_CONTEXT_PREFIX);
-    if (index < 0) return null;
-    const line = value.slice(index + EVAL_CONTEXT_PREFIX.length).split(/\r?\n/, 1)[0];
-    try {
-      const context = JSON.parse(line);
-      return context?.contract === "evalos-candidate-context.3" ? context : null;
-    } catch { return null; }
-  }
-  if (!value || typeof value !== "object" || seen.has(value)) return null;
-  seen.add(value);
-  for (const nested of Object.values(value)) {
-    const context = findFrozenContext(nested, seen);
-    if (context) return context;
-  }
-  return null;
 }
 
 function sameValue(actual, expected) {
   return canonical(actual) === canonical(expected);
 }
 
-function evaluationBinding({ runRef, expected, publicPayloads = [], nativeClosures = [] }) {
-  const taskContext = publicPayloads.map((item) => findFrozenContext(item)).find(Boolean) ?? null;
-  const nativeClosure = nativeClosures.find(Boolean) ?? null;
-  const context = nativeClosure ? {
+function submissionReceipt({ runRef, executionContract, idempotencyKey, requestBody, channel }) {
+  const expected = frozenEvaluationContext(executionContract);
+  const material = {
+    contract: "evalos-submission-receipt.1",
+    run_ref: runRef,
+    trial_id: expected.trial_id,
+    case_ref: expected.case_ref,
+    context_digest: expected.context_digest,
+    idempotency_key: idempotencyKey,
+    request_digest: digest(requestBody),
+    channel,
+  };
+  return { ...material, receipt_digest: digest(material) };
+}
+
+function evaluationBinding({ runRef, expected, receipt, nativeClosures = [] }) {
+  const nativeClosure = nativeClosures.find((item) => item && typeof item === "object") ?? null;
+  const nativeFields = nativeClosure ? {
     trial_id: nativeClosure.trial_id,
     case_ref: nativeClosure.case_id ?? nativeClosure.case_ref,
     environment_seed: nativeClosure.evaluation_seed ?? nativeClosure.seed,
     budget: nativeClosure.evaluation_budget ?? nativeClosure.budget,
     operating_mode: nativeClosure.operating_mode,
     execution_mode: nativeClosure.execution_mode,
-  } : taskContext;
-  const taskChecks = {
-    context_digest: taskContext?.context_digest === expected?.context_digest,
-    trial_id: taskContext?.trial_id === expected?.trial_id,
-    case_ref: taskContext?.case_ref === expected?.case_ref,
-    environment_seed: taskContext?.environment_seed === expected?.environment_seed,
-    budget: sameValue(taskContext?.budget, expected?.budget),
-    operating_mode: taskContext?.operating_mode === expected?.operating_mode,
-    execution_mode: taskContext?.execution_mode === expected?.execution_mode,
+  } : {};
+  const nativeChecks = Object.fromEntries(Object.entries(nativeFields)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .map(([name, value]) => [name, sameValue(value, expected?.[name])]));
+  const receiptMaterial = Object.fromEntries(Object.entries(receipt ?? {})
+    .filter(([name]) => name !== "receipt_digest"));
+  const receiptChecks = {
+    run_ref: receipt?.run_ref === runRef,
+    trial_id: receipt?.trial_id === expected?.trial_id,
+    case_ref: receipt?.case_ref === expected?.case_ref,
+    context_digest: receipt?.context_digest === expected?.context_digest,
+    receipt_digest: receipt?.receipt_digest === digest(receiptMaterial),
   };
-  const closureChecks = nativeClosure ? {
-    trial_id: context.trial_id === expected?.trial_id,
-    case_ref: context.case_ref === expected?.case_ref,
-    environment_seed: context.environment_seed === expected?.environment_seed,
-    budget: sameValue(context.budget, expected?.budget),
-    operating_mode: context.operating_mode === expected?.operating_mode,
-    execution_mode: context.execution_mode === expected?.execution_mode,
-  } : null;
-  const taskBound = Object.values(taskChecks).every(Boolean);
-  const closureBound = closureChecks ? Object.values(closureChecks).every(Boolean) : true;
+  const receiptBound = Object.values(receiptChecks).every(Boolean);
   return {
-    contract: "evalos-product-run-binding.1", run_ref: runRef,
+    contract: "evalos-product-run-binding.2",
+    run_ref: runRef,
     expected_context_digest: expected?.context_digest ?? null,
-    task_context_observed: Boolean(taskContext), native_closure_observed: Boolean(nativeClosure),
-    binding_strength: nativeClosure ? "NATIVE_CLOSURE_FIELDS" : taskContext ? "PUBLIC_TASK_CONTEXT" : "UNBOUND",
-    task_checks: taskChecks, closure_checks: closureChecks,
-    complete: taskBound && closureBound,
+    binding_strength: receiptBound ? "CONTROL_PLANE_RECEIPT" : "UNBOUND",
+    receipt_checks: receiptChecks,
+    native_conformance: {
+      observed: Object.keys(nativeChecks),
+      checks: nativeChecks,
+      mismatches: Object.entries(nativeChecks).filter(([, passed]) => !passed).map(([name]) => name),
+    },
+    complete: receiptBound,
   };
 }
 
@@ -250,15 +289,86 @@ function productEvidence(events, extra = {}) {
   };
 }
 
-function finalOutcome({ status, conclusion, uncertainty, evidence = [] }) {
-  const evidenceRefs = evidence.flatMap((item) => item?.evidence_ref ?? item?.evidence_id ?? item?.id ?? []).filter(Boolean);
+function stringList(value) {
+  return (Array.isArray(value) ? value : value === undefined || value === null ? [] : [value])
+    .flatMap((item) => typeof item === "string" ? [item] : [])
+    .map((item) => item.trim()).filter(Boolean);
+}
+
+function boundedConfidence(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(1, number > 1 ? number / 100 : number)) : null;
+}
+
+function hypothesisStatement(item) {
+  return item?.cause ?? item?.statement ?? item?.hypothesis ?? item?.title ?? item?.description ?? null;
+}
+
+function leadingHypothesis(hypotheses) {
+  const values = (hypotheses ?? []).filter((item) => item && typeof item === "object");
+  const preferred = values.filter((item) => ["leading", "supported", "confirmed"].includes(String(item.status ?? "").toLowerCase()));
+  const candidates = preferred.length ? preferred : values.filter((item) =>
+    !["rejected", "weakened", "contradicted"].includes(String(item.status ?? "").toLowerCase()));
+  return candidates.sort((left, right) =>
+    (boundedConfidence(right.confidence ?? right.confidence_score) ?? -1)
+      - (boundedConfidence(left.confidence ?? left.confidence_score) ?? -1))[0] ?? null;
+}
+
+function recoverySummary(events) {
+  const values = events ?? [];
+  const failedAt = values.findIndex((event) => {
+    const name = String(event?.event_type ?? event?.name ?? event?.action ?? "").toLowerCase();
+    const payload = event?.public_payload ?? event?.payload ?? event ?? {};
+    return /tool.*fail|post_tool_failure|observation.*fail/.test(name)
+      || payload.ok === false || ["failed", "error"].includes(String(payload.status ?? "").toLowerCase());
+  });
+  if (failedAt < 0) return { failure_observed: false, recovered: false };
+  const recovered = values.slice(failedAt + 1).some((event) => {
+    const name = String(event?.event_type ?? event?.name ?? event?.action ?? "").toLowerCase();
+    const payload = event?.public_payload ?? event?.payload ?? event ?? {};
+    return /retry|recover|resume/.test(name) || payload.recovered === true
+      || (payload.ok === true && /tool|observation|evidence/.test(name));
+  });
+  return { failure_observed: true, recovered };
+}
+
+function finalOutcome({ status, conclusion, uncertainty, evidence = [], hypotheses = [], report = {}, events = [] }) {
+  const sourceHypotheses = hypotheses.length ? hypotheses : report.hypotheses ?? [];
+  const leading = leadingHypothesis(sourceHypotheses);
+  const evidenceRefs = new Set();
+  for (const item of evidence) {
+    stringList(item?.evidence_ref ?? item?.evidence_id ?? item?.id).forEach((ref) => evidenceRefs.add(ref));
+    stringList(item?.evidence_refs).forEach((ref) => evidenceRefs.add(ref));
+  }
+  stringList(report.evidence_ids).forEach((ref) => evidenceRefs.add(ref));
+  stringList(leading?.supporting_evidence_ids).forEach((ref) => evidenceRefs.add(ref));
+  const exclusions = sourceHypotheses
+    .filter((item) => ["rejected", "weakened", "contradicted"].includes(String(item?.status ?? "").toLowerCase()))
+    .map(hypothesisStatement).filter(Boolean);
+  const nextChecks = [
+    ...stringList(report.missing_evidence),
+    ...stringList(report.evidence_gaps),
+    ...stringList(leading?.unknowns ?? leading?.missing_evidence),
+  ];
   const candidateTerminalStatus = String(status ?? "").toLowerCase();
   const inconclusive = ["inconclusive", "insufficient_evidence", "waiting_data", "human_takeover", "denied",
     "budget_exhausted"].includes(candidateTerminalStatus);
-  return { status: inconclusive ? "inconclusive" : "resolved", root_cause: conclusion ?? uncertainty ?? "candidate-did-not-publish-a-conclusion",
-    confidence: inconclusive ? 0 : 1, evidence_refs: [...new Set(evidenceRefs)], exclusions: [],
-    tool_failures_recovered: false, next_checks: inconclusive ? ["由确定性评分器结合冻结Case判断该安全停止是否正确"] : [],
-    summary: conclusion ?? uncertainty ?? "", candidate_terminal_status: candidateTerminalStatus };
+  const rootCause = hypothesisStatement(leading) ?? conclusion ?? uncertainty ?? "candidate-did-not-publish-a-conclusion";
+  const confidence = boundedConfidence(leading?.confidence ?? leading?.confidence_score ?? report.confidence);
+  const recovery = recoverySummary(events);
+  return {
+    status: inconclusive ? "inconclusive" : "resolved",
+    root_cause: rootCause,
+    confidence: confidence ?? (inconclusive ? 0 : null),
+    evidence_refs: [...evidenceRefs],
+    exclusions: [...new Set(exclusions)],
+    tool_failures_recovered: recovery.failure_observed ? recovery.recovered : null,
+    next_checks: [...new Set(nextChecks.length ? nextChecks
+      : inconclusive ? ["由确定性评分器结合冻结Case判断该安全停止是否正确"] : [])],
+    summary: report.summary ?? conclusion ?? uncertainty ?? "",
+    uncertainty: uncertainty ?? report.uncertainty ?? null,
+    candidate_terminal_status: candidateTerminalStatus,
+  };
 }
 
 function langGraphAdapterStatus(state) {
@@ -290,7 +400,7 @@ function frozenEvaluationContext(executionContract) {
     suite_ref: executionContract.suite_ref, evaluation_lane: executionContract.evaluation_lane,
     operating_mode: visible.operating_mode, execution_mode: executionContract.execution_mode,
     model: executionContract.model, budget: executionContract.budget,
-    allowed_tool_names: (executionContract.tools ?? []).map((item) => item.name),
+    tool_contract_digest: digest(executionContract.tools ?? []),
     policy_digest: digest(executionContract.policy ?? {}),
     frozen_dependencies_digest: digest(executionContract.frozen_dependencies ?? {}),
   };
@@ -298,8 +408,39 @@ function frozenEvaluationContext(executionContract) {
 }
 
 function candidateGoal(executionContract) {
+  return executionContract.case.goal;
+}
+
+function agentHarnessSubmission(executionContract) {
   const context = frozenEvaluationContext(executionContract);
-  return `[EvalOS冻结评测上下文｜不是求解提示] ${JSON.stringify(context)}\n\n评测题目：${executionContract.case.goal}`;
+  const scope = executionContract.case.visible.scope ?? {};
+  return {
+    goal: candidateGoal(executionContract),
+    trigger_type: "natural_language",
+    source_ref: "evalos:" + executionContract.trial.id + ":" + context.context_digest.slice(-16),
+    priority: 70,
+    scope_hint: {
+      customer_id: scope.customer_id, service_id: scope.service_id, site_id: scope.site_id,
+      entity_ids: scope.entity_ids ?? scope.resource_ids ?? [],
+      source_page: "/evalos/trials/" + executionContract.trial.id,
+    },
+    time_window: timeWindow(executionContract.case.visible.time_window),
+    seed_evidence_refs: [],
+    freshness: "fresh",
+  };
+}
+
+function langGraphSubmission(executionContract) {
+  const scope = executionContract.case.visible.scope ?? {};
+  return {
+    goal: candidateGoal(executionContract),
+    trigger_type: "user",
+    title: "EvalOS " + executionContract.trial.case_ref,
+    resource_ids: scope.resource_ids ?? scope.entity_ids ?? [],
+    service_ids: scope.service_ids ?? (scope.service_id ? [scope.service_id] : []),
+    time_window: timeWindow(executionContract.case.visible.time_window),
+    client_request_id: executionContract.trial.id,
+  };
 }
 
 function discovery(attestation, architecture, capability, runtime, health = {}) {
@@ -374,22 +515,15 @@ export function createAgentHarnessProductConnector({ origin, token, approvalToke
         execution_mode: executionContract.execution_mode, production_writes_available: false };
     },
     async start({ executionContract }) {
-      const visible = executionContract.case.visible;
-      const evaluationContext = frozenEvaluationContext(executionContract);
-      const scope = visible.scope ?? {};
-      const result = await api.request("/v2/investigation-candidates", { method: "POST", body: {
-        goal: candidateGoal(executionContract), trigger_type: "natural_language",
-        source_ref: `evalos:${executionContract.trial.id}:${evaluationContext.context_digest.slice(-16)}`,
-        priority: 70, scope_hint: { customer_id: scope.customer_id, service_id: scope.service_id, site_id: scope.site_id,
-          entity_ids: scope.entity_ids ?? scope.resource_ids ?? [], source_page: `/evalos/trials/${executionContract.trial.id}` },
-        time_window: timeWindow(visible.time_window), seed_evidence_refs: [], freshness: "fresh",
-      } });
+      const requestBody = agentHarnessSubmission(executionContract);
+      const result = await api.request("/v2/investigation-candidates", { method: "POST", body: requestBody });
       const runRef = result.investigation_id ?? result.linked_investigation_id ?? result.candidate?.linked_investigation_id;
       if (!runRef) throw new Error("Agent+Harness product did not create a real investigation");
-      expectedContexts.set(runRef, evaluationContext);
-      return { run_ref: runRef, status: "RUNNING", cursor: 0 };
+      return { run_ref: runRef, status: "RUNNING", cursor: 0,
+        binding_receipt: submissionReceipt({ runRef, executionContract, requestBody,
+          idempotencyKey: requestBody.source_ref, channel: "agent-harness:/v2/investigation-candidates" }) };
     },
-    async observe({ runRef, cursor = 0 }) {
+    async observe({ runRef, cursor = 0, executionContract }) {
       const [detail, log, actionPage] = await Promise.all([
         api.request(`/v2/investigations/${encodeURIComponent(runRef)}`),
         api.request(`/v2/investigations/${encodeURIComponent(runRef)}/execution-log?after_sequence=${Number(cursor) || 0}&limit=5000`),
@@ -413,16 +547,22 @@ export function createAgentHarnessProductConnector({ origin, token, approvalToke
         `agent-harness:evaluation-action:${answer.action_id}`, answer));
       const projectionRaw = projected.flatMap((item) => item.raw);
       const projectionNormalized = projected.flatMap((item) => item.normalized);
-      const binding = terminal ? evaluationBinding({ runRef, expected: expectedContexts.get(runRef),
-        publicPayloads: [detail, ...completeEvents], nativeClosures: evaluationAnswers }) : null;
+      const requestBody = agentHarnessSubmission(executionContract);
+      const expected = frozenEvaluationContext(executionContract);
+      const receipt = submissionReceipt({ runRef, executionContract, requestBody,
+        idempotencyKey: requestBody.source_ref, channel: "agent-harness:/v2/investigation-candidates" });
+      const binding = terminal ? evaluationBinding({ runRef, expected, receipt, nativeClosures: evaluationAnswers }) : null;
       return { run_ref: runRef, status: terminal ? (state === "failed" ? "FAILED" : state === "inconclusive" ? "INCONCLUSIVE" : "COMPLETED") : "RUNNING",
         next_cursor: log.next_sequence ?? cursor, raw_events: [...translated.raw, ...projectionRaw],
         normalized_events: [...translated.normalized, ...projectionNormalized],
         approval_requests: approvalRequests, outcome: terminal ? finalOutcome({ status: state,
-          conclusion: detail.report?.root_cause ?? detail.report?.summary ?? detail.answer ?? detail.conclusion,
-          uncertainty: detail.report?.uncertainty, evidence: detail.evidence ?? [] }) : null,
+          conclusion: detail.answer ?? detail.conclusion ?? detail.report?.summary,
+          uncertainty: detail.report?.uncertainty ?? detail.stop_reason,
+          evidence: detail.evidence ?? [], hypotheses: detail.hypotheses ?? [],
+          report: detail.report ?? {}, events: completeEvents }) : null,
         product_evidence: terminal ? productEvidence(completeEvents, { persistence: `investigation:${runRef}`, audit: `execution-log:${runRef}` }) : null,
-        evaluation_binding: binding, artifact_refs: detail.report_ref ? [detail.report_ref] : [] };
+        evaluation_binding: binding, candidate_usage: candidateUsageSnapshot(detail, completeEvents),
+        artifact_refs: detail.report_ref ? [detail.report_ref] : [] };
     },
     async respondApproval({ request, decision }) {
       return approvalApi.request(`/v2/actions/${encodeURIComponent(request.action_id)}/approval`, { method: "POST",
@@ -496,23 +636,17 @@ export function createLangGraphProductConnector({ origin, token, approvalToken, 
         execution_mode: executionContract.execution_mode, production_writes_available: false };
     },
     async start({ executionContract }) {
-      const evaluationContext = frozenEvaluationContext(executionContract);
-      const scope = executionContract.case.visible.scope ?? {};
-      const result = await api.request("/api/v1/candidates", { method: "POST", body: {
-        // EvalOS 提交的是一项新的、冻结的调查任务，不是考生租户数据库里已经存在的告警回放。
-        // 因此必须走产品公开的人工调查入口；client_request_id 负责幂等，评测绑定由下方
-        // expectedContexts 独立校验，不能伪造一条不存在的 source record。
-        goal: candidateGoal(executionContract), trigger_type: "user",
-        title: `EvalOS ${executionContract.trial.case_ref}`,
-        resource_ids: scope.resource_ids ?? scope.entity_ids ?? [], service_ids: scope.service_ids ?? (scope.service_id ? [scope.service_id] : []),
-        time_window: timeWindow(executionContract.case.visible.time_window), client_request_id: executionContract.trial.id,
-      } });
+      // EvalOS submits the same frozen question through the public product boundary.
+      // Trial, Case, Seed and budget stay in the trusted EvalOS/Twin control plane.
+      const requestBody = langGraphSubmission(executionContract);
+      const result = await api.request("/api/v1/candidates", { method: "POST", body: requestBody });
       const runRef = result.investigation?.investigation_id;
       if (!runRef) throw new Error("LangGraph product did not create a real investigation");
-      expectedContexts.set(runRef, evaluationContext);
-      return { run_ref: runRef, status: "RUNNING", cursor: 0 };
+      return { run_ref: runRef, status: "RUNNING", cursor: 0,
+        binding_receipt: submissionReceipt({ runRef, executionContract, requestBody,
+          idempotencyKey: requestBody.client_request_id, channel: "langgraph:/api/v1/candidates" }) };
     },
-    async observe({ runRef, cursor = 0 }) {
+    async observe({ runRef, cursor = 0, executionContract }) {
       const [detail, journal, projection] = await Promise.all([
         api.request(`/api/v1/investigations/${encodeURIComponent(runRef)}`),
         api.request(`/api/v1/investigations/${encodeURIComponent(runRef)}/journal?after_cursor=${Number(cursor) || 0}&limit=1000`),
@@ -533,18 +667,24 @@ export function createLangGraphProductConnector({ origin, token, approvalToken, 
       const terminal = adapterStatus !== "RUNNING";
       const projected = terminal ? projectionEvidence("langgraph-product", `langgraph:product-e2e:${runRef}`, projection)
         : { raw: [], normalized: [] };
-      const binding = terminal ? evaluationBinding({ runRef, expected: expectedContexts.get(runRef),
-        publicPayloads: [detail, projection, ...events],
+      const requestBody = langGraphSubmission(executionContract);
+      const expected = frozenEvaluationContext(executionContract);
+      const receipt = submissionReceipt({ runRef, executionContract, requestBody,
+        idempotencyKey: requestBody.client_request_id, channel: "langgraph:/api/v1/candidates" });
+      const binding = terminal ? evaluationBinding({ runRef, expected, receipt,
         nativeClosures: lifecycle ? [projection] : [] }) : null;
       return { run_ref: runRef, status: adapterStatus,
         next_cursor: journal.next_cursor ?? cursor, raw_events: [...translated.raw, ...projected.raw],
         normalized_events: [...translated.normalized, ...projected.normalized],
         approval_requests: approvalRequests, outcome: terminal ? finalOutcome({ status: state,
-          conclusion: projection.root_cause ?? detail.conclusion, uncertainty: projection.uncertainty ?? detail.uncertainty,
-          evidence: projection.evidence ?? detail.evidence ?? [] }) : null,
+          conclusion: projection.root_cause ?? detail.conclusion,
+          uncertainty: projection.uncertainty ?? detail.uncertainty,
+          evidence: projection.evidence ?? detail.evidence ?? [],
+          hypotheses: detail.hypotheses ?? projection.hypotheses ?? [],
+          report: detail.report ?? {}, events: projection.public_events ?? events }) : null,
         product_evidence: terminal ? productEvidence(projection.public_events ?? events, { persistence: `journal:${runRef}`,
           audit: `product-e2e:${runRef}`, archive: projection.archive_reconciled ? `archive:${runRef}` : null }) : null,
-        evaluation_binding: binding,
+        evaluation_binding: binding, candidate_usage: candidateUsageSnapshot(detail, projection, events),
         artifact_refs: (projection.archive_artifacts ?? []).map((item) => item.uri ?? item.object_key ?? item.artifact_id).filter(Boolean) };
     },
     async respondApproval({ runRef, request, decision }) {
@@ -558,7 +698,7 @@ export function createLangGraphProductConnector({ origin, token, approvalToken, 
   });
 }
 
-export const PRODUCT_CONNECTOR_V3_RUNTIME = Object.freeze({
+export const PRODUCT_CONNECTOR_V4_RUNTIME = Object.freeze({
   role: "external-product-control-plane-client", productionWrites: false,
   candidateCodeMutation: false, candidateDatabaseMutation: false, tokenSource: "environment-only",
 });

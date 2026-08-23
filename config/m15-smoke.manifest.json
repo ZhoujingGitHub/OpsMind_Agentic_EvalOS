@@ -1,5 +1,5 @@
 {
-  "manifest_version": "5.0",
+  "manifest_version": "6.0",
   "milestone": "M3.1",
   "run_class": "ENGINEERING_TEST",
   "evaluation_mode": "QUALIFICATION",
@@ -27,8 +27,8 @@
   "environment_seeds": [20260813],
   "replicates_per_seed": 3,
   "contestants": [
-    { "ref": "test-double-a", "kind": "TEST_DOUBLE", "architecture": "TEST_DOUBLE", "adapter_contract_version": "3.0", "adapter_version": "test-double-adapter-3.0.0", "source_revision": "m31-local-test-double-a", "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "runtime_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "runtime_manifest_digest": "sha256:abababababababababababababababababababababababababababababababab", "capability_contract_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" },
-    { "ref": "test-double-b", "kind": "TEST_DOUBLE", "architecture": "TEST_DOUBLE", "adapter_contract_version": "3.0", "adapter_version": "test-double-adapter-3.0.0", "source_revision": "m31-local-test-double-b", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "runtime_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "runtime_manifest_digest": "sha256:babababababababababababababababababababababababababababababababa", "capability_contract_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }
+    { "ref": "test-double-a", "kind": "TEST_DOUBLE", "architecture": "TEST_DOUBLE", "adapter_contract_version": "4.0", "adapter_version": "test-double-adapter-4.0.0", "source_revision": "m31-local-test-double-a", "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "runtime_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "runtime_manifest_digest": "sha256:abababababababababababababababababababababababababababababababab", "capability_contract_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" },
+    { "ref": "test-double-b", "kind": "TEST_DOUBLE", "architecture": "TEST_DOUBLE", "adapter_contract_version": "4.0", "adapter_version": "test-double-adapter-4.0.0", "source_revision": "m31-local-test-double-b", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "runtime_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "runtime_manifest_digest": "sha256:babababababababababababababababababababababababababababababababa", "capability_contract_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }
   ],
   "model": { "provider": "deepseek", "id": "deepseek-v4-flash", "interface": "anthropic", "sdk": "@anthropic-ai/claude-agent-sdk", "thinking": "disabled", "temperature": 0, "max_turns": 20 },
   "frozen_dependencies": {
@@ -39,7 +39,7 @@
     "grader": { "ref": "evalos-code-grader@5.1.0", "digest": "sha256:14d14efe59dd6148775cdb74ef52867e52393b58e877ff9a2a49cb410b5e8624" },
     "twin": { "ref": "m15-test-double@1.0.0", "digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666" },
     "trace_schema": { "ref": "evalos-trace@3.0.0", "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777" },
-    "product_adapter_contract": { "ref": "evalos-candidate-adapter@3.0.0", "digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888" }
+    "product_adapter_contract": { "ref": "evalos-candidate-adapter@4.0.0", "digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888" }
   },
   "budget": {
     "input_tokens": 4000,

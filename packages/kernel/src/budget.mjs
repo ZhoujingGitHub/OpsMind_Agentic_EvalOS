@@ -21,8 +21,8 @@ export class BudgetTracker {
       if (!(dimension in this.limits)) throw new Error(`unknown budget dimension: ${dimension}`);
       const next = this.usage[dimension] + Math.max(0, Number(amount));
       const limit = this.limits[dimension];
-      if (next >= limit) throw new BudgetExceededError(dimension, next, limit);
       this.usage[dimension] = next;
+      if (next >= limit) throw new BudgetExceededError(dimension, next, limit);
       const ratio = next / limit;
       if (ratio >= 0.8 && !this.warned.has(dimension)) {
         this.warned.add(dimension);

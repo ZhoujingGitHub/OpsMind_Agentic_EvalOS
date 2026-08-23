@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://opsmind.local/contracts/candidate-adapter-v3.schema.json",
+  "$id": "https://opsmind.local/contracts/candidate-adapter-v4.schema.json",
   "title": "OpsMind EvalOS Candidate Adapter Contract 3.0",
   "description": "EvalOS交给外部真实考生的统一准考证。Adapter只提交任务、翻译公开事件和收集原始证据，不替考生调用内部工具。",
   "type": "object",
   "required": ["adapter_contract_version", "evaluation_lane", "run_class", "operating_modes", "execution_mode", "experiment_id", "trial", "contestant", "case", "scope", "tools", "model", "frozen_dependencies", "budget", "policy", "approval_oracle", "retry_policy", "contract_digest"],
   "properties": {
-    "adapter_contract_version": { "const": "3.0" },
+    "adapter_contract_version": { "const": "4.0" },
     "evaluation_lane": { "enum": ["AGENT_CAPABILITY", "CONTROLLED_CLOSURE", "PRODUCT_RELIABILITY"] },
     "run_class": { "const": "REAL_CANDIDATE" },
     "operating_modes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["diagnosis_only", "human_collaboration", "controlled_auto"] } },

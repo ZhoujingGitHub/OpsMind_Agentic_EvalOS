@@ -86,6 +86,14 @@ test("工作台明确Agent自主性、确定性评分、源码快照和只读AI�
   assert.match(source, /定向回归/);
   assert.match(source, /仅重新评分/);
   assert.match(source, /原结果与新结果对比/);
+  assert.match(source, /平台运行健康（Operations health）/);
+  assert.match(source, /这次失败算在谁头上（Failure ownership）/);
+  assert.match(source, /考生没有公开的数据明确显示“未提供”，绝不按 0 计算/);
+  assert.match(source, /本次能下什么结论（Decision report）/);
+  assert.match(source, /诊断结论 · 不宣布胜负/);
+  assert.match(source, /安全停止任务/);
+  assert.match(source, /window.confirm/);
+  assert.match(source, /compareUsageMetric/);
   assert.match(source, /评测执行层（Harness）/);
   assert.match(source, /80 个 Case 已冻结，480 次 Trial 尚未创建/);
   assert.match(source, /前往数据集选择 Case 并新建评测/);

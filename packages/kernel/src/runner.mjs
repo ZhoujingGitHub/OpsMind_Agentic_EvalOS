@@ -4,13 +4,32 @@ import { performance } from "node:perf_hooks";
 import { BudgetExceededError, BudgetTracker } from "./budget.mjs";
 import { createCaseEnvironment } from "./cases.mjs";
 import { buildEvaluationContract } from "./evaluation-contract.mjs";
+import { classifyTrialFailure } from "./failure-policy.mjs";
 import { redact } from "./redaction.mjs";
 import { sha256, stableStringify } from "./utils.mjs";
 
-export function isRetryableInfrastructureFailure(error) {
-  const message = String(error ?? "");
-  if (/ToolNotFoundError|unknown\s+tool|tool\s+not\s+found/i.test(message)) return false;
-  return /(?:^|\D)429(?:\D|$)|(?:^|\D)50[234](?:\D|$)|rate.?limit|timed?\s*out|timeout|ECONN(?:RESET|REFUSED|ABORTED)|EAI_AGAIN|ENETUNREACH|connection\s+(?:reset|refused|aborted)|temporary\s+(?:network|dns|service)/i.test(message);
+
+function measuredUsage(budgetUsage, candidateUsage, runClass) {
+  const dimensions = ["input_tokens", "output_tokens", "model_calls", "tool_calls", "wallclock_ms",
+    "compute_ms", "storage_bytes", "cost_usd"];
+  const observed = candidateUsage?.observed_dimensions ?? [];
+  return {
+    ...budgetUsage,
+    measurement: runClass === "REAL_CANDIDATE" ? {
+      source: candidateUsage?.source ?? "unavailable",
+      observed_dimensions: observed,
+      unavailable_dimensions: dimensions.filter((name) => !observed.includes(name) && name !== "wallclock_ms"),
+      platform_wallclock_observed: true,
+      complete: candidateUsage?.complete === true,
+    } : {
+      source: "evalos_engineering_runtime",
+      observed_dimensions: dimensions,
+      unavailable_dimensions: [],
+      platform_wallclock_observed: true,
+      complete: true,
+      test_double: true,
+    },
+  };
 }
 
 export class TrialRunner {
@@ -38,19 +57,27 @@ export class TrialRunner {
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 64) {
       throw new Error("runner concurrency must be an integer between 1 and 64");
     }
+    const control = { halted: false };
     const workerLoop = async (index) => {
       const workerId = concurrency === 1 ? this.workerId : `${this.workerId}-c${index + 1}`;
       let count = 0;
-      while (true) {
+      while (!control.halted) {
         const trial = this.store.claimNext(workerId, this.leaseMs, experimentId);
         if (!trial) break;
-        await this.runTrial(trial, { workerId });
-        count += 1;
+        try {
+          await this.runTrial(trial, { workerId });
+          count += 1;
+        } catch (error) {
+          if (error.haltQueue === true) control.halted = true;
+          throw error;
+        }
       }
       return count;
     };
-    return (await Promise.all(Array.from({ length: concurrency }, (_, index) => workerLoop(index))))
-      .reduce((total, count) => total + count, 0);
+    const settled = await Promise.allSettled(Array.from({ length: concurrency }, (_, index) => workerLoop(index)));
+    const failure = settled.find((item) => item.status === "rejected");
+    if (failure) throw failure.reason;
+    return settled.reduce((total, item) => total + item.value, 0);
   }
 
   async runTrial(trial, { workerId = this.workerId } = {}) {
@@ -84,6 +111,24 @@ export class TrialRunner {
     let environmentReset = null;
     let environmentBeforeReset = null;
     let approvedWriteCount = 0;
+    let candidateUsage = null;
+    let leaseError = null;
+    const heartbeatIntervalMs = Math.max(250, Math.min(
+      Number(experiment.manifest.policy.heartbeat_ms ?? 5000), Math.max(250, Math.floor(this.leaseMs / 3)),
+    ));
+    const maintainLease = () => {
+      if (leaseError) throw leaseError;
+      try { this.store.heartbeat(trial.id, workerId, this.leaseMs); }
+      catch (error) {
+        error.haltQueue = true;
+        leaseError = error;
+        throw error;
+      }
+    };
+    const leaseTimer = setInterval(() => {
+      try { maintainLease(); } catch {}
+    }, heartbeatIntervalMs);
+    leaseTimer.unref?.();
 
     try {
       environment = await this.environmentFactory({ caseSpec, trial, experiment,
@@ -169,13 +214,26 @@ export class TrialRunner {
         event("environment.independent_capture", "twin-manager", capture ?? { captured: false, reason });
         return capture;
       };
-      const rawOutcome = await adapter.execute({ caseSpec, trial, experiment, executionContract, toolExecutor, emit, requestApproval,
+      const adapterResult = await adapter.execute({ caseSpec, trial, experiment, executionContract, toolExecutor, emit, requestApproval,
         captureEnvironment,
+        shouldCancel: async () => {
+          if (leaseError) throw leaseError;
+          return this.store.isTrialCancellationRequested(trial.id);
+        },
+        heartbeat: async () => maintainLease(),
         harnessPolicy: experiment.manifest.policy, maxTurns: Math.max(1, trial.budget.tool_calls - 1) });
+      const { __evalos_usage: reportedCandidateUsage = null, ...rawOutcome } = adapterResult;
+      candidateUsage = reportedCandidateUsage;
+      if (experiment.manifest.run_class === "REAL_CANDIDATE") {
+        const billable = Object.fromEntries(Object.entries(candidateUsage?.values ?? {})
+          .filter(([name, value]) => ["input_tokens", "output_tokens", "model_calls", "tool_calls", "storage_bytes", "cost_usd"].includes(name)
+            && Number.isFinite(Number(value))));
+        emitWarnings(budget.consume(billable));
+      }
       const outcome = redact(rawOutcome).value;
       this.store.endSpan(trial.id, agentSpan, "agent.invoke", "AGENT", "contestant", "OK", { outcome });
       emitWarnings(budget.consume({ wallclock_ms: Math.max(1, Math.round(performance.now() - start)) }));
-      const usage = budget.snapshot().usage;
+      const usage = measuredUsage(budget.snapshot().usage, candidateUsage, experiment.manifest.run_class);
       environmentBeforeReset = typeof environment.snapshot === "function" ? await environment.snapshot() : {};
       if (typeof environment.reset === "function") {
         environmentReset = await environment.reset();
@@ -240,6 +298,7 @@ export class TrialRunner {
       writeFileSync(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
       const digest = sha256(stableStringify(artifact));
       this.store.addArtifact(trial.id, "trial-result", artifactPath, digest, statSync(artifactPath).size);
+      clearInterval(leaseTimer);
       this.store.completeTrial(trial.id, { usage, outcome,
         finalState: { before_reset: environmentBeforeReset, reset: environmentReset }, traceHash });
       this.ledger.append({
@@ -252,6 +311,9 @@ export class TrialRunner {
       });
       return this.store.getTrial(trial.id);
     } catch (error) {
+      clearInterval(leaseTimer);
+      candidateUsage = error.candidateUsage ?? candidateUsage;
+      try { emitWarnings(budget.consume({ wallclock_ms: Math.max(1, Math.round(performance.now() - start)) })); } catch {}
       let resetErrorMessage = null;
       let snapshotErrorMessage = null;
       const keepQuarantined = error.keepEnvironmentQuarantined === true;
@@ -282,8 +344,10 @@ export class TrialRunner {
       event(category, "kernel", { error: error.message, dimension: error.dimension ?? null });
       try { this.store.endSpan(trial.id, agentSpan, "agent.invoke", "AGENT", "contestant", "ERROR", { error: error.message }); } catch {}
       try { this.store.endSpan(trial.id, rootSpan, "trial.execute", "CHAIN", "runner", "ERROR", { error: error.message }); } catch {}
-      const usage = budget.snapshot().usage;
+      const usage = measuredUsage(budget.snapshot().usage, candidateUsage, experiment.manifest.run_class);
       const traceHash = this.store.traceSemanticHash(trial.id);
+      const failureClassification = classifyTrialFailure(error, { resetError: resetErrorMessage,
+        keepQuarantined });
       const finalState = {
         before_reset: environmentBeforeReset,
         reset: environmentReset,
@@ -294,7 +358,16 @@ export class TrialRunner {
         },
         snapshot_error: snapshotErrorMessage,
         reset_error: resetErrorMessage,
+        failure_classification: failureClassification,
       };
+      if (error.cancelled === true && !keepQuarantined && !resetErrorMessage && environmentReset?.ok !== false) {
+        this.store.cancelTrial(trial.id, error.message, { usage, finalState, traceHash });
+        this.ledger.append({ entityType: "trial", entityId: trial.id, action: "trial.cancelled", payload: {
+          reason: error.message, usage, trace_hash: traceHash, environment_reset: environmentReset,
+          quarantine: finalState.quarantine,
+        } });
+        return this.store.getTrial(trial.id);
+      }
       this.store.failTrial(trial.id, error.message, { usage, finalState, traceHash });
       this.ledger.append({ entityType: "trial", entityId: trial.id, action: "trial.failed", payload: {
         error: error.message, usage, trace_hash: traceHash, environment_reset: environmentReset,

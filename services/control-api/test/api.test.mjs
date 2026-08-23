@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createApp, evaluationRunName } from "../src/app.mjs";
-import { freezeSourceSnapshot } from "../../../packages/kernel/src/index.mjs";
+import { createTestDouble, freezeSourceSnapshot } from "../../../packages/kernel/src/index.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "config", "m15-smoke.manifest.json"), "utf8"));
@@ -30,9 +30,14 @@ test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏
       methodology_sources: [], limitations: [], confidence: 0.8 }, usage: { turns: 2 } }) } });
   try {
     const health = await (await app.handler(new Request("http://local/health"))).json();
-    assert.equal(health.contract, "evalos.6");
+    assert.equal(health.contract, "evalos.7");
     assert.equal(health.milestone, "M3.1");
     assert.equal(health.formal_run.enabled, false);
+    assert.equal(health.operations.contract, "evalos-operations-health.1");
+    assert.equal(health.operations.ledger.valid, true);
+    const operationsHealth = await (await app.handler(new Request("http://local/api/workbench/operations-health", { headers: { authorization: "Bearer admin-secret" } }))).json();
+    assert.equal(operationsHealth.status, "ok");
+    assert.equal(operationsHealth.evidence.unresolved_cleanup_trials, 0);
     const capabilities = await (await app.handler(new Request("http://local/api/runtime/capabilities"))).json();
     assert.equal(capabilities.candidate_execution, "external-real-products-only");
     assert.equal(capabilities.eval_intelligence.model, "deepseek-v4-flash");
@@ -157,6 +162,13 @@ test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏
     assert.equal(evaluationRequest.progress.total, 2);
     assert.equal(evaluationRequest.progress.completed, 2);
     assert.equal(evaluationRequest.items.every((item) => item.source_trial_id && item.trial_id && item.source_trial_id !== item.trial_id), true);
+    assert.equal(evaluationRequest.decision_report.ready, true);
+    assert.equal(evaluationRequest.decision_report.decision_authority, "DIAGNOSTIC_ONLY");
+    assert.equal(evaluationRequest.decision_report.conclusion_code, "QUALIFICATION_NO_WINNER");
+    assert.equal(evaluationRequest.decision_report.comparison.paired_trials, 1);
+    assert.equal(evaluationRequest.decision_report.comparison.formal_winner, null);
+    assert.equal(evaluationRequest.items.every((item) => item.trace_hash && item.cleanup?.reset_ok !== false), true);
+    assert.equal(evaluationRequest.items.every((item) => item.current?.usage_measurement?.complete === true), true);
     assert.equal((await createEvaluationRequest()).status, 200);
     const officialAfterValidation = await (await app.handler(new Request("http://local/api/workbench/overview", {
       headers: { authorization: "Bearer admin-secret" } }))).json();
@@ -249,6 +261,62 @@ test("旧Product Tool Bridge已被断代移除，EvalOS不能代替真实考生�
   } finally { app.close(); }
 });
 
+test("评测任务只对冻结允许的瞬态限流自动重试一次并保留两次尝试证据", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-api-auto-retry-"));
+  const base = createTestDouble("test-double-a", "context-first");
+  let executions = 0;
+  const flaky = { ...base, async execute(context) {
+    executions += 1;
+    if (executions === 1) throw new Error("HTTP 429 rate limit from temporary model gateway");
+    return base.execute(context);
+  } };
+  const app = createApp({
+    databasePath: path.join(root, "control.sqlite"),
+    privateLabelDatabasePath: path.join(root, "private.sqlite"),
+    runtimeRoot: root,
+    apiToken: "control-secret",
+    bootstrapEngineeringTestDesign: true,
+    engineeringAdapterOverrides: { "test-double-a:ENGINEERING_TEST": flaky },
+  });
+  try {
+    const source = app.store.listExperiments().find((item) => item.manifest.run_class === "ENGINEERING_TEST");
+    const selection = {
+      request_kind: "NEW_EVALUATION", evaluation_purpose: "PAIRED_COMPARISON", mode: "QUICK_VALIDATION",
+      source_experiment_id: source.id, case_refs: [manifest.case_refs[0]],
+      contestant_refs: manifest.contestants.map((item) => item.ref),
+      environment_seeds: [manifest.environment_seeds[0]], repetitions: 1,
+      requested_by: "retry-policy-test", reason: "验证瞬态基础设施失败只按冻结策略重试一次",
+    };
+    const response = await app.handler(new Request("http://local/api/workbench/run-requests", {
+      method: "POST",
+      headers: { authorization: "Bearer control-secret", "content-type": "application/json",
+        "idempotency-key": "auto-retry-once" },
+      body: JSON.stringify(selection),
+    }));
+    assert.equal(response.status, 202);
+    const id = (await response.json()).request.id;
+    let request;
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      request = (await (await app.handler(new Request(`http://local/api/workbench/run-requests/${id}`, {
+        headers: { authorization: "Bearer control-secret" },
+      }))).json()).request;
+      if (["COMPLETED", "FAILED"].includes(request.status)) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(request.status, "COMPLETED");
+    const retried = request.items.find((item) => item.contestant_ref === "test-double-a");
+    assert.equal(retried.attempt, 2);
+    const attempts = app.store.listTrialAttemptResults(retried.trial_id);
+    assert.deepEqual(attempts.map((item) => item.status), ["FAILED", "COMPLETED"]);
+    assert.equal(attempts[0].final_state.failure_classification.category, "RATE_LIMIT");
+    assert.equal(app.ledger.entries().some((item) => item.action === "trial.infrastructure_retry_scheduled"), true);
+    const health = await (await app.handler(new Request("http://local/api/workbench/operations-health", {
+      headers: { authorization: "Bearer control-secret" },
+    }))).json();
+    assert.equal(health.failure_categories.RATE_LIMIT, 1);
+    assert.equal(health.retry_history.retried_trials, 1);
+  } finally { app.close(); }
+});
 test("M3冻结设计可用于新建评测预检但不能绕过门禁直接启动480 Trial", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "evalos-api-m3-frozen-design-"));
   const app = createApp({ databasePath: path.join(root, "control.sqlite"), privateLabelDatabasePath: path.join(root, "private.sqlite"),

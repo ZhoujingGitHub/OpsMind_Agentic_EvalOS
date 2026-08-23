@@ -130,6 +130,10 @@ export class ExternalProductTwinEnvironment {
       trial_id: this.managedTrialId,
       scenario_id: this.caseSpec.environment.scenario_id,
       seed: Number(this.trial.environment_seed),
+      observation_profile: this.caseSpec.environment.observation_profile ?? "public-baseline",
+      regression_failure_mode: this.caseSpec.environment.regression_failure_mode,
+      overlay_contract_version: this.caseSpec.environment.overlay_contract_version ?? "1.0.0",
+      baseline_ref: this.caseSpec.environment.baseline_ref,
     }), "prepare");
     if (!response.ok) throw new Error(`Candidate Twin prepare failed: ${managerError(response)}`);
     if (response.slot_lease_present !== true) throw new Error("Candidate Twin prepare did not issue a private slot lease");
@@ -140,6 +144,9 @@ export class ExternalProductTwinEnvironment {
       contestant_ref: this.trial.contestant_ref,
       managed_trial_id: this.managedTrialId,
       scenario_id: this.caseSpec.environment.scenario_id,
+      observation_profile: response.observation_profile ?? this.caseSpec.environment.observation_profile ?? "public-baseline",
+      scenario_clock: response.scenario_clock ?? null,
+      profile_digest: response.profile_digest ?? null,
       fingerprint: this.fingerprint,
       isolation: response.isolation ?? "external-product-exclusive-trial",
       slot_lease_present: true,
@@ -176,6 +183,8 @@ export class ExternalProductTwinEnvironment {
       scenario_id: this.caseSpec.environment.scenario_id,
       contestant_ref: this.trial.contestant_ref,
       managed_trial_id: this.managedTrialId,
+      observation_profile: this.caseSpec.environment.observation_profile ?? "public-baseline",
+      regression_failure_mode: this.caseSpec.environment.regression_failure_mode ?? null,
       fingerprint: this.fingerprint,
       capture_count: this.captureCount,
       final_capture: finalCapture,

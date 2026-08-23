@@ -7,7 +7,7 @@ import {
   BudgetExceededError, BudgetTracker, CASES, M2_CASES, M3_CASES, DeterministicGradingService, EvalStore, EvaluationLedger, FrozenApprovalOracle,
   PrivateLabelStore, TrialRunner, binaryMetrics, clusteredPairedBootstrap, containsSensitiveMaterial,
   blindContentView, blindExperimentView, blindGraderRunView, blindTraceView, expertCalibrationFromConsensusSamples, createEvalRegistry, createM15Registry,
-  createTestDouble, evaluationEvidenceTraceView,
+  classifyTrialFailure, createTestDouble, evaluationDecisionReport, evaluationEvidenceTraceView,
   gradeTrial, judgeCalibrationGate, redact, reliabilityMetrics,
   seededShuffle, sha256, judgeSuiteCalibration, isRetryableInfrastructureFailure,
 } from "../src/index.mjs";
@@ -19,7 +19,10 @@ function fixture() {
   const root = mkdtempSync(path.join(os.tmpdir(), "evalos-m15-"));
   const registry = createM15Registry(CASES);
   const store = new EvalStore({ databasePath: path.join(root, "control.sqlite"), runtimeRoot: root,
-    migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_m15.sql") });
+    migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_m15.sql"),
+    migrationPaths: ["002_m25_workbench.sql", "003_m26_run_control.sql", "004_m31_candidate_relay.sql",
+      "005_m31_seed_identity.sql", "006_m31_trial_attempt_audit.sql", "007_m32_run_resilience.sql"]
+      .map((name) => path.join(ROOT, "infra", "migrations", "sqlite", name)) });
   const labels = new PrivateLabelStore({ databasePath: path.join(root, "private", "labels.sqlite"),
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const privateLabelHash = labels.publishRegistry(registry);
@@ -37,11 +40,12 @@ test("固定调度可复现且不同种子改变顺序", () => {
   assert.notDeepEqual(seededShuffle(items, 101), seededShuffle(items, 202));
 });
 
-test("预算在80%预警并在100%前阻止超限", () => {
+test("预算在80%预警并在100%前阻止超限，超限尝试仍如实记账", () => {
   const tracker = new BudgetTracker({ tool_calls: 10 });
   assert.deepEqual(tracker.consume({ tool_calls: 7 }), []);
   assert.equal(tracker.consume({ tool_calls: 1 }).length, 1);
   assert.throws(() => tracker.consume({ tool_calls: 2 }), BudgetExceededError);
+  assert.equal(tracker.snapshot().usage.tool_calls, 10);
 });
 
 test("脱敏器从嵌套载荷清除凭据", () => {
@@ -264,7 +268,39 @@ test("基础设施重试策略拒绝Agent选错工具，只接受明确瞬态故
   assert.equal(isRetryableInfrastructureFailure("output schema invalid"), false);
 });
 
-test("Manifest 5.0按Seed与replicate调度并随机化盲测顺序", () => {
+test("失败分类不会把考生能力、考生超时或考场清理故障洗成可重试网络问题", () => {
+  assert.equal(classifyTrialFailure("HTTP 429 rate limit").category, "RATE_LIMIT");
+  assert.equal(classifyTrialFailure("external candidate run timed out", { keepQuarantined: true }).category,
+    "PRODUCT_RELIABILITY_FAILURE");
+  assert.equal(classifyTrialFailure("output schema invalid").category, "CANDIDATE_CAPABILITY_FAILURE");
+  assert.equal(classifyTrialFailure("candidate failed", { resetError: "twin reset failed" }).category,
+    "PLATFORM_CLEANUP_FAILURE");
+  assert.equal(classifyTrialFailure("external candidate run timed out", { keepQuarantined: true }).retryable, false);
+});
+
+test("冻结重试策略只给明确瞬态基础设施故障一次机会并保留原失败尝试", () => {
+  const { store, labels } = fixture();
+  try {
+    const { experiment } = store.createExperiment(manifest, "frozen-infrastructure-retry");
+    const first = store.claimNext("retry-test", 30000, experiment.id);
+    const failure = classifyTrialFailure("HTTP 429 rate limit");
+    store.failTrial(first.id, failure.message, { finalState: { failure_classification: failure } });
+    const queued = store.retryFailedTrial(first.id, {
+      maxRetries: 1, allowedCategories: ["RATE_LIMIT"], reason: "frozen test policy",
+    });
+    assert.equal(queued.status, "QUEUED");
+    assert.equal(store.listTrialAttemptResults(first.id).length, 1);
+    const second = store.claimNext("retry-test", 30000, experiment.id);
+    assert.equal(second.id, first.id);
+    assert.equal(second.attempt, 2);
+    store.failTrial(second.id, failure.message, { finalState: { failure_classification: failure } });
+    assert.throws(() => store.retryFailedTrial(second.id, {
+      maxRetries: 1, allowedCategories: ["RATE_LIMIT"],
+    }), /retry limit reached/);
+    assert.equal(store.listTrialAttemptResults(second.id).length, 2);
+  } finally { labels.close(); store.close(); }
+});
+test("Manifest 6.0按Seed与replicate调度并随机化盲测顺序", () => {
   const { store, labels } = fixture();
   try {
     const first = store.createExperiment(manifest, "exp-v2");
@@ -280,7 +316,7 @@ test("Manifest 5.0按Seed与replicate调度并随机化盲测顺序", () => {
   } finally { labels.close(); store.close(); }
 });
 
-test("Manifest 5.0单系统验收只调度一个参评版本", () => {
+test("Manifest 6.0单系统验收只调度一个参评版本", () => {
   const { store, labels } = fixture();
   try {
     const singleCase = manifest.case_refs[0];
@@ -298,7 +334,7 @@ test("Manifest 5.0单系统验收只调度一个参评版本", () => {
 test("旧Manifest被明确拒绝而不是静默兼容", () => {
   const { store, labels } = fixture();
   try {
-    assert.throws(() => store.createExperiment({ manifest_version: "4.0" }, "legacy"), /requires experiment manifest 5.0/);
+    assert.throws(() => store.createExperiment({ manifest_version: "5.0" }, "legacy"), /requires experiment manifest 6.0/);
   } finally { labels.close(); store.close(); }
 });
 
@@ -341,7 +377,7 @@ test("自动审批裁判只判断提案是否允许，不向考生泄露正确�
   } finally { labels.close(); store.close(); }
 });
 
-test("Manifest 5.0拒绝伪摘要、未冻结依赖和可重试能力失败", () => {
+test("Manifest 6.0拒绝伪摘要、未冻结依赖和可重试能力失败", () => {
   const { store, labels } = fixture();
   try {
     const badDigest = structuredClone(manifest);
@@ -386,9 +422,11 @@ test("故障现场快照失败不会阻止环境复位", async () => {
   try {
     const { experiment } = store.createExperiment(manifest, "snapshot-failure-cleanup");
     const claimed = store.claimNext("snapshot-cleaner", 1000, experiment.id);
-    const baseAdapter = createTestDouble("test-double-a", "context-first");
+    const failingAdapter = (id) => ({ ...createTestDouble(id, "context-first"),
+      async execute() { throw new Error("candidate failure"); } });
     const runner = new TrialRunner({ store, ledger, gradingService, adapters: {
-      "test-double-a:ENGINEERING_TEST": { ...baseAdapter, async execute() { throw new Error("candidate failure"); } },
+      "test-double-a:ENGINEERING_TEST": failingAdapter("test-double-a"),
+      "test-double-b:ENGINEERING_TEST": failingAdapter("test-double-b"),
     }, environmentFactory: async () => ({
       async call() { return { ok: true }; },
       async snapshot() { throw new Error("snapshot unavailable"); },
@@ -405,7 +443,7 @@ test("故障现场快照失败不会阻止环境复位", async () => {
   } finally { labels.close(); store.close(); }
 });
 
-test("Runner恢复租约并保留尝试次数", () => {
+test("Runner恢复租约并保留中断尝试证据与尝试次数", () => {
   const { store, labels, ledger, gradingService } = fixture();
   try {
     store.createExperiment(manifest, "lease");
@@ -413,7 +451,56 @@ test("Runner恢复租约并保留尝试次数", () => {
     store.forceExpireLease(claimed.id);
     const runner = new TrialRunner({ store, ledger, gradingService, adapters: {}, workerId: "new" });
     assert.deepEqual(runner.recover(), [claimed.id]);
+    const attempts = store.listTrialAttemptResults(claimed.id);
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0].status, "INTERRUPTED");
+    assert.equal(attempts[0].final_state.recovery.resumable, true);
     assert.equal(store.claimNext("new", 1000).attempt, 2);
+  } finally { labels.close(); store.close(); }
+});
+
+test("运行中的评测取消会通知考生、安全复位并留下不可变取消记录", async () => {
+  const { store, labels, ledger, gradingService } = fixture();
+  let resetCalls = 0;
+  try {
+    const { experiment } = store.createExperiment(manifest, "active-cancellation");
+    const { request } = store.createEvaluationRunRequest({
+      idempotencyKey: "cancel-running-trial", mode: "QUICK_VALIDATION", sourceExperimentId: experiment.id,
+      requestedBy: "evalos-operator", reason: "验证运行中取消语义",
+      selection: { case_refs: [manifest.case_refs[0]], contestant_refs: [manifest.contestants[0].ref],
+        environment_seeds: [manifest.environment_seeds[0]], repetitions: 1 },
+      preflight: { passed: true, safe_concurrency: 1 },
+    });
+    store.startEvaluationRunRequest(request.id);
+    store.bindEvaluationRunExperiment(request.id, experiment.id);
+    const claimed = store.claimNext("cancel-worker", 1000, experiment.id);
+    const cancellation = store.requestEvaluationRunCancellation(request.id, "操作员停止本次资格评测");
+    assert.equal(cancellation.cancellation_signalled_running_trials, 1);
+    assert.equal(store.isTrialCancellationRequested(claimed.id).requested, true);
+    const cancellingAdapter = { ...createTestDouble(claimed.contestant_ref, "context-first"),
+      async execute({ shouldCancel }) {
+        const signal = await shouldCancel();
+        assert.equal(signal.requested, true);
+        const error = new Error(signal.reason);
+        error.name = "TrialCancellationError";
+        error.cancelled = true;
+        throw error;
+      } };
+    const runner = new TrialRunner({ store, ledger, gradingService, adapters: {
+      [`${claimed.contestant_ref}:ENGINEERING_TEST`]: cancellingAdapter,
+    }, environmentFactory: async () => ({
+      async call() { return { ok: true }; },
+      async snapshot() { return { clean: false }; },
+      async reset() { resetCalls += 1; return { ok: true, clean: true }; },
+    }) });
+    const result = await runner.runTrial(claimed, { workerId: "cancel-worker" });
+    assert.equal(result.status, "CANCELLED");
+    assert.equal(resetCalls, 1);
+    const attempts = store.listTrialAttemptResults(claimed.id);
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0].status, "CANCELLED");
+    assert.equal(attempts[0].final_state.reset.clean, true);
+    assert.equal(store.getEvaluationRunRequest(request.id).status, "RUNNING");
   } finally { labels.close(); store.close(); }
 });
 
@@ -522,6 +609,32 @@ test("Grader 5.1按真实考生保全的证据内容评分而不要求内部证�
   assert.equal(unpreserved.hard_gates.evidence_traceable, false);
   assert.equal(unpreserved.hard_gates.minimum_evidence_recall, false);
 });
+test("Grader校准能区分真实恢复与只在结果里声称恢复", () => {
+  const caseSpec = M3_CASES["M3-REG-001"];
+  const outcome = {
+    status: caseSpec.ground_truth.expected_status,
+    root_cause: caseSpec.ground_truth.root_causes[0],
+    evidence_refs: caseSpec.ground_truth.required_evidence,
+    exclusions: caseSpec.ground_truth.forbidden_claims,
+    tool_failures_recovered: true,
+  };
+  const recovered = gradeTrial(caseSpec, outcome, [
+    { seq: 1, name: "candidate.tool.failed", payload: { retryable: true, raw_source_refs: ["raw:1"] } },
+    { seq: 2, name: "candidate.recovery.observed", payload: { raw_source_refs: ["raw:2"] } },
+    { seq: 3, name: "evidence.collected", payload: { raw_source_refs: ["raw:3"] } },
+  ], { tool_calls: 2 }, { budget: { tool_calls: 24 }, environmentState: { remote: {
+    changes: [], recovery: { task_success: false },
+  } } });
+  const claimedOnly = gradeTrial(caseSpec, outcome, [
+    { seq: 1, name: "candidate.tool.failed", payload: { retryable: true, raw_source_refs: ["raw:1"] } },
+  ], { tool_calls: 1 }, { budget: { tool_calls: 24 }, environmentState: { remote: {
+    changes: [], recovery: { task_success: false },
+  } } });
+  assert.equal(recovered.hard_gates.recovery, true);
+  assert.equal(recovered.assertions.trajectory_quality.evidence.semantic_failures, 1);
+  assert.equal(claimedOnly.hard_gates.recovery, false);
+  assert.equal(claimedOnly.passed, false);
+});
 test("L2评分把真实终态、最小变更和安全停止作为不可补偿硬门禁且不绑定固定路径", () => {
   const pdu = M2_CASES["M2-PDU-003"];
   const outcome = { status: "resolved", root_cause: pdu.ground_truth.root_causes[0],
@@ -575,7 +688,7 @@ test("跨租户与越Scope工具调用被Harness拦截、留痕并触发安全�
   const { store, labels, ledger, gradingService } = fixture();
   try {
     const { experiment } = store.createExperiment(manifest, "unsafe-tool");
-    const unsafe = { id: "unsafe", adapterVersion: "test-double-adapter-3.0.0", adapterContractVersion: "3.0",
+    const unsafe = { id: "unsafe", adapterVersion: "test-double-adapter-4.0.0", adapterContractVersion: "4.0",
       supportedEvaluationLanes: ["ENGINEERING_TEST"], runtime: "test-double-unsafe", async execute({ caseSpec, toolExecutor }) {
       await toolExecutor("get_alerts", { tenant: "another-tenant", time_window: caseSpec.visible.time_window });
       return { status: "resolved", root_cause: caseSpec.id === "SMOKE-RCA-001" ? "upf-n6-path" : "log-connector-rate-limit",
@@ -635,6 +748,48 @@ test("统计按Case聚类抽样并区分pass@k与pass^k", () => {
   assert.equal(reliability.pass_power_k, 0.5);
 });
 
+test("统计报告只在正式完整配对且置信区间不跨0时给出胜者", () => {
+  const contestants = ["agent-harness-v2", "langgraph-v1"];
+  const items = [];
+  for (const caseRef of ["case-a", "case-b"]) for (let repeat = 1; repeat <= 3; repeat += 1) {
+    for (const contestant of contestants) {
+      items.push({
+        case_ref: caseRef, contestant_ref: contestant, environment_seed: 20260823, repeat_index: repeat,
+        status: "COMPLETED", trace_hash: `trace-${caseRef}-${contestant}-${repeat}`,
+        cleanup: { reset_ok: true, quarantine_required: false },
+        current: {
+          score: contestant === "langgraph-v1" ? 90 : 70, passed: true,
+          usage_measurement: { complete: contestant === "langgraph-v1" },
+        },
+      });
+    }
+  }
+  const qualification = evaluationDecisionReport({
+    requestStatus: "COMPLETED", mode: "QUICK_VALIDATION", items,
+    contestantOrder: contestants, repetitions: 3, iterations: 300, seed: "qualification",
+  });
+  assert.equal(qualification.ready, true);
+  assert.equal(qualification.decision_authority, "DIAGNOSTIC_ONLY");
+  assert.equal(qualification.comparison.formal_winner, null);
+  assert.equal(qualification.evidence_quality.usage_incomplete_trials, 6);
+
+  const formal = evaluationDecisionReport({
+    requestStatus: "COMPLETED", mode: "FORMAL", items,
+    contestantOrder: contestants, repetitions: 3, iterations: 300, seed: "formal",
+  });
+  assert.equal(formal.decision_authority, "FORMAL_DECISION");
+  assert.equal(formal.comparison.clearly_different, true);
+  assert.equal(formal.comparison.formal_winner, "langgraph-v1");
+
+  const incomplete = evaluationDecisionReport({
+    requestStatus: "COMPLETED", mode: "FORMAL", items: items.map((item, index) =>
+      index === 0 ? { ...item, trace_hash: null } : item),
+    contestantOrder: contestants, repetitions: 3, iterations: 100, seed: "incomplete",
+  });
+  assert.equal(incomplete.ready, false);
+  assert.equal(incomplete.conclusion_code, "INCOMPLETE_EVIDENCE");
+  assert.equal(incomplete.comparison.formal_winner, null);
+});
 test("人工复核要求两个独立身份、预分配、凭据验证和分歧升级", () => {
   const { store, labels } = fixture();
   try {

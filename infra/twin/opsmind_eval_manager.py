@@ -31,6 +31,13 @@ CONTROLLERS = {
 }
 BASE = Path("/usr/local/sbin/opsmind-twinctl")
 OPERATIONS = {"status", "prepare", "snapshot", "reset"}
+OBSERVATION_PROFILES = {
+    "public-baseline",
+    "hidden-benign-noise",
+    "safety-untrusted-instruction",
+    "regression-first-observation-fails",
+}
+REGRESSION_FAILURE_MODES = {"source_unavailable", "timeout"}
 
 
 def error(operation: str, code: str, message: str) -> dict[str, Any]:
@@ -84,6 +91,11 @@ def validate(request: Any) -> dict[str, Any]:
         seed = request.get("seed", 0)
         if isinstance(seed, bool) or not isinstance(seed, int):
             raise ValueError("seed must be an integer")
+        profile = request.get("observation_profile")
+        if profile not in OBSERVATION_PROFILES:
+            raise ValueError("invalid observation_profile")
+        if profile == "regression-first-observation-fails" and request.get("regression_failure_mode") not in REGRESSION_FAILURE_MODES:
+            raise ValueError("invalid regression_failure_mode")
     return request
 
 
@@ -123,19 +135,37 @@ def dispatch(raw_request: Any) -> dict[str, Any]:
         active = before.get("active_trial")
         if active and active != trial_id:
             return error(operation, "TWIN_SLOT_BUSY", "another candidate Trial owns the protocol-lab slot")
-        if active == trial_id and before.get("slot_lease_present"):
-            return {**before, "operation": "prepare", "idempotent": True, "trial_id": trial_id}
-        response = run_json([
-            controller,
-            "manage-prepare",
-            trial_id,
-            str(request["scenario_id"]),
-            str(request.get("seed", 0)),
-        ])
-        if response.get("ok") is not True:
-            return error(operation, "PREPARE_FAILED", str(response.get("error") or "candidate Twin prepare failed"))
+        idempotent = active == trial_id and before.get("slot_lease_present")
+        prepared_now = False
+        response: dict[str, Any] = {}
+        if not idempotent:
+            response = run_json([
+                controller,
+                "manage-prepare",
+                trial_id,
+                str(request["scenario_id"]),
+                str(request.get("seed", 0)),
+            ])
+            if response.get("ok") is not True:
+                return error(operation, "PREPARE_FAILED", str(response.get("error") or "candidate Twin prepare failed"))
+            prepared_now = True
+        profile_response = base_call({
+            "operation": "configure_profile",
+            "trial_id": trial_id,
+            "observation_profile": request["observation_profile"],
+            "regression_failure_mode": request.get("regression_failure_mode"),
+            "overlay_contract_version": request.get("overlay_contract_version") or "1.0.0",
+            "baseline_ref": request.get("baseline_ref") or "opsmind-m2-baseline-v1",
+        })
+        if profile_response.get("ok") is not True:
+            if prepared_now:
+                run_json([controller, "manage-reset", trial_id])
+            detail = profile_response.get("error") or "candidate Twin profile configuration failed"
+            return error(operation, "PROFILE_CONFIG_FAILED", str(detail))
         after = public_status(contestant_ref, controller_status(contestant_ref))
         if after.get("active_trial") != trial_id or not after.get("slot_lease_present"):
+            if prepared_now:
+                run_json([controller, "manage-reset", trial_id])
             return error(operation, "LEASE_NOT_ISSUED", "candidate Twin did not issue an isolated slot lease")
         return {
             "ok": True,
@@ -143,10 +173,15 @@ def dispatch(raw_request: Any) -> dict[str, Any]:
             "contestant_ref": contestant_ref,
             "trial_id": trial_id,
             "scenario_id": str(request["scenario_id"]),
-            "fingerprint": response.get("fingerprint"),
+            "observation_profile": profile_response.get("observation_profile"),
+            "regression_failure_mode": profile_response.get("regression_failure_mode"),
+            "profile_digest": profile_response.get("profile_digest"),
+            "scenario_clock": profile_response.get("scenario_clock"),
+            "fingerprint": profile_response.get("fingerprint") or response.get("fingerprint"),
             "isolation": (response.get("data") or {}).get("isolation", "exclusive_trial"),
             "slot_lease_present": True,
-            "topology": (response.get("data") or {}).get("topology"),
+            "idempotent": bool(idempotent or profile_response.get("idempotent")),
+            "topology": (response.get("data") or {}).get("topology") or after.get("topology"),
         }
 
     if operation == "snapshot":

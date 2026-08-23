@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { BLIND_JUDGE_RUNTIME, CANDIDATE_ADAPTER_V3_RUNTIME, DEEPSEEK_AGENT_RUNTIME, EVALOS_LEAD_RUNTIME, blindJudgePromptMaterial, createCandidateAdapterV3, deepSeekEnvironment, isolatedBashCommand, judgeAttentionDecision, normalizeInvestigatorReport, toMcpToolResult, toolPolicy } from "../src/index.mjs";
+import { BLIND_JUDGE_RUNTIME, CANDIDATE_ADAPTER_V4_RUNTIME, DEEPSEEK_AGENT_RUNTIME, EVALOS_LEAD_RUNTIME, blindJudgePromptMaterial, createCandidateAdapterV4, deepSeekEnvironment, isolatedBashCommand, judgeAttentionDecision, normalizeInvestigatorReport, toMcpToolResult, toolPolicy } from "../src/index.mjs";
 import { CASES } from "../../kernel/src/index.mjs";
 
 test("runtime uses Claude Agent SDK over DeepSeek Anthropic endpoint without a graph framework", () => {
@@ -44,7 +44,7 @@ test("investigator accepts natural report variants but freezes one strict canoni
   assert.match(report.methodology_sources[0].url, /^https:\/\/www\.anthropic\.com\//);
 });
 
-test("Candidate Adapter 3.0只做外部提交、事件翻译和证据保全，不代考", async () => {
+test("Candidate Adapter 4.0只做外部提交、事件翻译和证据保全，不代考", async () => {
   const fingerprints = {
     source_revision: "abcdef1234567",
     artifact_digest: `sha256:${"1".repeat(64)}`,
@@ -63,12 +63,14 @@ test("Candidate Adapter 3.0只做外部提交、事件翻译和证据保全，�
         payload: { status: "completed" }, payload_digest: `sha256:${"5".repeat(64)}` }],
       normalized_events: [{ event_type: "conclusion.recorded", actor: "external-candidate", status: "OK",
         raw_source_refs: ["raw:1"], payload: { evidence_refs: ["evidence:real"] } }],
-      evaluation_binding: { contract: "evalos-product-run-binding.1", complete: true,
+      evaluation_binding: { contract: "evalos-product-run-binding.2", complete: true,
         binding_strength: "PUBLIC_TASK_CONTEXT", expected_context_digest: `sha256:${"6".repeat(64)}` },
+      candidate_usage: { source: "candidate-public-api", values: { input_tokens: 321, output_tokens: 45, model_calls: 2 },
+        observed_dimensions: ["input_tokens", "output_tokens", "model_calls"], unavailable_dimensions: ["tool_calls"], complete: false },
       outcome: { status: "resolved", root_cause: "real-product-result", evidence_refs: ["evidence:real"] } }; },
     cancel: async () => {},
   };
-  const adapter = createCandidateAdapterV3({ id: "agent-harness-v2", connector, pollIntervalMs: 1, timeoutMs: 1000 });
+  const adapter = createCandidateAdapterV4({ id: "agent-harness-v2", connector, pollIntervalMs: 1, timeoutMs: 1000 });
   const emitted = [];
   const captures = [];
   const outcome = await adapter.execute({ trial: { id: "trial-real-1" }, executionContract: {
@@ -80,10 +82,12 @@ test("Candidate Adapter 3.0只做外部提交、事件翻译和证据保全，�
   assert.equal(outcome.status, "resolved");
   assert.equal(outcome.candidate_run_ref, "external:trial-real-1");
   assert.equal(outcome.evaluation_binding.complete, true);
+  assert.equal(outcome.__evalos_usage.values.input_tokens, 321);
+  assert.deepEqual(outcome.__evalos_usage.observed_dimensions, ["input_tokens", "output_tokens", "model_calls"]);
   assert.ok(emitted.some(([name]) => name === "candidate.raw_event"));
   assert.ok(emitted.some(([name]) => name === "conclusion.recorded"));
   assert.deepEqual(captures, ["conclusion.recorded"]);
-  assert.deepEqual(CANDIDATE_ADAPTER_V3_RUNTIME.forbidden,
+  assert.deepEqual(CANDIDATE_ADAPTER_V4_RUNTIME.forbidden,
     ["invoke-candidate-internal-tools", "synthesize-missing-evidence", "change-official-score"]);
 });
 
@@ -104,7 +108,7 @@ test("Candidate Adapter超时后等待真实考生终态再释放隔离槽", asy
     cancel: async () => ({ supported: false, reason: "candidate_api_has_no_cancel" }),
   };
   const emitted = [];
-  const adapter = createCandidateAdapterV3({ id: "agent-harness-v2", connector, pollIntervalMs: 1,
+  const adapter = createCandidateAdapterV4({ id: "agent-harness-v2", connector, pollIntervalMs: 1,
     timeoutMs: 1, quarantineTimeoutMs: 50 });
   await assert.rejects(adapter.execute({ trial: { id: "trial-slow-terminal" }, executionContract: {
     run_class: "REAL_CANDIDATE", evaluation_lane: "CONTROLLED_CLOSURE", trial: { id: "trial-slow-terminal" },
@@ -115,6 +119,35 @@ test("Candidate Adapter超时后等待真实考生终态再释放隔离槽", asy
   assert.ok(emitted.some(([name]) => name === "candidate.run.quarantine_released"));
 });
 
+test("Candidate Adapter收到操作员取消后等待真实终态再安全释放隔离", async () => {
+  const fingerprints = {
+    source_revision: "abcdef1234567", artifact_digest: `sha256:${"1".repeat(64)}`,
+    runtime_digest: `sha256:${"2".repeat(64)}`, runtime_manifest_digest: `sha256:${"3".repeat(64)}`,
+    capability_contract_digest: `sha256:${"4".repeat(64)}`,
+  };
+  let cancelReason = null;
+  const connector = {
+    kind: "fixture-external-product",
+    discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "CLAUDE_AGENT_SDK_HARNESS",
+      production_writes_available: false, ...fingerprints }),
+    start: async () => ({ run_ref: "external:operator-cancel", status: "RUNNING" }),
+    observe: async ({ runRef }) => ({ run_ref: runRef, status: "CANCELLED", raw_events: [], normalized_events: [] }),
+    cancel: async ({ reason }) => { cancelReason = reason; return { supported: true }; },
+  };
+  const emitted = [];
+  const adapter = createCandidateAdapterV4({ id: "agent-harness-v2", connector, pollIntervalMs: 1,
+    timeoutMs: 1000, quarantineTimeoutMs: 50 });
+  await assert.rejects(adapter.execute({ trial: { id: "trial-operator-cancel" }, executionContract: {
+    run_class: "REAL_CANDIDATE", evaluation_lane: "CONTROLLED_CLOSURE", trial: { id: "trial-operator-cancel" },
+    contestant: { ref: "agent-harness-v2", kind: "REAL_PRODUCT", architecture: "CLAUDE_AGENT_SDK_HARNESS", ...fingerprints },
+    budget: { wallclock_ms: 1000 },
+  }, shouldCancel: async () => ({ requested: true, reason: "操作员终止", requested_at: "2026-08-23T00:00:00Z" }),
+  emit: async (...args) => emitted.push(args) }), (error) => error.name === "TrialCancellationError"
+    && error.cancelled === true && error.quarantineReleased === true);
+  assert.equal(cancelReason, "evalos_operator_cancellation");
+  assert.ok(emitted.some(([name]) => name === "candidate.run.quarantine_started"));
+  assert.ok(emitted.some(([name]) => name === "candidate.run.quarantine_released"));
+});
 test("Candidate Adapter在真实考生始终未终止时封锁环境并要求停止队列", async () => {
   const fingerprints = {
     source_revision: "abcdef1234567", artifact_digest: `sha256:${"1".repeat(64)}`,
@@ -129,7 +162,7 @@ test("Candidate Adapter在真实考生始终未终止时封锁环境并要求停
     observe: async ({ runRef }) => ({ run_ref: runRef, status: "RUNNING", raw_events: [], normalized_events: [] }),
     cancel: async () => ({ supported: false }),
   };
-  const adapter = createCandidateAdapterV3({ id: "langgraph-v1", connector, pollIntervalMs: 1,
+  const adapter = createCandidateAdapterV4({ id: "langgraph-v1", connector, pollIntervalMs: 1,
     timeoutMs: 1, quarantineTimeoutMs: 4 });
   await assert.rejects(adapter.execute({ trial: { id: "trial-never-terminal" }, executionContract: {
     run_class: "REAL_CANDIDATE", evaluation_lane: "CONTROLLED_CLOSURE", trial: { id: "trial-never-terminal" },
@@ -234,11 +267,11 @@ test("Eval Intelligence保持Claude Agent SDK开放式调查，同时严格只�
   assert.match(source, /不能改变正式分数/);
 });
 
-test("Candidate Adapter 3.0强制真实考生指纹、原始证据回指和禁止代考", () => {
-  const source = readFileSync(new URL("../src/candidate-adapter-v3.mjs", import.meta.url), "utf8");
+test("Candidate Adapter 4.0强制真实考生指纹、原始证据回指和禁止代考", () => {
+  const source = readFileSync(new URL("../src/candidate-adapter-v4.mjs", import.meta.url), "utf8");
   assert.match(source, /candidate discovery drift/);
   assert.match(source, /each normalized event must point to preserved raw evidence/);
-  assert.match(source, /Candidate Adapter 3\.0 refuses test doubles/);
+  assert.match(source, /Candidate Adapter 4\.0 refuses test doubles/);
   assert.match(source, /invoke-candidate-internal-tools/);
 });
 

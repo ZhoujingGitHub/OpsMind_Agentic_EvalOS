@@ -11,7 +11,14 @@ const ACTION_CONTRACTS = Object.freeze({
   alert_state: { alert: ["amf-down"], desired_state: ["cleared"] },
   capture_policy: { policy: ["bounded-retention"], desired_state: ["enabled"] },
 });
-const OPERATIONS = new Set(["health", "prepare", "observe", "act", "snapshot", "reset"]);
+const OPERATIONS = new Set(["health", "prepare", "configure_profile", "observe", "act", "snapshot", "reset"]);
+const OBSERVATION_PROFILES = new Set([
+  "public-baseline",
+  "hidden-benign-noise",
+  "safety-untrusted-instruction",
+  "regression-first-observation-fails",
+]);
+const REGRESSION_FAILURE_MODES = new Set(["source_unavailable", "timeout"]);
 const MANAGER_OPERATIONS = new Set(["status", "prepare", "snapshot", "reset"]);
 const MANAGED_CONTESTANTS = Object.freeze({
   "agent-harness-v2": "ah-",
@@ -23,6 +30,13 @@ export function validateTwinRequest(request) {
   if (!OPERATIONS.has(request.operation)) throw new Error(`Unsupported Twin operation: ${request.operation}`);
   if (request.operation !== "health" && !ID.test(String(request.trial_id ?? ""))) throw new Error("Invalid Twin trial_id");
   if (request.operation === "prepare" && !ID.test(String(request.scenario_id ?? ""))) throw new Error("Invalid Twin scenario_id");
+  if (request.operation === "configure_profile") {
+    if (!OBSERVATION_PROFILES.has(request.observation_profile)) throw new Error("Invalid Twin observation_profile");
+    if (request.observation_profile === "regression-first-observation-fails"
+      && !REGRESSION_FAILURE_MODES.has(request.regression_failure_mode)) {
+      throw new Error("Invalid Twin regression_failure_mode");
+    }
+  }
   if (request.operation === "observe" && !CAPABILITIES.has(request.capability)) throw new Error(`Unsupported Twin capability: ${request.capability}`);
   if (request.operation === "act") {
     const contract = ACTION_CONTRACTS[request.action_type];
@@ -60,6 +74,13 @@ export function validateTwinManagerRequest(request) {
   if (request.operation === "prepare" && !ID.test(String(request.scenario_id ?? ""))) {
     throw new Error("Invalid managed Twin scenario_id");
   }
+  if (request.operation === "prepare") {
+    if (!OBSERVATION_PROFILES.has(request.observation_profile)) throw new Error("Invalid managed Twin observation_profile");
+    if (request.observation_profile === "regression-first-observation-fails"
+      && !REGRESSION_FAILURE_MODES.has(request.regression_failure_mode)) {
+      throw new Error("Invalid managed Twin regression_failure_mode");
+    }
+  }
   if (request.seed !== undefined && !Number.isSafeInteger(Number(request.seed))) {
     throw new Error("Managed Twin seed must be an integer");
   }
@@ -88,3 +109,5 @@ export const TWIN_ACTION_TYPES = Object.freeze(Object.keys(ACTION_CONTRACTS));
 export const TWIN_OPERATIONS = Object.freeze([...OPERATIONS]);
 export const TWIN_MANAGER_OPERATIONS = Object.freeze([...MANAGER_OPERATIONS]);
 export const TWIN_MANAGED_CONTESTANTS = MANAGED_CONTESTANTS;
+export const TWIN_OBSERVATION_PROFILES = Object.freeze([...OBSERVATION_PROFILES]);
+export const TWIN_REGRESSION_FAILURE_MODES = Object.freeze([...REGRESSION_FAILURE_MODES]);

@@ -91,7 +91,9 @@ test("外部真实考生由 EvalOS 考务控制器准备独立前缀 Trial，考
     if (request.operation === "prepare") {
       active = request.trial_id;
       return { ok: true, operation: "prepare", fingerprint: "candidate-twin-fingerprint",
-        isolation: "exclusive_trial", slot_lease_present: true };
+        isolation: "exclusive_trial", slot_lease_present: true,
+        observation_profile: request.observation_profile, scenario_clock: "2026-08-23T00:00:00Z",
+        profile_digest: "sha256:frozen-profile" };
     }
     if (request.operation === "snapshot") return { ok: true, operation: "snapshot", snapshot: {
       trial_id: active, changes: [{ action_type: "subscriber_profile", parameters: { source: "reference_profile" } }],
@@ -106,6 +108,17 @@ test("外部真实考生由 EvalOS 考务控制器准备独立前缀 Trial，考
   const prepared = await environment.prepare();
   assert.equal(prepared.managed_trial_id, "ah-trial_external_1");
   assert.equal(prepared.slot_lease_present, true);
+  assert.equal(prepared.observation_profile, "public-baseline");
+  assert.equal(prepared.profile_digest, "sha256:frozen-profile");
+  assert.deepEqual({
+    observation_profile: calls[0].observation_profile,
+    overlay_contract_version: calls[0].overlay_contract_version,
+    baseline_ref: calls[0].baseline_ref,
+  }, {
+    observation_profile: caseSpec.environment.observation_profile,
+    overlay_contract_version: caseSpec.environment.overlay_contract_version,
+    baseline_ref: caseSpec.environment.baseline_ref,
+  });
   assert.equal((await environment.call("query_core_logs")).error.code, "EXTERNAL_PRODUCT_TOOL_BOUNDARY");
   assert.equal((await environment.capture("verification.completed")).captured, true);
   assert.equal((await environment.snapshot()).remote.recovery.task_success, true);
@@ -116,7 +129,16 @@ test("外部真实考生由 EvalOS 考务控制器准备独立前缀 Trial，考
 test("考务合同拒绝串用考生命名空间且绝不返回私有租约", () => {
   assert.equal(managedTwinTrialId("langgraph-v1", "trial_1"), "lg-trial_1");
   assert.throws(() => validateTwinManagerRequest({ operation: "prepare", contestant_ref: "langgraph-v1",
-    trial_id: "ah-trial_1", scenario_id: "amf-service-down", seed: 1 }), /must start with lg-/);
+    trial_id: "ah-trial_1", scenario_id: "amf-service-down", seed: 1,
+    observation_profile: "public-baseline" }), /must start with lg-/);
+  assert.throws(() => validateTwinManagerRequest({ operation: "prepare", contestant_ref: "langgraph-v1",
+    trial_id: "lg-trial_1", scenario_id: "amf-service-down", seed: 1 }), /observation_profile/);
+  assert.throws(() => validateTwinManagerRequest({ operation: "prepare", contestant_ref: "langgraph-v1",
+    trial_id: "lg-trial_1", scenario_id: "amf-service-down", seed: 1,
+    observation_profile: "regression-first-observation-fails" }), /regression_failure_mode/);
+  assert.equal(validateTwinManagerRequest({ operation: "prepare", contestant_ref: "langgraph-v1",
+    trial_id: "lg-trial_1", scenario_id: "amf-service-down", seed: 1,
+    observation_profile: "regression-first-observation-fails", regression_failure_mode: "timeout" }).regression_failure_mode, "timeout");
   assert.throws(() => validateTwinManagerRequest({ operation: "prepare", contestant_ref: "unknown",
     trial_id: "xx-trial_1", scenario_id: "amf-service-down", seed: 1 }), /Unsupported managed contestant/);
   assert.throws(() => validateTwinManagerResponse({ ok: true, operation: "prepare", slot_lease_id: "secret" }, "prepare"),

@@ -85,8 +85,8 @@ class EvidenceSeekingReplayBrain {
 export function createTestDouble(id, style = "context-first") {
   return {
     id,
-    adapterVersion: "test-double-adapter-3.0.0",
-    adapterContractVersion: "3.0",
+    adapterVersion: "test-double-adapter-4.0.0",
+    adapterContractVersion: "4.0",
     supportedEvaluationLanes: ["ENGINEERING_TEST"],
     runtime: "explicit-engineering-test-double",
     async execute({ caseSpec, toolExecutor, emit, maxTurns = 10 }) {

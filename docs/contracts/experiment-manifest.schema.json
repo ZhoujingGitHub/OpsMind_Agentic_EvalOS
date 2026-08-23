@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://opsmind.local/contracts/experiment-manifest.schema.json",
-  "title": "OpsMind EvalOS Experiment Manifest 5.0",
+  "title": "OpsMind EvalOS Experiment Manifest 6.0",
   "type": "object",
   "required": ["manifest_version", "milestone", "run_class", "evaluation_mode", "evaluation_lane", "operating_modes", "execution_mode", "approval_oracle", "design", "name", "suite_ref", "dataset_ref", "case_refs", "case_partitions", "environment_seeds", "replicates_per_seed", "contestants", "model", "frozen_dependencies", "budget", "policy", "retry_policy", "capacity_policy", "statistics_policy"],
   "properties": {
-    "manifest_version": { "const": "5.0" },
+    "manifest_version": { "const": "6.0" },
     "milestone": { "const": "M3.1" },
     "run_class": { "enum": ["ENGINEERING_TEST", "REAL_CANDIDATE"] },
     "evaluation_mode": { "enum": ["QUALIFICATION", "CAPACITY_REHEARSAL", "FORMAL"] },
@@ -42,7 +42,7 @@
         "type": "object", "required": ["ref", "kind", "architecture", "adapter_contract_version", "adapter_version", "source_revision", "artifact_digest", "runtime_digest", "runtime_manifest_digest", "capability_contract_digest"],
         "properties": {
           "ref": { "type": "string", "minLength": 1 }, "kind": { "enum": ["REAL_PRODUCT", "TEST_DOUBLE"] },
-          "architecture": { "type": "string", "minLength": 1 }, "adapter_contract_version": { "const": "3.0" },
+          "architecture": { "type": "string", "minLength": 1 }, "adapter_contract_version": { "const": "4.0" },
           "adapter_version": { "type": "string", "minLength": 1 }, "source_revision": { "type": "string", "minLength": 7 },
           "artifact_digest": { "$ref": "#/$defs/digest" }, "runtime_digest": { "$ref": "#/$defs/digest" },
           "runtime_manifest_digest": { "$ref": "#/$defs/digest" }, "capability_contract_digest": { "$ref": "#/$defs/digest" }
