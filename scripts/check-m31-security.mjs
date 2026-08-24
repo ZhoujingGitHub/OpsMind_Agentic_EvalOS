@@ -11,6 +11,8 @@ const oracle = read("packages/kernel/src/approval-oracle.mjs");
 const grader = read("packages/kernel/src/grader.mjs");
 const evaluationContract = read("packages/kernel/src/evaluation-contract.mjs");
 const failurePolicy = read("packages/kernel/src/failure-policy.mjs");
+const relayWorker = read("infra/candidates/relay-worker.py");
+const controlApi = read("services/control-api/src/app.mjs");
 const statistics = read("packages/kernel/src/statistics.mjs");
 const twinGateway = read("infra/twin/ssh_gateway.sh");
 const twinManager = read("infra/twin/opsmind_eval_manager.py");
@@ -77,6 +79,10 @@ assert.match(deploymentSmoke, /m3-l2-agentic-formal@3\.0\.0/);
 assert.match(deploymentSmoke, /case_count, 80/);
 assert.doesNotMatch(`${app}\n${adapter}\n${connectors}`, /(?:DEEPSEEK_API_KEY|ANTHROPIC_AUTH_TOKEN|EVALOS_AGENT_HARNESS_TOKEN|EVALOS_LANGGRAPH_TOKEN)\s*=\s*["'][^"']+["']/);
 assert.match(failurePolicy, /capability.*failure|CANDIDATE_CAPABILITY_FAILURE/i);
+for (const source of [relayWorker, controlApi]) {
+  assert.match(source, /investigations\/\[A-Za-z0-9_\-\]\+\/protocol-lab\/reset/,
+    "Agent+Harness Twin reset must be allowlisted by both relay boundaries");
+}
 assert.match(failurePolicy, /retryable: false/);
 assert.match(statistics, /authority === "FORMAL_DECISION"/);
 assert.match(app, /authenticated workbench session required/);

@@ -294,6 +294,8 @@ test("失败分类不会把考生能力、考生超时或考场清理故障洗�
   assert.equal(classifyTrialFailure("TimeoutError - Claude Agent SDK query 在 900 秒内没有完成").category,
     "PRODUCT_RELIABILITY_FAILURE");
   assert.equal(classifyTrialFailure("output schema invalid").category, "CANDIDATE_CAPABILITY_FAILURE");
+  assert.equal(classifyTrialFailure("ReportNotSubmitted - Agent 未通过提交调查报告接口交付可校验的最终报告。").category,
+    "CANDIDATE_CAPABILITY_FAILURE");
   assert.equal(classifyTrialFailure("candidate failed", { resetError: "twin reset failed" }).category,
     "PLATFORM_CLEANUP_FAILURE");
   assert.equal(classifyTrialFailure("external candidate run timed out", { keepQuarantined: true }).retryable, false);
@@ -491,6 +493,44 @@ test("真实考生终态先保全现场、再注销考生侧绑定、最后由Ev
     const attempt = store.listTrialAttemptResults(claimed.id)[0];
     assert.equal(attempt.final_state.candidate_finalization.strategy, "fixture-candidate-reset");
     assert.equal(attempt.final_state.reset.clean, true);
+  } finally { labels.close(); store.close(); }
+});
+
+test("考生侧清场失败仍保留为产品证据，但独立Twin复位干净后不得锁死串行考场", async () => {
+  const { store, labels, ledger, gradingService } = fixture();
+  let resetCalls = 0;
+  try {
+    const { experiment } = store.createExperiment(manifest, "candidate-cleanup-failure-does-not-halt-clean-arena");
+    const claimed = store.claimNext("cleanup-failure-worker", 1000, experiment.id);
+    const base = createTestDouble(claimed.contestant_ref, "context-first");
+    const adapter = {
+      ...base,
+      async execute() {
+        const error = new Error("ReportNotSubmitted - Agent 未提交最终调查报告");
+        error.runRef = "candidate-run-report-missing";
+        error.candidateTerminal = true;
+        throw error;
+      },
+      async finalize() {
+        throw new Error("候选产品内部复位检查未通过");
+      },
+    };
+    const runner = new TrialRunner({ store, ledger, gradingService, adapters: {
+      [`${claimed.contestant_ref}:ENGINEERING_TEST`]: adapter,
+    }, environmentFactory: async () => ({
+      async call() { return { ok: true }; },
+      async snapshot() { return { clean: false }; },
+      async reset() { resetCalls += 1; return { ok: true, clean: true, authority: "evalos" }; },
+    }) });
+
+    const result = await runner.runTrial(claimed, { workerId: "cleanup-failure-worker" });
+    assert.equal(result.status, "FAILED");
+    assert.equal(resetCalls, 1);
+    const attempt = store.listTrialAttemptResults(claimed.id)[0];
+    assert.equal(attempt.final_state.candidate_finalization_error, "候选产品内部复位检查未通过");
+    assert.equal(attempt.final_state.reset.clean, true);
+    assert.equal(attempt.error, "ReportNotSubmitted - Agent 未提交最终调查报告");
+    assert.ok(store.getTrace(claimed.id).some((record) => record.name === "candidate.environment.release_failed"));
   } finally { labels.close(); store.close(); }
 });
 

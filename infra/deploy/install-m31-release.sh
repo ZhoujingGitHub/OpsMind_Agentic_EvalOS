@@ -13,7 +13,8 @@ actual_sha256="$(sha256sum "$archive" | awk '{print $1}')"
 release_root="/opt/opsmind-evalos/releases/$release_id"
 current_link="/opt/opsmind-evalos/current"
 previous_release="$(readlink -f "$current_link" || true)"
-backup_root="/var/lib/opsmind-evalos/backups/$release_id"
+backups_root="/var/lib/opsmind-evalos/backups"
+backup_root="$backups_root/$release_id"
 unit_backup="/var/lib/opsmind-evalos/backups/$release_id/systemd"
 rollback() {
   local exit_code=$?
@@ -30,6 +31,16 @@ rollback() {
     cp -f "$unit_backup/opsmind-evalos.service" /etc/systemd/system/opsmind-evalos.service 2>/dev/null || true
     cp -f "$unit_backup/opsmind-evalos-console.service" /etc/systemd/system/opsmind-evalos-console.service 2>/dev/null || true
   fi
+  if [[ -f "$backup_root/control/control.sqlite" ]]; then
+    rm -f /var/lib/opsmind-evalos/control/control.sqlite*
+    cp -a "$backup_root/control/." /var/lib/opsmind-evalos/control/
+    chown -R opsmindeval:opsmindeval /var/lib/opsmind-evalos/control
+  fi
+  if [[ -f "$backup_root/private/labels.sqlite" ]]; then
+    rm -f /var/lib/opsmind-evalos/private/labels.sqlite*
+    cp -a "$backup_root/private/." /var/lib/opsmind-evalos/private/
+    chown -R opsmindeval:opsmindeval /var/lib/opsmind-evalos/private
+  fi
   systemctl daemon-reload 2>/dev/null || true
   systemctl start opsmind-evalos opsmind-evalos-console 2>/dev/null || true
   exit "$exit_code"
@@ -37,6 +48,27 @@ rollback() {
 trap rollback EXIT
 
 [[ ! -e "$release_root" ]] || { echo "release already exists: $release_root" >&2; exit 2; }
+
+# 全量 SQLite 备份只保留最近一代；本次成功后合计两代。防止连续发布把系统盘写满。
+mkdir -p "$backups_root"
+mapfile -t previous_backups < <(find "$backups_root" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
+  | sort -rn | cut -d' ' -f2-)
+for ((index = 1; index < ${#previous_backups[@]}; index += 1)); do
+  stale_backup="${previous_backups[$index]}"
+  [[ "$stale_backup" == "$backups_root/"* ]] || { echo "refusing unsafe backup removal: $stale_backup" >&2; exit 2; }
+  rm -rf -- "$stale_backup"
+done
+
+database_bytes="$(du -sb /var/lib/opsmind-evalos/control /var/lib/opsmind-evalos/private 2>/dev/null \
+  | awk '{ total += $1 } END { print total + 0 }')"
+available_bytes="$(df -PB1 /var/lib/opsmind-evalos | awk 'NR == 2 { print $4 }')"
+reserve_bytes=$((1024 * 1024 * 1024))
+required_bytes=$((database_bytes + reserve_bytes))
+[[ "$available_bytes" -ge "$required_bytes" ]] || {
+  echo "insufficient disk space for an atomic database backup: available=$available_bytes required=$required_bytes" >&2
+  exit 2
+}
+
 mkdir -p "$release_root"
 tar -xzf "$archive" -C "$release_root"
 test -f "$release_root/evalos/RELEASE.json"

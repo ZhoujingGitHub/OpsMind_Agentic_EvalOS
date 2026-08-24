@@ -23,6 +23,7 @@ const CANDIDATE_RELAY_PATHS = Object.freeze({
     "^/v2/protocol-lab$",
     "^/v2/remediation/context$", "^/v2/remediation/mode$", "^/v2/investigation-candidates$",
     "^/v2/investigations/[A-Za-z0-9_-]+$", "^/v2/investigations/[A-Za-z0-9_-]+/execution-log(?:\\?.*)?$",
+    "^/v2/investigations/[A-Za-z0-9_-]+/protocol-lab/reset$",
     "^/v2/actions(?:\\?.*)?$", "^/v2/evaluation/actions/[A-Za-z0-9_-]+$", "^/v2/actions/[A-Za-z0-9_-]+/approval$",
   ],
   "langgraph-v1": [
@@ -282,12 +283,14 @@ export function createApp({
       quarantine_required: attempt.final_state?.quarantine?.required === true,
       quarantine_released: attempt.final_state?.quarantine?.released ?? null,
       snapshot_error: attempt.final_state?.snapshot_error ?? null,
+      candidate_finalization_error: attempt.final_state?.candidate_finalization_error ?? null,
       reset_error: attempt.final_state?.reset_error ?? null,
     },
     created_at: attempt.created_at,
   });
   const cleanupNeedsReconciliation = (attempt) => Boolean(attempt && (
     attempt.final_state?.reset?.ok === false
+    || Boolean(attempt.final_state?.candidate_finalization_error)
     || attempt.final_state?.quarantine?.required === true && attempt.final_state?.quarantine?.released !== true
   ));
   const successfulCleanup = (trialId, attempt) => store.listTrialCleanupReconciliations(trialId)
@@ -310,6 +313,22 @@ export function createApp({
       error.code = "CLEANUP_NOT_READY";
       throw error;
     }
+    let candidateFinalization = null;
+    let candidateFinalizationError = null;
+    if (attempt.final_state?.candidate_finalization_error) {
+      if (typeof connector.finalize !== "function") {
+        candidateFinalizationError = "candidate cleanup finalizer is not configured";
+      } else {
+        try {
+          candidateFinalization = await connector.finalize({ runRef, reason: "cleanup_reconciliation" });
+          if (candidateFinalization?.ok !== true) {
+            candidateFinalizationError = candidateFinalization?.error ?? "candidate cleanup finalizer did not return ok=true";
+          }
+        } catch (error) {
+          candidateFinalizationError = error?.message ?? String(error);
+        }
+      }
+    }
     let reset;
     try {
       reset = await twinManagerClient.invoke({ operation: "reset", contestant_ref: trial.contestant_ref,
@@ -317,11 +336,18 @@ export function createApp({
     } catch (error) {
       reset = { ok: false, clean: false, error: error?.message ?? String(error) };
     }
+    // 考生侧清场失败属于考生产品证据；EvalOS 是否可以重新开放串行考场，
+    // 只由独立 Twin 管理器是否证明环境已恢复干净基线决定。
     const resolved = reset?.ok === true && reset?.clean === true;
     const reconciliation = store.recordTrialCleanupReconciliation({ trialId, attempt: attempt.attempt,
       candidateRunRef: runRef, candidateTerminalStatus: candidate.status, twinReset: reset,
-      status: resolved ? "RESOLVED" : "FAILED", error: resolved ? null : reset?.error ?? "Twin reset did not prove a clean baseline",
+      status: resolved ? "RESOLVED" : "FAILED", error: resolved ? null
+        : candidateFinalizationError ?? reset?.error ?? "Twin reset did not prove a clean baseline",
       evidence: { contract: "evalos-cleanup-reconciliation.1", candidate_probe: candidate,
+        candidate_finalization: candidateFinalization,
+        candidate_finalization_error: candidateFinalizationError,
+        candidate_product_cleanup_succeeded: !candidateFinalizationError,
+        platform_cleanup_authority: "evalos-independent-twin-manager",
         managed_twin_trial_id: managedTwinTrialId(trial.contestant_ref, trial.id), original_attempt_result_hash: attempt.result_hash } });
     ledger.append({ entityType: "trial", entityId: trialId,
       action: resolved ? "trial.cleanup_reconciled" : "trial.cleanup_reconciliation_failed",
@@ -816,6 +842,7 @@ export function createApp({
       .map((item) => `${item.trial_id}:${item.attempt}`));
     const unresolvedCleanup = latestAttempts.filter(({ trial, attempt }) => attempt && (
       attempt.cleanup?.reset_ok === false
+      || Boolean(attempt.cleanup?.candidate_finalization_error)
       || attempt.cleanup?.quarantine_required && attempt.cleanup?.quarantine_released !== true
     ) && !resolvedCleanupKeys.has(`${trial.id}:${attempt.attempt}`)).length;
     const incompleteUsage = trials.filter((trial) => trial.status === "COMPLETED"

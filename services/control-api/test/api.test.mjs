@@ -101,27 +101,36 @@ test("清理核验必须先确认真实考生终态，再通过受限Twin管理�
     evaluation_mode: "QUALIFICATION", contestants: [contestant], case_refs: [caseRef], environment_seeds: [2026082301],
     replicates_per_seed: 1, case_partitions: { public: [caseRef], hidden: [], safety: [], regression: [] } };
   const resetCalls = [];
+  const candidateFinalizeCalls = [];
   const app = createApp({ databasePath: path.join(root, "control.sqlite"),
     privateLabelDatabasePath: path.join(root, "private", "labels.sqlite"), runtimeRoot: root,
     apiToken: "admin-secret", cleanupConnectorOverrides: { [contestant.ref]: {
       probeRun: async ({ runRef }) => ({ run_ref: runRef, status: "COMPLETED", terminal: true, raw_status: "resolved" }),
+      finalize: async ({ runRef, reason }) => { candidateFinalizeCalls.push({ runRef, reason });
+        throw new Error("候选产品内部复位检查未通过"); },
     } }, twinManagerClientOverride: { invoke: async (request) => { resetCalls.push(request); return { ok: true, clean: true,
       operation: "reset", reset_hash: "sha256:clean" }; } } });
   try {
     const created = app.store.createExperiment(smallManifest, "cleanup-reconcile-test");
     const trial = app.store.claimNext("cleanup-test-worker", 30000, created.experiment.id);
     app.store.failTrial(trial.id, "external candidate quarantine unresolved: timed out", { finalState: {
+      candidate_finalization_error: "candidate relay path was temporarily unavailable",
       quarantine: { required: true, released: false, candidate_run_ref: "candidate-run-terminal-later" },
       failure_classification: { category: "PRODUCT_RELIABILITY_FAILURE", owner: "CANDIDATE" },
     } });
     const reconciliation = await app.reconcileTrialCleanup(trial.id);
     assert.equal(reconciliation.status, "RESOLVED");
     assert.equal(reconciliation.candidate_terminal_status, "COMPLETED");
+    assert.deepEqual(candidateFinalizeCalls, [{ runRef: "candidate-run-terminal-later", reason: "cleanup_reconciliation" }]);
     assert.equal(resetCalls.length, 1);
     assert.equal(resetCalls[0].operation, "reset");
     assert.match(resetCalls[0].trial_id, /^(?:ah-|lg-)/);
     assert.equal(app.store.getTrial(trial.id).status, "FAILED");
     assert.equal(app.ledger.entries().at(-1).action, "trial.cleanup_reconciled");
+    assert.equal(reconciliation.evidence.candidate_product_cleanup_succeeded, false);
+    assert.equal(reconciliation.evidence.candidate_finalization_error, "候选产品内部复位检查未通过");
+    assert.equal(reconciliation.evidence.platform_cleanup_authority, "evalos-independent-twin-manager");
+    assert.equal(reconciliation.twin_reset.clean, true);
   } finally { app.close(); }
 });
 

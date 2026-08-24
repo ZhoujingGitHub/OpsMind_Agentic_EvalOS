@@ -244,7 +244,6 @@ export class TrialRunner {
           finalizationError.runRef = outcome.candidate_run_ref ?? finalizationError.runRef ?? null;
           finalizationError.candidateTerminal = true;
           finalizationError.candidateFinalizationAttempted = true;
-          finalizationError.haltQueue = true;
           throw finalizationError;
         }
       }
@@ -331,7 +330,7 @@ export class TrialRunner {
       let resetErrorMessage = null;
       let snapshotErrorMessage = null;
       let candidateFinalization = null;
-      let candidateFinalizationError = null;
+      let candidateFinalizationError = error.candidateFinalizationAttempted === true ? error.message : null;
       const keepQuarantined = error.keepEnvironmentQuarantined === true;
       const quarantineStarted = error.quarantineStarted === true || keepQuarantined;
       if (environment && environmentReset === null && typeof environment.reset === "function" && !keepQuarantined) {
@@ -352,7 +351,6 @@ export class TrialRunner {
               candidateFinalization ?? { ok: true });
           } catch (finalizationError) {
             candidateFinalizationError = finalizationError.message;
-            error.haltQueue = true;
             event("candidate.environment.release_failed", "candidate-adapter", {
               run_ref: error.runRef, error: candidateFinalizationError,
             });
