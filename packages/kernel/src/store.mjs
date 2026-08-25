@@ -45,8 +45,13 @@ function trialSelect(where = "") {
 }
 
 function manifestRefs(manifest) {
-  if (manifest.manifest_version !== "6.0") throw new Error("EvalOS requires experiment manifest 6.0; legacy manifests are archived read-only and cannot execute");
-  if (manifest.milestone !== "M3.1") throw new Error("Manifest 6.0 requires milestone M3.1");
+  const manifestVersion = manifest.manifest_version;
+  if (!["6.0", "7.0"].includes(manifestVersion)) {
+    throw new Error("EvalOS requires experiment manifest 6.0 or 7.0; legacy manifests are archived read-only and cannot execute");
+  }
+  const expectedMilestone = manifestVersion === "7.0" ? "M3.2" : "M3.1";
+  const expectedAdapterContract = manifestVersion === "7.0" ? "5.0" : "4.0";
+  if (manifest.milestone !== expectedMilestone) throw new Error(`Manifest ${manifestVersion} requires milestone ${expectedMilestone}`);
   if (!["ENGINEERING_TEST", "REAL_CANDIDATE"].includes(manifest.run_class)) {
     throw new Error("run_class must be ENGINEERING_TEST or REAL_CANDIDATE");
   }
@@ -54,7 +59,7 @@ function manifestRefs(manifest) {
     throw new Error("evaluation_mode must be QUALIFICATION, CAPACITY_REHEARSAL, or FORMAL");
   }
   if (!["ENGINEERING_TEST", "AGENT_CAPABILITY", "CONTROLLED_CLOSURE", "PRODUCT_RELIABILITY"].includes(manifest.evaluation_lane)) {
-    throw new Error("evaluation_lane is not supported by Manifest 6.0");
+    throw new Error(`evaluation_lane is not supported by Manifest ${manifestVersion}`);
   }
   if (manifest.run_class === "ENGINEERING_TEST" && manifest.evaluation_lane !== "ENGINEERING_TEST") {
     throw new Error("engineering test data must use the isolated ENGINEERING_TEST lane");
@@ -110,10 +115,10 @@ function manifestRefs(manifest) {
   }
   for (const contestant of manifest.contestants) {
     if (!contestant.ref || !["REAL_PRODUCT", "TEST_DOUBLE"].includes(contestant.kind) || !contestant.architecture ||
-        contestant.adapter_contract_version !== "4.0" || !contestant.adapter_version || !contestant.source_revision ||
+        contestant.adapter_contract_version !== expectedAdapterContract || !contestant.adapter_version || !contestant.source_revision ||
         !SHA256_DIGEST.test(contestant.artifact_digest) || !SHA256_DIGEST.test(contestant.runtime_digest) ||
         !SHA256_DIGEST.test(contestant.runtime_manifest_digest) || !SHA256_DIGEST.test(contestant.capability_contract_digest)) {
-      throw new Error("each contestant must freeze identity, kind, architecture, Adapter 4.0, source, runtime and capability fingerprints");
+      throw new Error(`each contestant must freeze identity, kind, architecture, Adapter ${expectedAdapterContract}, source, runtime and capability fingerprints`);
     }
   }
   const contestantKinds = new Set(manifest.contestants.map((item) => item.kind));
@@ -126,13 +131,52 @@ function manifestRefs(manifest) {
   }
   if (!manifest.model || !manifest.frozen_dependencies || !manifest.budget || !manifest.policy ||
       !manifest.retry_policy || !manifest.capacity_policy || !manifest.statistics_policy) {
-    throw new Error("Manifest 6.0 must freeze model, dependencies, budget, policy, retry, capacity, and statistics");
+    throw new Error(`Manifest ${manifestVersion} must freeze model, dependencies, budget, policy, retry, capacity, and statistics`);
   }
   assertExactKeys(manifest.model, ["provider", "id", "interface", "sdk", "thinking", "temperature", "max_turns"], "model");
   if (manifest.model.provider !== "deepseek" || manifest.model.id !== "deepseek-v4-flash" ||
       manifest.model.interface !== "anthropic" || manifest.model.sdk !== "@anthropic-ai/claude-agent-sdk" ||
       !["enabled", "disabled"].includes(manifest.model.thinking) || !Number.isFinite(manifest.model.temperature) ||
       !Number.isInteger(manifest.model.max_turns) || manifest.model.max_turns < 1) throw new Error("model freeze is invalid");
+
+  if (manifestVersion === "7.0") {
+    if (manifest.run_class !== "REAL_CANDIDATE") throw new Error("Manifest 7.0 is reserved for external REAL_CANDIDATE products");
+    assertExactKeys(manifest.candidate_runtime_policy,
+      ["source", "allow_multi_model", "hidden_case_fields", "usage_accounting"], "candidate_runtime_policy");
+    if (manifest.candidate_runtime_policy.source !== "candidate_public_api" ||
+        manifest.candidate_runtime_policy.allow_multi_model !== true ||
+        manifest.candidate_runtime_policy.hidden_case_fields !== "opaque_digest_only" ||
+        manifest.candidate_runtime_policy.usage_accounting !== "reported_with_explicit_unknowns") {
+      throw new Error("Manifest 7.0 candidate_runtime_policy must preserve public discovery, opaque blind fields and explicit usage unknowns");
+    }
+    for (const contestant of manifest.contestants) {
+      if (contestant.adapter_version !== "candidate-adapter-5.0.0") {
+        throw new Error("Manifest 7.0 contestants must use candidate-adapter-5.0.0");
+      }
+      if (!['PRODUCT_NATIVE_ACK', 'EVIDENCE_CHAIN_BOUND'].includes(contestant.binding_requirement)) {
+        throw new Error("Manifest 7.0 contestants must freeze a supported binding_requirement");
+      }
+      const runtime = contestant.candidate_runtime;
+      assertExactKeys(runtime, ["contract_version", "models", "versions"], `contestants.${contestant.ref}.candidate_runtime`);
+      if (runtime.contract_version !== "1.0") throw new Error("candidate_runtime contract_version must be 1.0");
+      if (!Array.isArray(runtime.models) || !runtime.models.length) throw new Error("candidate_runtime.models must be non-empty");
+      for (const model of runtime.models) {
+        assertExactKeys(model, ["provider", "id", "interface", "thinking", "roles"], "candidate_runtime.models[]");
+        if (!model.provider || !model.id || !model.interface || !["enabled", "disabled", "unknown"].includes(model.thinking)) {
+          throw new Error("candidate_runtime model profile is invalid");
+        }
+        assertUniqueStrings(model.roles, "candidate_runtime.models[].roles");
+        if (!model.roles.length) throw new Error("candidate_runtime model roles must be non-empty");
+      }
+      if (!runtime.versions || typeof runtime.versions !== "object" || Array.isArray(runtime.versions) ||
+          !Object.keys(runtime.versions).length || Object.values(runtime.versions).some((value) => typeof value !== "string" || !value)) {
+        throw new Error("candidate_runtime.versions must freeze public string versions");
+      }
+      if (!manifest.candidate_runtime_policy.allow_multi_model && runtime.models.length > 1) {
+        throw new Error("candidate_runtime contains multiple models but the policy forbids it");
+      }
+    }
+  }
 
   const dependencyKeys = ["mcp_catalog", "agent_harness_skill_pack", "langgraph_knowledge_pack", "scope_policy", "grader", "twin", "trace_schema", "product_adapter_contract"];
   assertExactKeys(manifest.frozen_dependencies, dependencyKeys, "frozen_dependencies");

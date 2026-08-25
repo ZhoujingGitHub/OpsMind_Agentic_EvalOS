@@ -83,7 +83,9 @@ export class TrialRunner {
   async runTrial(trial, { workerId = this.workerId } = {}) {
     const caseSpec = this.store.getExecutionCase(trial.case_ref);
     const experiment = this.store.getExperiment(trial.experiment_id);
-    const adapter = this.adapters[`${trial.contestant_ref}:${experiment.manifest.evaluation_lane}`] ?? this.adapters[trial.contestant_ref];
+    const contestant = experiment.manifest.contestants.find((item) => item.ref === trial.contestant_ref);
+    const adapter = this.adapters[`${trial.contestant_ref}:${experiment.manifest.evaluation_lane}:${contestant?.adapter_contract_version}`]
+      ?? this.adapters[`${trial.contestant_ref}:${experiment.manifest.evaluation_lane}`] ?? this.adapters[trial.contestant_ref];
     if (!caseSpec) throw new Error(`execution case not found: ${trial.case_ref}`);
     if (!adapter) throw new Error(`contestant adapter not found: ${trial.contestant_ref}`);
     if ("ground_truth" in caseSpec) throw new Error("private label leaked into execution plane");

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsmind.local/contracts/candidate-adapter-v5.schema.json",
+  "title": "OpsMind EvalOS Candidate Adapter Contract 5.0",
+  "description": "面向外部真实产品的旁路适配合同。只发送公开任务和不透明上下文摘要，保留产品原生终态、证据、用量与清场交接，不替考生调用内部工具。",
+  "type": "object",
+  "required": ["adapter_contract_version", "evaluation_lane", "run_class", "operating_modes", "execution_mode", "experiment_id", "trial", "contestant", "case", "scope", "tools", "model", "frozen_dependencies", "budget", "policy", "approval_oracle", "retry_policy", "suite_ref", "dataset_ref", "candidate_runtime_policy", "contract_digest"],
+  "properties": {
+    "adapter_contract_version": { "const": "5.0" },
+    "evaluation_lane": { "enum": ["AGENT_CAPABILITY", "CONTROLLED_CLOSURE", "PRODUCT_RELIABILITY"] },
+    "run_class": { "const": "REAL_CANDIDATE" },
+    "operating_modes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["diagnosis_only", "human_collaboration", "controlled_auto"] } },
+    "execution_mode": { "enum": ["controlled_simulation", "replay_read_only"] },
+    "experiment_id": { "type": "string", "minLength": 1 },
+    "trial": {
+      "type": "object",
+      "required": ["id", "case_ref", "environment_seed", "replicate_id", "blind_id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 }, "case_ref": { "type": "string", "minLength": 1 },
+        "environment_seed": { "type": "integer" }, "replicate_id": { "type": "integer", "minimum": 1 },
+        "blind_id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "contestant": {
+      "type": "object",
+      "required": ["ref", "adapter_version", "source_revision", "artifact_digest", "runtime_digest", "runtime_manifest_digest", "capability_contract_digest", "kind", "architecture", "binding_requirement", "candidate_runtime"],
+      "properties": {
+        "ref": { "type": "string", "minLength": 1 }, "adapter_version": { "const": "candidate-adapter-5.0.0" },
+        "source_revision": { "type": "string", "minLength": 7 }, "artifact_digest": { "$ref": "#/$defs/digest" },
+        "runtime_digest": { "$ref": "#/$defs/digest" }, "runtime_manifest_digest": { "$ref": "#/$defs/digest" },
+        "capability_contract_digest": { "$ref": "#/$defs/digest" }, "kind": { "const": "REAL_PRODUCT" },
+        "architecture": { "type": "string", "minLength": 1 },
+        "binding_requirement": { "enum": ["PRODUCT_NATIVE_ACK", "EVIDENCE_CHAIN_BOUND"] },
+        "candidate_runtime": { "$ref": "#/$defs/candidateRuntime" }
+      },
+      "additionalProperties": false
+    },
+    "case": { "$ref": "case-contract-v3.schema.json" },
+    "scope": { "type": "object" },
+    "tools": { "type": "array", "items": { "type": "object" } },
+    "model": { "type": "object" }, "frozen_dependencies": { "type": "object" },
+    "budget": { "type": "object" }, "policy": { "type": "object" },
+    "approval_oracle": { "type": "object" }, "retry_policy": { "type": "object" },
+    "suite_ref": { "type": "string", "minLength": 1 }, "dataset_ref": { "type": "string", "minLength": 1 },
+    "candidate_runtime_policy": { "type": "object" }, "contract_digest": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "candidateRuntime": {
+      "type": "object", "required": ["contract_version", "models", "versions"],
+      "properties": {
+        "contract_version": { "const": "1.0" },
+        "models": { "type": "array", "minItems": 1, "items": {
+          "type": "object", "required": ["provider", "id", "interface", "thinking", "roles"],
+          "properties": {
+            "provider": { "type": "string", "minLength": 1 }, "id": { "type": "string", "minLength": 1 },
+            "interface": { "type": "string", "minLength": 1 }, "thinking": { "enum": ["enabled", "disabled", "unknown"] },
+            "roles": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+          }, "additionalProperties": false
+        } },
+        "versions": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1 } }
+      }, "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

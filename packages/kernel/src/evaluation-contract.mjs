@@ -1,6 +1,10 @@
 import { sha256 } from "./utils.mjs";
 
 export const EVALUATION_ADAPTER_CONTRACT_VERSION = "4.0";
+export const EVALUATION_ADAPTER_CONTRACT_VERSIONS = Object.freeze({
+  "6.0": "4.0",
+  "7.0": "5.0",
+});
 
 function descriptor(name, definition) {
   return {
@@ -14,15 +18,22 @@ function descriptor(name, definition) {
   };
 }
 
+function expectedAdapterContract(manifestVersion) {
+  const version = EVALUATION_ADAPTER_CONTRACT_VERSIONS[manifestVersion];
+  if (!version) throw new Error(`Manifest ${manifestVersion ?? "unknown"} is archived read-only and cannot execute`);
+  return version;
+}
+
 export function buildEvaluationContract({ experiment, trial, caseSpec, adapter }) {
-  if (experiment?.manifest?.manifest_version !== "6.0") throw new Error("Candidate Adapter 4.0 requires Manifest 6.0");
+  const manifestVersion = experiment?.manifest?.manifest_version;
+  const adapterContractVersion = expectedAdapterContract(manifestVersion);
   const contestant = experiment.manifest.contestants.find((item) => item.ref === trial.contestant_ref);
   if (!contestant) throw new Error(`contestant is not frozen in the manifest: ${trial.contestant_ref}`);
-  if (contestant.adapter_contract_version !== EVALUATION_ADAPTER_CONTRACT_VERSION) {
-    throw new Error(`contestant ${contestant.ref} does not use Candidate Adapter contract 4.0`);
+  if (contestant.adapter_contract_version !== adapterContractVersion) {
+    throw new Error(`contestant ${contestant.ref} does not use Candidate Adapter contract ${adapterContractVersion}`);
   }
-  if (adapter.adapterContractVersion !== EVALUATION_ADAPTER_CONTRACT_VERSION) {
-    throw new Error(`runtime adapter ${adapter.id} does not implement Candidate Adapter contract 4.0`);
+  if (adapter.adapterContractVersion !== adapterContractVersion) {
+    throw new Error(`runtime adapter ${adapter.id} does not implement Candidate Adapter contract ${adapterContractVersion}`);
   }
   if (contestant.adapter_version !== adapter.adapterVersion) {
     throw new Error(`runtime adapter version mismatch for ${contestant.ref}`);
@@ -31,7 +42,7 @@ export function buildEvaluationContract({ experiment, trial, caseSpec, adapter }
     throw new Error(`runtime adapter ${adapter.id} does not support evaluation lane ${experiment.manifest.evaluation_lane}`);
   }
   const contract = {
-    adapter_contract_version: EVALUATION_ADAPTER_CONTRACT_VERSION,
+    adapter_contract_version: adapterContractVersion,
     evaluation_lane: experiment.manifest.evaluation_lane,
     run_class: experiment.manifest.run_class,
     operating_modes: experiment.manifest.operating_modes,
@@ -54,6 +65,10 @@ export function buildEvaluationContract({ experiment, trial, caseSpec, adapter }
       capability_contract_digest: contestant.capability_contract_digest,
       kind: contestant.kind,
       architecture: contestant.architecture,
+      ...(manifestVersion === "7.0" ? {
+        binding_requirement: contestant.binding_requirement,
+        candidate_runtime: contestant.candidate_runtime,
+      } : {}),
     },
     case: {
       id: caseSpec.id,
@@ -75,6 +90,11 @@ export function buildEvaluationContract({ experiment, trial, caseSpec, adapter }
     policy: experiment.manifest.policy,
     approval_oracle: experiment.manifest.approval_oracle,
     retry_policy: experiment.manifest.retry_policy,
+    ...(manifestVersion === "7.0" ? {
+      suite_ref: experiment.manifest.suite_ref,
+      dataset_ref: experiment.manifest.dataset_ref,
+      candidate_runtime_policy: experiment.manifest.candidate_runtime_policy,
+    } : {}),
   };
   return Object.freeze({ ...contract, contract_digest: `sha256:${sha256(contract)}` });
 }

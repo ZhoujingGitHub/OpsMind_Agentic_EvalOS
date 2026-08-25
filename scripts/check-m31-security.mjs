@@ -7,6 +7,8 @@ const read = (file) => readFileSync(path.join(root, file), "utf8");
 const app = read("services/control-api/src/app.mjs");
 const adapter = read("packages/agent-runtime/src/candidate-adapter-v4.mjs");
 const connectors = read("packages/agent-runtime/src/product-connectors-v4.mjs");
+const adapterV5 = read("packages/agent-runtime/src/candidate-adapter-v5.mjs");
+const connectorsV5 = read("packages/agent-runtime/src/product-connectors-v5.mjs");
 const oracle = read("packages/kernel/src/approval-oracle.mjs");
 const grader = read("packages/kernel/src/grader.mjs");
 const evaluationContract = read("packages/kernel/src/evaluation-contract.mjs");
@@ -38,6 +40,16 @@ assert.match(grader, /approval_integrity/);
 assert.match(grader, /independent_verification/);
 assert.match(grader, /reset_integrity/);
 assert.match(adapter, /REAL_CANDIDATE/);
+assert.match(connectorsV5, /tokenSource:\s*"environment-only"/);
+assert.match(connectorsV5, /real candidate product APIs require HTTPS/);
+assert.match(connectorsV5, /productionWrites:\s*false/);
+assert.match(connectorsV5, /must use three separate identities/);
+assert.match(connectorsV5, /hiddenFieldsSent:\s*false/);
+assert.match(adapterV5, /send-hidden-case-or-seed/);
+assert.match(adapterV5, /production_writes_available !== false/);
+assert.match(adapterV5, /each normalized event must point to preserved raw evidence/);
+assert.match(adapterV5, /synthesize-missing-evidence/);
+assert.match(adapterV5, /REAL_CANDIDATE/);
 assert.match(evaluationContract, /run_class:\s*experiment\.manifest\.run_class/);
 assert.match(app, /test-double-a:ENGINEERING_TEST/);
 assert.match(app, /480_TRIAL_NOT_AUTHORIZED/);
@@ -77,7 +89,8 @@ assert.match(consoleUnit, /Requires=opsmind-evalos\.service/);
 assert.match(consoleUnit, /ExecStartPre=.*127\.0\.0\.1:8787\/health/);
 assert.match(deploymentSmoke, /m3-l2-agentic-formal@3\.0\.0/);
 assert.match(deploymentSmoke, /case_count, 80/);
-assert.doesNotMatch(`${app}\n${adapter}\n${connectors}`, /(?:DEEPSEEK_API_KEY|ANTHROPIC_AUTH_TOKEN|EVALOS_AGENT_HARNESS_TOKEN|EVALOS_LANGGRAPH_TOKEN)\s*=\s*["'][^"']+["']/);
+assert.doesNotMatch(`${app}\n${adapter}\n${connectors}\n${adapterV5}\n${connectorsV5}`,
+  /(?:DEEPSEEK_API_KEY|ANTHROPIC_AUTH_TOKEN|EVALOS_AGENT_HARNESS_TOKEN|EVALOS_LANGGRAPH_TOKEN)\s*=\s*["'][^"']+["']/);
 assert.match(failurePolicy, /capability.*failure|CANDIDATE_CAPABILITY_FAILURE/i);
 for (const source of [relayWorker, controlApi]) {
   assert.match(source, /investigations\/\[A-Za-z0-9_\-\]\+\/protocol-lab\/reset/,

@@ -8,8 +8,9 @@ import {
   evaluationDecisionReport, evaluationEvidenceTraceView, explainTraceRecord, TRACE_FILTERS, readSnapshotFile, sha256,
 } from "../../../packages/kernel/src/index.mjs";
 import {
-  BLIND_JUDGE_VERSION, CASE_INVESTIGATOR_RUNTIME, createAgentHarnessProductConnector, createCandidateAdapterV4,
-  createCaseInvestigator, createLangGraphProductConnector, judgeRecordAndSummarize,
+  BLIND_JUDGE_VERSION, CASE_INVESTIGATOR_RUNTIME, createAgentHarnessProductConnector, createAgentHarnessProductConnectorV5,
+  createCandidateAdapterV4, createCandidateAdapterV5, createCaseInvestigator,
+  createLangGraphProductConnector, createLangGraphProductConnectorV5, judgeRecordAndSummarize,
 } from "../../../packages/agent-runtime/src/index.mjs";
 import { ExternalProductTwinEnvironment, ProtocolTwinEnvironment, SshTwinClient,
   SshTwinManagerClient, managedTwinTrialId } from "../../../packages/twin-runtime/src/index.mjs";
@@ -19,9 +20,10 @@ const ANALYSIS_BUDGET = Object.freeze({ wallclock_ms: 300000, cost_usd: 2, max_t
 
 const CANDIDATE_RELAY_PATHS = Object.freeze({
   "agent-harness-v2": [
+    "^/health$", "^/v2/capabilities$", "^/v2/model-profile$",
     "^/v2/auth/me$", "^/v2/evaluation/controlled-remediation-contract$", "^/v2/investigation-runtime$",
     "^/v2/protocol-lab$",
-    "^/v2/remediation/context$", "^/v2/remediation/mode$", "^/v2/investigation-candidates$",
+    "^/v2/remediation/context$", "^/v2/remediation/mode$", "^/v2/investigation-candidates(?:\\?.*)?$",
     "^/v2/investigations/[A-Za-z0-9_-]+$", "^/v2/investigations/[A-Za-z0-9_-]+/execution-log(?:\\?.*)?$",
     "^/v2/investigations/[A-Za-z0-9_-]+/protocol-lab/reset$",
     "^/v2/actions(?:\\?.*)?$", "^/v2/evaluation/actions/[A-Za-z0-9_-]+$", "^/v2/actions/[A-Za-z0-9_-]+/approval$",
@@ -31,6 +33,7 @@ const CANDIDATE_RELAY_PATHS = Object.freeze({
     "^/api/v1/candidates$", "^/api/v1/investigations/[A-Za-z0-9_-]+$",
     "^/api/v1/investigations/[A-Za-z0-9_-]+/journal(?:\\?.*)?$",
     "^/api/v1/investigations/[A-Za-z0-9_-]+/product-e2e$", "^/api/v1/investigations/[A-Za-z0-9_-]+/approvals$",
+    "^/api/v1/jobs(?:\\?.*)?$",
   ],
 });
 
@@ -216,11 +219,11 @@ export function createApp({
     { ref: "agent-harness-v2", origin: process.env.EVALOS_AGENT_HARNESS_ORIGIN,
       token: process.env.EVALOS_AGENT_HARNESS_TOKEN, approvalToken: process.env.EVALOS_AGENT_HARNESS_APPROVAL_TOKEN,
       adminToken: process.env.EVALOS_AGENT_HARNESS_ADMIN_TOKEN, tenantId: process.env.EVALOS_AGENT_HARNESS_TENANT_ID,
-      create: createAgentHarnessProductConnector },
+      createV4: createAgentHarnessProductConnector, createV5: createAgentHarnessProductConnectorV5 },
     { ref: "langgraph-v1", origin: process.env.EVALOS_LANGGRAPH_ORIGIN,
       token: process.env.EVALOS_LANGGRAPH_TOKEN, approvalToken: process.env.EVALOS_LANGGRAPH_APPROVAL_TOKEN,
       adminToken: process.env.EVALOS_LANGGRAPH_ADMIN_TOKEN, tenantId: process.env.EVALOS_LANGGRAPH_TENANT_ID,
-      create: createLangGraphProductConnector },
+      createV4: createLangGraphProductConnector, createV5: createLangGraphProductConnectorV5 },
   ];
   for (const config of connectorConfigs) {
     const frozen = frozenCandidate(config.ref);
@@ -228,18 +231,25 @@ export function createApp({
     const tenantId = config.tenantId ?? relayCandidates[config.ref]?.tenant_id;
     const directConfigured = config.origin && config.token && config.approvalToken && config.adminToken;
     if ((!directConfigured && !relayTransport) || !tenantId || !frozen) continue;
-    const connector = config.create({ origin: config.origin, token: config.token,
+    const useV5 = frozen.adapter_contract_version === "5.0";
+    const connector = (useV5 ? config.createV5 : config.createV4)({ origin: config.origin, token: config.token,
       approvalToken: config.approvalToken, adminToken: config.adminToken, tenantId,
       requestTransport: relayTransport,
       declaredRuntimeLimits: relayCandidates[config.ref]?.evaluation_limits ?? null,
+      declaredCandidateRuntime: frozen.candidate_runtime ?? null,
       attestation: { source_revision: frozen.source_revision, artifact_digest: frozen.artifact_digest } });
-    const adapter = createCandidateAdapterV4({ id: config.ref, connector });
+    const adapter = useV5 ? createCandidateAdapterV5({ id: config.ref, connector })
+      : createCandidateAdapterV4({ id: config.ref, connector });
     realCandidateConnectors[config.ref] = connector;
-    for (const lane of adapter.supportedEvaluationLanes) adapters[`${config.ref}:${lane}`] = adapter;
+    for (const lane of adapter.supportedEvaluationLanes) {
+      adapters[`${config.ref}:${lane}:${adapter.adapterContractVersion}`] = adapter;
+      adapters[`${config.ref}:${lane}`] = adapter;
+    }
   }
   Object.assign(realCandidateConnectors, cleanupConnectorOverrides);
   const liveDeepSeekAvailable = Boolean(process.env.DEEPSEEK_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN ?? process.env.ANTHROPIC_API_KEY);
-  const adapterFor = (ref, lane) => adapters[`${ref}:${lane}`] ?? adapters[ref];
+  const adapterFor = (ref, lane, contractVersion = null) => (contractVersion
+    ? adapters[`${ref}:${lane}:${contractVersion}`] : null) ?? adapters[`${ref}:${lane}`] ?? adapters[ref];
   const twinEnvironmentConfigured = Boolean(process.env.EVALOS_TWIN_HOST && process.env.EVALOS_TWIN_SSH_KEY && process.env.EVALOS_TWIN_KNOWN_HOSTS);
   const twinConfigured = Boolean(twinManagerClientOverride || twinEnvironmentConfigured);
   const twinClient = twinEnvironmentConfigured ? new SshTwinClient() : null;
@@ -475,7 +485,9 @@ export function createApp({
     if (!new Set(["RERUN_FROZEN", "NEW_EVALUATION"]).has(requestKind)) throw new Error("必须明确选择按原配置重新评测或新建评测");
     const source = store.getExperiment(body.source_experiment_id);
     if (!source) throw new Error("source experiment is required");
-    if (source.manifest.manifest_version !== "6.0") throw new Error("冻结参评配置属于旧版只读历史；M3.1 只执行 Manifest 6.0，请选择新版实验配置");
+    if (!["6.0", "7.0"].includes(source.manifest.manifest_version)) {
+      throw new Error("冻结参评配置属于旧版只读历史；当前只执行 Manifest 6.0 或 7.0，请选择新版实验配置");
+    }
     const suite = store.listSuites().find((item) => item.suite_ref === source.suite_ref);
     const caseRefs = [...new Set(body.case_refs ?? [])];
     if (!caseRefs.length) throw new Error("at least one case is required");
@@ -522,8 +534,9 @@ export function createApp({
       : Number(source.manifest.budget?.wallclock_ms ?? 30000);
     const totalTrials = caseRefs.length * contestants.length * environmentSeeds.length * repetitions;
     const needsTwin = caseRefs.some((caseRef) => store.getExecutionCase(caseRef)?.source?.level === "L2");
-    const missingAdapters = contestants.map((item) => item.ref).filter((ref) => !adapterFor(ref, source.manifest.evaluation_lane)
-      || !adapterFor(ref, source.manifest.evaluation_lane).supportedEvaluationLanes?.includes(source.manifest.evaluation_lane));
+    const missingAdapters = contestants.filter((item) => !adapterFor(item.ref, source.manifest.evaluation_lane,
+      item.adapter_contract_version) || !adapterFor(item.ref, source.manifest.evaluation_lane,
+      item.adapter_contract_version).supportedEvaluationLanes?.includes(source.manifest.evaluation_lane)).map((item) => item.ref);
     const runClassViolations = contestants.flatMap((item) => {
       if (source.manifest.run_class === "ENGINEERING_TEST" && item.kind !== "TEST_DOUBLE") {
         return [`工程测试实验只能使用明确标注的测试替身：${item.ref}`];
@@ -544,7 +557,7 @@ export function createApp({
         return { ref: contestant.ref, kind: "TEST_DOUBLE", ready: true, label: "工程测试替身（不进入真实成绩）",
           isolation: { safe_parallelism: Number(source.manifest.capacity_policy?.runner_workers ?? 1) } };
       }
-      const adapter = adapterFor(contestant.ref, source.manifest.evaluation_lane);
+      const adapter = adapterFor(contestant.ref, source.manifest.evaluation_lane, contestant.adapter_contract_version);
       if (!adapter || typeof adapter.preflight !== "function") {
         return { ref: contestant.ref, kind: contestant.kind, ready: false,
           error: "真实产品连接器或开考检查未配置" };
@@ -916,7 +929,8 @@ export function createApp({
       }
       if (request.method === "GET" && url.pathname === "/health") {
         const operations = operationsHealth();
-        return json({ status: operations.status, service: "opsmind-evalos-control-api", contract: "evalos.7", milestone: "M3.1",
+        return json({ status: operations.status, service: "opsmind-evalos-control-api", contract: "evalos.7",
+          milestone: frozenM31Manifest.milestone,
           ledger: operations.ledger, operations,
           formal_run: { enabled: formalM3RunEnabled, guard: "480_TRIAL_NOT_AUTHORIZED" },
           twin: { configured: twinConfigured } }, 200, cors);
@@ -925,7 +939,7 @@ export function createApp({
         if (!isAdmin(request)) return json({ error: "authenticated workbench session required" }, 401, cors);
         return json(operationsHealth(), 200, cors);
       }      if (request.method === "GET" && url.pathname === "/api/runtime/capabilities") {
-        return json({ contract: "evalos-runtime-capabilities.3", milestone: "M3.1",
+        return json({ contract: "evalos-runtime-capabilities.3", milestone: frozenM31Manifest.milestone,
           eval_intelligence_enabled: liveDeepSeekAvailable,
           candidate_execution: "external-real-products-only", adapters: Object.keys(adapters),
           real_candidate_adapters: Object.fromEntries(["agent-harness-v2", "langgraph-v1"].map((ref) =>
@@ -942,7 +956,7 @@ export function createApp({
         const items = [];
         for (const ref of ["agent-harness-v2", "langgraph-v1"]) {
           const frozen = frozenCandidate(ref);
-          const adapter = adapterFor(ref, frozenM31Manifest.evaluation_lane);
+          const adapter = adapterFor(ref, frozenM31Manifest.evaluation_lane, frozen?.adapter_contract_version);
           if (!frozen || !adapter || typeof adapter.preflight !== "function") {
             items.push({ ref, kind: "REAL_PRODUCT", configured: false, ready: false,
               status_label: "尚未连接", explanation: "EvalOS 尚未取得该真实产品的独立评测凭据或公开产品接口。" });
@@ -1162,7 +1176,7 @@ export function createApp({
       }
       if (request.method === "GET" && url.pathname === "/api/workbench/run-templates") {
         const requestedSourceExperimentId = url.searchParams.get("source_experiment_id");
-        return json({ items: store.listExperiments().filter((item) => item.manifest.manifest_version === "6.0"
+        return json({ items: store.listExperiments().filter((item) => ["6.0", "7.0"].includes(item.manifest.manifest_version)
           && (requestedSourceExperimentId
             ? item.id === requestedSourceExperimentId
             : ((store.listTrials(item.id, { includeReplays: false }).length === 0
@@ -1266,10 +1280,12 @@ export function createApp({
         const formalExperimentIds = new Set(store.listExperiments().filter((item) => evaluationMode(item) === "FORMAL").map((item) => item.id));
         const formalTrialIds = new Set(trials.filter((item) => formalExperimentIds.has(item.experiment_id)).map((item) => item.id));
         const grades = store.listGraderRuns().filter((item) => item.dimension === "overall" && formalTrialIds.has(item.trial_id));
-        return json({ contract: "evalos-workbench.4", milestone: "M3.1", platform: {
+        return json({ contract: "evalos-workbench.4", milestone: frozenM31Manifest.milestone, platform: {
           core: "Claude Agent SDK + DeepSeek + MCP + Skills + Harness", workflow_graph: null,
           official_score_source: "deterministic_code_grader", ai_analysis_authority: "diagnostic_only",
-          candidate_execution: "external-real-products-only", candidate_adapter_contract: "4.0",
+          candidate_execution: "external-real-products-only",
+          candidate_adapter_contract: frozenM31Manifest.contestants[0]?.adapter_contract_version ?? "4.0",
+          candidate_adapter_contracts_supported: ["4.0", "5.0"],
           trace_contract: "4.0", grader_contract: "5.1", formal_480_enabled: false,
         }, counts: { datasets: store.listDatasets().length, cases: store.listCases().length,
           experiments: experiments.length, trials: trials.length, completed_trials: trials.filter((item) => item.status === "COMPLETED").length,

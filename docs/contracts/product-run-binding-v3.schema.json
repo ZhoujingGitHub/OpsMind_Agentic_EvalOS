@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsmind.local/contracts/product-run-binding-v3.schema.json",
+  "title": "OpsMind EvalOS Product Run Binding 3.0",
+  "description": "真实产品运行与冻结 EvalOS Trial 的可审计绑定。EvalOS 自己生成的提交回执不构成完成绑定；产品原生确认优先，其次才是无矛盾的公开证据链。",
+  "type": "object",
+  "required": ["contract", "run_ref", "expected_context_digest", "binding_strength", "native_conformance", "evidence_chain", "complete"],
+  "properties": {
+    "contract": { "const": "evalos-product-run-binding.3" },
+    "run_ref": { "type": "string", "minLength": 1 },
+    "expected_context_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "binding_strength": { "enum": ["PRODUCT_NATIVE_ACK", "EVIDENCE_CHAIN_BOUND", "UNBOUND"] },
+    "native_conformance": { "$ref": "#/$defs/checks" },
+    "evidence_chain": { "$ref": "#/$defs/checks" },
+    "complete": { "type": "boolean" }
+  },
+  "$defs": {
+    "checks": {
+      "type": "object", "required": ["required", "checks", "missing", "mismatches"],
+      "properties": {
+        "required": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "observed": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "checks": { "type": "object", "additionalProperties": { "type": "boolean" } },
+        "missing": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "mismatches": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

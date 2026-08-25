@@ -5,3 +5,5 @@ export * from "./judge-orchestrator.mjs";
 export * from "./case-investigator.mjs";
 export * from "./candidate-adapter-v4.mjs";
 export * from "./product-connectors-v4.mjs";
+export * from "./candidate-adapter-v5.mjs";
+export * from "./product-connectors-v5.mjs";
