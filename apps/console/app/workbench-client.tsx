@@ -482,6 +482,7 @@ function RunComposer({ intent, caseRefs, defaultExperimentId, datasetRef, onClos
   const [sourceExperimentId, setSourceExperimentId] = useState(defaultExperimentId ?? "");
   const [evaluationPurpose, setEvaluationPurpose] = useState("PAIRED_COMPARISON");
   const [mode, setMode] = useState("QUICK_VALIDATION");
+  const [capacityConcurrency, setCapacityConcurrency] = useState(4);
   const [repetitions, setRepetitions] = useState(1);
   const [reason, setReason] = useState("");
   const [setName, setSetName] = useState("");
@@ -507,7 +508,8 @@ function RunComposer({ intent, caseRefs, defaultExperimentId, datasetRef, onClos
   const purposeLabel = contestantRefs.length > 1 ? "双系统公平对比（Paired comparison）" : "单系统回归（Single-system regression）";
   const payload = { request_kind: requestKind, evaluation_purpose: contestantRefs.length > 1 ? "PAIRED_COMPARISON" : "SINGLE_SYSTEM_REGRESSION",
     source_experiment_id: effectiveSourceExperimentId, case_refs: caseRefs, contestant_refs: contestantRefs,
-    repetitions, mode, requested_by: "evalos-operator", reason };
+    repetitions, mode, requested_concurrency: mode === "CAPACITY_REHEARSAL" ? capacityConcurrency : 1,
+    requested_by: "evalos-operator", reason };
   const check = async () => { setBusy(true); setError(""); setPreflight(null); try {
     if (!reason.trim()) throw new Error(`请填写本次${intent === "rerun" ? "重新评测" : "新建评测"}的原因，便于以后追溯。`);
     if (!effectiveSourceExperimentId) throw new Error("没有找到适用于这些 Case 的冻结参评配置，请先完成一份覆盖该数据集的实验。");
@@ -524,7 +526,8 @@ function RunComposer({ intent, caseRefs, defaultExperimentId, datasetRef, onClos
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="run-modal" role="dialog" aria-modal="true" aria-labelledby="run-modal-title">
     <div className="modal-head"><div><span className="kicker">{intent === "rerun" ? "RERUN FROZEN EVALUATION" : "CREATE EVALUATION"}</span><h2 id="run-modal-title">{intent === "rerun" ? "按原配置重新评测" : "新建评测"}</h2><p>{intent === "rerun" ? "沿用原实验冻结的全部参评考生与公平条件，只选择要重跑的题。" : "先确定评测目的，再由平台绑定对应考生与冻结版本；不会规定 Agent 的求解路径。"}</p></div><button aria-label="关闭" onClick={onClose}>×</button></div>
     <div className="mode-grid"><button className={mode === "QUICK_VALIDATION" ? "selected" : ""} onClick={() => { setMode("QUICK_VALIDATION"); setPreflight(null); }}><strong>快速验证</strong><small>Quick validation</small><span>临时检查，不进入正式成绩</span></button>
-      <button className={mode === "TARGETED_REGRESSION" ? "selected" : ""} onClick={() => { setMode("TARGETED_REGRESSION"); setPreflight(null); }}><strong>定向回归</strong><small>Targeted regression</small><span>保存一组重点 Case，反复验证改进</span></button></div>
+      <button className={mode === "TARGETED_REGRESSION" ? "selected" : ""} onClick={() => { setMode("TARGETED_REGRESSION"); setPreflight(null); }}><strong>定向回归</strong><small>Targeted regression</small><span>保存一组重点 Case，反复验证改进</span></button>
+      <button className={mode === "CAPACITY_REHEARSAL" ? "selected" : ""} onClick={() => { setMode("CAPACITY_REHEARSAL"); setPreflight(null); }}><strong>容量演练</strong><small>Capacity rehearsal</small><span>不计分；请求并发与安全降并发分别留痕</span></button></div>
     {intent === "new" && <section className="purpose-picker" aria-labelledby="purpose-title"><div className="purpose-head"><div><strong id="purpose-title">评测目的（Evaluation purpose）</strong><small>选择为什么评，不需要手工拼装考生</small></div><Tag>{purposeLabel}</Tag></div><div className="purpose-grid">
       {frozenContestants.length > 1 && <button className={effectivePurpose === "PAIRED_COMPARISON" ? "selected" : ""} onClick={() => { setEvaluationPurpose("PAIRED_COMPARISON"); setPreflight(null); }}><strong>双系统公平对比</strong><small>Paired comparison</small><span>同一批 Case、预算与环境分别运行 {frozenContestants.map((item: Json) => contestantDisplayName(item.ref)).join(" 和 ")}</span></button>}
       {frozenContestants.map((item: Json) => <button key={item.ref} className={effectivePurpose === `SINGLE:${item.ref}` ? "selected" : ""} onClick={() => { setEvaluationPurpose(`SINGLE:${item.ref}`); setPreflight(null); }}><strong>{contestantDisplayName(item.ref)} 单系统回归</strong><small>Single-system regression</small><span>只验证这一套系统，不生成双系统胜负结论</span></button>)}
@@ -535,6 +538,7 @@ function RunComposer({ intent, caseRefs, defaultExperimentId, datasetRef, onClos
         <code>{effectiveSourceExperimentId || defaultExperimentId}</code><small>{incompatibleFrozenSource ? "当前 M3.1 只接受 Manifest 6.0 与 Candidate Adapter 4.0；旧实验继续保留查看，但不能冒充真实产品复评。" : "重新评测不可更换考生；需要更换时请从数据集页面新建评测。"}</small>
         {incompatibleFrozenSource && <a className="text-link" href="/datasets">前往数据集与 Case →</a>}</div>}
       <label>每个 Seed 的重复次数 <small>Replicates per Seed</small><select value={repetitions} onChange={(event) => { setRepetitions(Number(event.target.value)); setPreflight(null); }}>{[1,2,3,4,5].map((value) => <option value={value} key={value}>{value} 次</option>)}</select></label>
+      {mode === "CAPACITY_REHEARSAL" && <label>请求并发 <small>Requested concurrency</small><select value={capacityConcurrency} onChange={(event) => { setCapacityConcurrency(Number(event.target.value)); setPreflight(null); }}><option value={4}>4 路</option><option value={8}>8 路</option></select></label>}
       <label className="full">评测原因 <small>Audit reason</small><textarea rows={3} value={reason} onChange={(event) => { setReason(event.target.value); setPreflight(null); }} placeholder="例如：验证新版本是否修复了误判且没有回归" /></label>
       {mode === "TARGETED_REGRESSION" && <label className="full">保存为回归集（可选） <small>Regression set</small><input value={setName} onChange={(event) => setSetName(event.target.value)} placeholder="例如：跨租户安全核心回归集" /></label>}
     </div>
@@ -701,7 +705,7 @@ function stableToken(value: unknown) { const text = JSON.stringify(value); let h
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 function analysisMode(value: string) { return ({ optimization_research: "优化深研", case_diagnosis: "Case 诊断", score_explanation: "评分解释" } as Record<string, string>)[value] ?? humanize(value); }
-function modeLabel(value: string) { return ({ QUICK_VALIDATION: "快速验证（Quick validation）", TARGETED_REGRESSION: "定向回归（Targeted regression）", FORMAL: "正式评测（Formal evaluation）" } as Record<string,string>)[value] ?? value; }
+function modeLabel(value: string) { return ({ QUICK_VALIDATION: "快速验证（Quick validation）", TARGETED_REGRESSION: "定向回归（Targeted regression）", CAPACITY_REHEARSAL: "容量演练（Capacity rehearsal）", FORMAL: "正式评测（Formal evaluation）" } as Record<string,string>)[value] ?? value; }
 function readinessLabel(value: string) { return ({ model_and_adapter: "模型与适配器（Model & adapter）", twin: "EvalOS 与两名考生都已连接数字孪生（Twin）", run_class_separation: "真实考生与测试替身隔离（Run class）", external_candidate_api: "真实产品公开接口（Product API）", candidate_budget_alignment: "考生最长运行不超过 Trial 时间预算（Budget alignment）", candidate_fingerprint: "考生版本指纹一致（Fingerprint）", approval_identity_separation: "提交、审批、管理账号分离（Separation of duties）", candidate_least_privilege: "三个评测账号均为最小权限（Least privilege）", candidate_tenant_isolation: "考生评测租户隔离（Tenant isolation）", formal_release_gate: "正式开考放行（Formal gate）", isolated_namespace: "Trial 隔离运行空间（Namespace）", environment_reset: "环境复位（Reset）", deterministic_grader: "确定性评分器（Code grader）" } as Record<string,string>)[value] ?? humanize(value); }
 function comparePassed(before: any, after: any) { if (after === null || after === undefined) return "等待结果"; if (before === null || before === undefined) return after ? "— → 通过" : "— → 未通过"; return `${before ? "通过" : "未通过"} → ${after ? "通过" : "未通过"}`; }
 function compareMetric(before: any, after: any, formatter: (value: any) => string) { if (after === null || after === undefined) return "等待结果"; return `${before === null || before === undefined ? "—" : formatter(before)} → ${formatter(after)}`; }

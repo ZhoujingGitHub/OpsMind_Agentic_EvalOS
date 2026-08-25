@@ -61,6 +61,7 @@ test("一小时级Trial持续展示在线心跳、实质进展和卡顿风险而
 test("重评名称只保留一层用途前缀", () => {
   assert.equal(evaluationRunName("M3.1 双考生资格试运行", "QUICK_VALIDATION"), "快速验证 · M3.1 双考生资格试运行");
   assert.equal(evaluationRunName("快速验证 · M3.1 双考生资格试运行", "TARGETED_REGRESSION"), "定向回归 · M3.1 双考生资格试运行");
+  assert.equal(evaluationRunName("定向回归 · M3.1 双考生资格试运行", "CAPACITY_REHEARSAL"), "容量演练 · M3.1 双考生资格试运行");
   assert.equal(evaluationRunName("定向回归 · M3.1 双考生资格试运行", "FORMAL"), "正式评测 · M3.1 双考生资格试运行");
 });
 
@@ -473,6 +474,49 @@ test("评测任务只对冻结允许的瞬态限流自动重试一次并保留�
     }))).json();
     assert.equal(health.failure_categories.RATE_LIMIT, 1);
     assert.equal(health.retry_history.retried_trials, 1);
+  } finally { app.close(); }
+});
+
+test("容量演练独立留痕请求并发与实际并发且绝不计入正式成绩", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-capacity-rehearsal-"));
+  const app = createApp({ databasePath: path.join(root, "control.sqlite"),
+    privateLabelDatabasePath: path.join(root, "private.sqlite"), runtimeRoot: root, apiToken: "control-secret" });
+  try {
+    const capacitySource = structuredClone(manifest);
+    capacitySource.name = "容量演练冻结源";
+    capacitySource.case_refs = [manifest.case_refs[0]];
+    capacitySource.case_partitions = { public: capacitySource.case_refs, hidden: [], safety: [], regression: [] };
+    capacitySource.environment_seeds = [manifest.environment_seeds[0]];
+    capacitySource.capacity_policy = { ...capacitySource.capacity_policy, runner_workers: 8, twin_slots: 8 };
+    const source = app.store.createExperiment(capacitySource, "capacity-source", { scheduleTrials: false }).experiment;
+    const response = await app.handler(new Request("http://local/api/workbench/run-requests", {
+      method: "POST", headers: { authorization: "Bearer control-secret", "content-type": "application/json",
+        "idempotency-key": "capacity-rehearsal-4x" },
+      body: JSON.stringify({ request_kind: "NEW_EVALUATION", evaluation_purpose: "PAIRED_COMPARISON",
+        mode: "CAPACITY_REHEARSAL", requested_concurrency: 4, source_experiment_id: source.id,
+        case_refs: capacitySource.case_refs, contestant_refs: capacitySource.contestants.map((item) => item.ref),
+        environment_seeds: capacitySource.environment_seeds, repetitions: 1,
+        requested_by: "capacity-test", reason: "验证容量演练不会冒充正式成绩" }),
+    }));
+    const responsePayload = await response.json();
+    assert.equal(response.status, 202, JSON.stringify(responsePayload));
+    const created = responsePayload.request;
+    assert.equal(created.preflight.mode, "CAPACITY_REHEARSAL");
+    assert.equal(created.preflight.affects_official_score, false);
+    assert.equal(created.preflight.budget.requested_concurrency, 4);
+    assert.equal(created.preflight.budget.effective_concurrency, 4);
+    let request;
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      request = (await (await app.handler(new Request(`http://local/api/workbench/run-requests/${created.id}`, {
+        headers: { authorization: "Bearer control-secret" } }))).json()).request;
+      if (["COMPLETED", "FAILED"].includes(request.status)) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(request.status, "COMPLETED");
+    const experiment = app.store.getExperiment(request.created_experiment_id);
+    assert.equal(experiment.manifest.evaluation_mode, "CAPACITY_REHEARSAL");
+    assert.equal(experiment.manifest.capacity_policy.runner_workers, 4);
+    assert.equal(app.store.listTrials(experiment.id).length, 2);
   } finally { app.close(); }
 });
 

@@ -120,8 +120,9 @@ export function trialLiveProgressView(trial, experiment, trace, nowMs = Date.now
 }
 
 export function evaluationRunName(sourceName, mode) {
-  const runLabel = mode === "QUICK_VALIDATION" ? "快速验证" : mode === "TARGETED_REGRESSION" ? "定向回归" : "正式评测";
-  const baseName = String(sourceName).replace(/^(快速验证|定向回归|正式评测)\s*·\s*/u, "");
+  const runLabel = mode === "QUICK_VALIDATION" ? "快速验证" : mode === "TARGETED_REGRESSION" ? "定向回归"
+    : mode === "CAPACITY_REHEARSAL" ? "容量演练" : "正式评测";
+  const baseName = String(sourceName).replace(/^(快速验证|定向回归|容量演练|正式评测)\s*·\s*/u, "");
   return `${runLabel} · ${baseName}`;
 }
 
@@ -156,7 +157,8 @@ export function createApp({
       path.join(ROOT, "infra", "migrations", "sqlite", "005_m31_seed_identity.sql"),
       path.join(ROOT, "infra", "migrations", "sqlite", "006_m31_trial_attempt_audit.sql"),
       path.join(ROOT, "infra", "migrations", "sqlite", "007_m32_run_resilience.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "008_m32_cleanup_reconciliation.sql")] });
+      path.join(ROOT, "infra", "migrations", "sqlite", "008_m32_cleanup_reconciliation.sql"),
+      path.join(ROOT, "infra", "migrations", "sqlite", "009_m32_capacity_rehearsal.sql")] });
   const labels = new PrivateLabelStore({ databasePath: privateLabelDatabasePath,
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const privateLabelHash = labels.publishRegistry(registry);
@@ -490,7 +492,9 @@ export function createApp({
 
   const preflightEvaluation = async (body) => {
     const mode = body.mode ?? "QUICK_VALIDATION";
-    if (!new Set(["QUICK_VALIDATION", "TARGETED_REGRESSION", "FORMAL"]).has(mode)) throw new Error("invalid evaluation run mode");
+    if (!new Set(["QUICK_VALIDATION", "TARGETED_REGRESSION", "CAPACITY_REHEARSAL", "FORMAL"]).has(mode)) {
+      throw new Error("invalid evaluation run mode");
+    }
     const requestKind = body.request_kind;
     if (!new Set(["RERUN_FROZEN", "NEW_EVALUATION"]).has(requestKind)) throw new Error("必须明确选择按原配置重新评测或新建评测");
     const source = store.getExperiment(body.source_experiment_id);
@@ -581,7 +585,11 @@ export function createApp({
       }
     }));
     const failedCandidateChecks = candidateChecks.filter((item) => !item.ready);
-    const requestedConcurrency = Math.max(1, Number(source.manifest.capacity_policy?.runner_workers ?? 1));
+    const frozenMaximumConcurrency = Math.max(1, Number(source.manifest.capacity_policy?.runner_workers ?? 1));
+    const requestedConcurrency = Number(body.requested_concurrency ?? (mode === "FORMAL" ? frozenMaximumConcurrency : 1));
+    if (!Number.isInteger(requestedConcurrency) || requestedConcurrency < 1 || requestedConcurrency > frozenMaximumConcurrency) {
+      throw new Error(`requested concurrency must be between 1 and frozen maximum ${frozenMaximumConcurrency}`);
+    }
     const candidateParallelism = candidateChecks.length
       ? Math.min(...candidateChecks.map((item) => Number(item.isolation?.safe_parallelism ?? requestedConcurrency)))
       : 1;
@@ -601,7 +609,8 @@ export function createApp({
     return { contract: "evalos-preflight.3", ready: blockers.length === 0, blockers,
       request_kind: requestKind, evaluation_purpose: evaluationPurpose,
       mode, mode_label: mode === "QUICK_VALIDATION" ? "快速验证（Quick validation）" : mode === "TARGETED_REGRESSION"
-        ? "定向回归（Targeted regression）" : "正式评测（Formal evaluation）",
+        ? "定向回归（Targeted regression）" : mode === "CAPACITY_REHEARSAL"
+          ? "容量演练（Capacity rehearsal）" : "正式评测（Formal evaluation）",
       source_experiment_id: source.id, dataset_ref: source.dataset_ref, suite_ref: source.suite_ref,
       case_refs: caseRefs, contestant_refs: contestants.map((item) => item.ref), environment_seeds: environmentSeeds,
       contestants: contestants.map(({ ref, adapter_version, source_revision, artifact_digest }) =>
@@ -739,7 +748,11 @@ export function createApp({
           design: contestants.length === 2 ? "paired_comparison" : "single_system_acceptance",
           case_refs: request.selection.case_refs, case_partitions: casePartitions, contestants,
           environment_seeds: request.selection.environment_seeds, replicates_per_seed: request.selection.repetitions,
-          evaluation_mode: request.mode === "FORMAL" ? "FORMAL" : "QUALIFICATION", request_kind: request.selection.request_kind,
+          evaluation_mode: request.mode === "FORMAL" ? "FORMAL"
+            : request.mode === "CAPACITY_REHEARSAL" ? "CAPACITY_REHEARSAL" : "QUALIFICATION",
+          capacity_policy: { ...source.manifest.capacity_policy,
+            runner_workers: Number(request.preflight?.budget?.requested_concurrency ?? source.manifest.capacity_policy?.runner_workers ?? 1) },
+          request_kind: request.selection.request_kind,
           evaluation_purpose: request.selection.evaluation_purpose,
           source_experiment_id: source.id, operator_reason: request.reason };
         const created = store.createExperiment(manifest, `evaluation-request:${request.id}`);

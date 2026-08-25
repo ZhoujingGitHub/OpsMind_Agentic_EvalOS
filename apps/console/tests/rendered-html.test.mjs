@@ -86,6 +86,8 @@ test("工作台明确Agent自主性、确定性评分、源码快照和只读AI�
   assert.match(source, /不计正式成绩/);
   assert.match(source, /测试替身/);
   assert.match(source, /定向回归/);
+  assert.match(source, /容量演练/);
+  assert.match(source, /requested_concurrency/);
   assert.match(source, /仅重新评分/);
   assert.match(source, /原结果与新结果对比/);
   assert.match(source, /平台运行健康（Operations health）/);

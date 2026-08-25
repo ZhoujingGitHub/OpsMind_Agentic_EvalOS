@@ -1014,7 +1014,9 @@ export class EvalStore {
 
   createEvaluationRunRequest({ idempotencyKey, mode, sourceExperimentId, requestedBy, reason, selection, preflight }) {
     if (!idempotencyKey || !requestedBy || !reason) throw new Error("idempotency key, operator and reason are required");
-    if (!new Set(["QUICK_VALIDATION", "TARGETED_REGRESSION", "FORMAL"]).has(mode)) throw new Error("invalid evaluation run mode");
+    if (!new Set(["QUICK_VALIDATION", "TARGETED_REGRESSION", "CAPACITY_REHEARSAL", "FORMAL"]).has(mode)) {
+      throw new Error("invalid evaluation run mode");
+    }
     if (!this.getExperiment(sourceExperimentId)) throw new Error(`source experiment not found: ${sourceExperimentId}`);
     const requestBody = { mode, source_experiment_id: sourceExperimentId, requested_by: requestedBy, reason, selection, preflight };
     const requestHash = sha256(requestBody);
