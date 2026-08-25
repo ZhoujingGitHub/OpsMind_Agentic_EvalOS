@@ -204,9 +204,9 @@
       "adapter_version": "candidate-adapter-5.0.0",
       "source_revision": "e40a8c4433ab293619f7185e555a5789030832ed",
       "artifact_digest": "sha256:1f372bfab50b4e78680ad89db266fbde1f1bc471722031b45e2980c9d2417223",
-      "runtime_digest": "sha256:c371b647fda35bf8315ad7c0330c1842ebb82b00a6db92c99c8f6acd050ed430",
-      "runtime_manifest_digest": "sha256:6786016ecb34d137a8fab1650b9ef6bdaab1daa021168e25dfe2435f43da06fa",
-      "capability_contract_digest": "sha256:90ce2d27afb832984e4459bbbcd49821184b6ee47f09e00d731e77c6a999f3b1",
+      "runtime_digest": "sha256:b21ea0e8a670849a065b98d8213e08181e4b52ddc0e8c38b147d8b33ab5675dc",
+      "runtime_manifest_digest": "sha256:2c5769b33579b07fd85eba3435a99189dc07fe6591e97ce2f68bcee5a3fcddd7",
+      "capability_contract_digest": "sha256:725365203e93114cf0e1c9fa42a1c2b72e3235e6aa9a5c6e1020930a43e25ffb",
       "binding_requirement": "EVIDENCE_CHAIN_BOUND",
       "candidate_runtime": {
         "contract_version": "1.0",
@@ -220,10 +220,10 @@
           }
         ],
         "versions": {
-          "service": "2.3.0",
-          "investigation": "unknown",
-          "report": "unknown",
-          "protocol_binding": "unknown"
+          "service": "2.3.3",
+          "investigation": "opsmind-investigation/2.0",
+          "report": "opsmind-report-delivery/2.0",
+          "protocol_binding": "opsmind-protocol-lab-binding/2.0"
         }
       }
     },
