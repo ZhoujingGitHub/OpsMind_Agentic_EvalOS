@@ -204,9 +204,9 @@
       "adapter_version": "candidate-adapter-5.0.0",
       "source_revision": "e40a8c4433ab293619f7185e555a5789030832ed",
       "artifact_digest": "sha256:1f372bfab50b4e78680ad89db266fbde1f1bc471722031b45e2980c9d2417223",
-      "runtime_digest": "sha256:b21ea0e8a670849a065b98d8213e08181e4b52ddc0e8c38b147d8b33ab5675dc",
-      "runtime_manifest_digest": "sha256:2c5769b33579b07fd85eba3435a99189dc07fe6591e97ce2f68bcee5a3fcddd7",
-      "capability_contract_digest": "sha256:725365203e93114cf0e1c9fa42a1c2b72e3235e6aa9a5c6e1020930a43e25ffb",
+      "runtime_digest": "sha256:9b6b9f64ac98ca9840033bd7065b4dced55835ef631e844e0964e2ff6923e794",
+      "runtime_manifest_digest": "sha256:f3e4a67a0d6611dc480d0db4e7268d7127bae20c3b7a632c7d53515ebfd72472",
+      "capability_contract_digest": "sha256:28e8a376de4ab5197220b365671d3d24a624f1c112b7bb339ec68ea5480c0247",
       "binding_requirement": "EVIDENCE_CHAIN_BOUND",
       "candidate_runtime": {
         "contract_version": "1.0",
