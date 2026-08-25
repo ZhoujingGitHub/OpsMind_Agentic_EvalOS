@@ -5,6 +5,7 @@ const GENESIS = "0".repeat(64);
 export class EvaluationLedger {
   constructor(store) {
     this.store = store;
+    this.verificationCheckpoint = null;
   }
 
   append({ entityType, entityId: targetId, action, payload }) {
@@ -30,16 +31,22 @@ export class EvaluationLedger {
     });
   }
 
-  entries() {
-    return this.store.db.prepare("SELECT * FROM ledger_entries ORDER BY seq").all().map((row) => ({
+  entries(afterSeq = 0) {
+    return this.store.db.prepare("SELECT * FROM ledger_entries WHERE seq>? ORDER BY seq").all(afterSeq).map((row) => ({
       ...row,
       payload: JSON.parse(row.payload_json),
     }));
   }
 
   verify() {
-    const entries = this.entries();
-    let expectedPrev = GENESIS;
+    let checkpoint = this.verificationCheckpoint;
+    if (checkpoint) {
+      const stored = this.store.db.prepare("SELECT entry_hash FROM ledger_entries WHERE seq=?").get(checkpoint.last_seq);
+      if (stored?.entry_hash !== checkpoint.head_hash) checkpoint = null;
+    }
+    const entries = this.entries(checkpoint?.last_seq ?? 0);
+    if (checkpoint && entries.length === 0) return checkpoint.result;
+    let expectedPrev = checkpoint?.head_hash ?? GENESIS;
     const errors = [];
     for (const entry of entries) {
       if (entry.prev_hash !== expectedPrev) errors.push({ seq: entry.seq, reason: "previous hash mismatch" });
@@ -54,12 +61,21 @@ export class EvaluationLedger {
       if (entry.entry_hash !== expectedHash) errors.push({ seq: entry.seq, reason: "entry hash mismatch" });
       expectedPrev = entry.entry_hash;
     }
-    return {
+    const result = {
       valid: errors.length === 0,
-      entries: entries.length,
-      head_hash: entries.at(-1)?.entry_hash ?? GENESIS,
+      entries: (checkpoint?.result.entries ?? 0) + entries.length,
+      head_hash: entries.at(-1)?.entry_hash ?? checkpoint?.head_hash ?? GENESIS,
       errors,
     };
+    if (result.valid) {
+      this.verificationCheckpoint = {
+        last_seq: Number(entries.at(-1)?.seq ?? checkpoint?.last_seq ?? 0),
+        head_hash: result.head_hash,
+        result,
+      };
+    } else {
+      this.verificationCheckpoint = null;
+    }
+    return result;
   }
 }
-

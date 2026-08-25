@@ -472,6 +472,29 @@ test("故障现场快照失败不会阻止环境复位", async () => {
   } finally { labels.close(); store.close(); }
 });
 
+test("账本首次全量验签后只校验新增尾部且保持同一可信头", () => {
+  const { store, labels, ledger } = fixture();
+  const originalEntries = ledger.entries.bind(ledger);
+  const scannedAfter = [];
+  ledger.entries = (afterSeq = 0) => {
+    scannedAfter.push(afterSeq);
+    return originalEntries(afterSeq);
+  };
+  try {
+    ledger.append({ entityType: "test", entityId: "one", action: "test.one", payload: { value: 1 } });
+    ledger.append({ entityType: "test", entityId: "two", action: "test.two", payload: { value: 2 } });
+    const initial = ledger.verify();
+    assert.equal(initial.valid, true);
+    assert.equal(ledger.verify(), initial);
+    ledger.append({ entityType: "test", entityId: "three", action: "test.three", payload: { value: 3 } });
+    const extended = ledger.verify();
+    assert.equal(extended.valid, true);
+    assert.equal(extended.entries, initial.entries + 1);
+    assert.notEqual(extended.head_hash, initial.head_hash);
+    assert.deepEqual(scannedAfter, [0, initial.entries, initial.entries]);
+  } finally { labels.close(); store.close(); }
+});
+
 test("真实考生终态先保全现场、再注销考生侧绑定、最后由EvalOS独立复位Twin", async () => {
   const { store, labels, ledger, gradingService } = fixture();
   const order = [];

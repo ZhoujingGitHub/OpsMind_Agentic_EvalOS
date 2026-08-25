@@ -950,6 +950,11 @@ export function createApp({
         if (relayClaimMatch) return json({ request: candidateRelay.claim(candidateRef, body) }, 200, cors);
         return json(candidateRelay.complete(candidateRef, decodeURIComponent(relayCompleteMatch[2]), body), 200, cors);
       }
+      if (request.method === "GET" && url.pathname === "/ready") {
+        return json({ status: "ok", ready: true, service: "opsmind-evalos-control-api",
+          contract: "evalos-readiness.1", milestone: frozenM31Manifest.milestone,
+          formal_run: { enabled: false, guard: "480_TRIAL_NOT_AUTHORIZED" } }, 200, cors);
+      }
       if (request.method === "GET" && url.pathname === "/health") {
         const operations = operationsHealth();
         return json({ status: operations.status, service: "opsmind-evalos-control-api", contract: "evalos.7",

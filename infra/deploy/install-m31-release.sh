@@ -99,7 +99,7 @@ mv -Tf "${current_link}.next" "$current_link"
 systemctl daemon-reload
 systemctl start opsmind-evalos opsmind-evalos-console
 for attempt in $(seq 1 30); do
-  if curl --silent --fail --max-time 3 http://127.0.0.1:8787/health >/dev/null \
+  if curl --silent --fail --max-time 5 http://127.0.0.1:8787/ready >/dev/null \
     && curl --silent --fail --max-time 3 http://127.0.0.1:3000/ >/dev/null; then break; fi
   [[ "$attempt" -lt 30 ]] || { journalctl -u opsmind-evalos -u opsmind-evalos-console -n 120 --no-pager >&2; exit 1; }
   sleep 1

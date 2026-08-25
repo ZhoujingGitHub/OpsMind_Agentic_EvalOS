@@ -215,6 +215,10 @@ test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏
       optimization_plan: [{ priority: 1, title: "增强反证", why: "减少误判", how: "按信息增益补证", validation: "新增回归Case" }],
       methodology_sources: [], limitations: [], confidence: 0.8 }, usage: { turns: 2 } }) } });
   try {
+    const ready = await (await app.handler(new Request("http://local/ready"))).json();
+    assert.equal(ready.contract, "evalos-readiness.1");
+    assert.equal(ready.ready, true);
+    assert.equal(ready.formal_run.enabled, false);
     const health = await (await app.handler(new Request("http://local/health"))).json();
     assert.equal(health.contract, "evalos.7");
     assert.equal(health.milestone, "M3.2");

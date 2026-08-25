@@ -13,8 +13,9 @@ EnvironmentFile=-/etc/opsmind-evalos/evalos.env
 Environment=CONSOLE_HOST=127.0.0.1
 Environment=CONSOLE_PORT=3000
 Environment=EVALOS_API_ORIGIN=http://127.0.0.1:8787
-# 服务器按服务账号限制本机出站；仅让只读健康探针越过 User=，主进程仍以 opsmindeval 运行。
-ExecStartPre=+/bin/sh -c 'for attempt in $(/usr/bin/seq 1 60); do /usr/bin/curl --silent --fail --max-time 2 http://127.0.0.1:8787/health >/dev/null && exit 0; /usr/bin/sleep 1; done; exit 1'
+# 服务器按服务账号限制本机出站；仅让轻量只读就绪探针越过 User=，主进程仍以 opsmindeval 运行。
+# 完整 /health 会验证追加式账本，不可用短超时循环反复中断并制造重复全量校验。
+ExecStartPre=+/bin/sh -c 'for attempt in $(/usr/bin/seq 1 60); do /usr/bin/curl --silent --fail --max-time 5 http://127.0.0.1:8787/ready >/dev/null && exit 0; /usr/bin/sleep 1; done; exit 1'
 ExecStart=/usr/local/bin/node serve.mjs
 TimeoutStartSec=90
 Restart=on-failure
