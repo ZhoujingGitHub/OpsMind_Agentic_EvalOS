@@ -64,6 +64,42 @@ test("重评名称只保留一层用途前缀", () => {
   assert.equal(evaluationRunName("定向回归 · M3.1 双考生资格试运行", "FORMAL"), "正式评测 · M3.1 双考生资格试运行");
 });
 
+test("管理员可在不创建Trial或触碰Twin的前提下只读发现Adapter 5迁移合同", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-v5-discovery-"));
+  const discovery = {
+    source_revision: "candidate-revision-v5", artifact_digest: `sha256:${"a".repeat(64)}`,
+    runtime_digest: `sha256:${"b".repeat(64)}`, runtime_manifest_digest: `sha256:${"c".repeat(64)}`,
+    capability_contract_digest: `sha256:${"d".repeat(64)}`,
+    candidate_runtime: { contract_version: "1.0", models: [{ provider: "deepseek", id: "deepseek-v4-flash",
+      interface: "anthropic", thinking: "enabled", roles: ["investigation"] }], versions: { service: "5.0.0" } },
+  };
+  const app = createApp({ databasePath: path.join(root, "control.sqlite"),
+    privateLabelDatabasePath: path.join(root, "private", "labels.sqlite"), runtimeRoot: root,
+    apiToken: "admin-secret", discoveryConnectorOverrides: {
+      "agent-harness-v2:5.0": { discover: async () => discovery },
+    } });
+  try {
+    assert.equal((await app.handler(new Request("http://local/api/candidate-adapters/discover?contract_version=5.0"))).status, 401);
+    const invalid = await app.handler(new Request("http://local/api/candidate-adapters/discover?contract_version=6.0", {
+      headers: { authorization: "Bearer admin-secret" } }));
+    assert.equal(invalid.status, 400);
+    const response = await app.handler(new Request("http://local/api/candidate-adapters/discover?contract_version=5.0", {
+      headers: { authorization: "Bearer admin-secret" } }));
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.contract, "candidate-discovery.4");
+    assert.equal(body.production_writes, false);
+    assert.equal(body.creates_trial, false);
+    assert.equal(body.touches_twin, false);
+    assert.equal(body.items[0].contract_version, "5.0");
+    assert.equal(body.items[0].frozen_contract_version, "4.0");
+    assert.equal(body.items[0].freeze_required, true);
+    assert.equal(body.items[0].ready, false);
+    assert.deepEqual(body.items[0].discovery.candidate_runtime, discovery.candidate_runtime);
+    assert.equal(app.store.listTrials().length, 0);
+  } finally { app.close(); }
+});
+
 test("后续安全复位会解除平台健康阻塞但不会改写失败Trial", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "evalos-cleanup-health-"));
   const app = createApp({ databasePath: path.join(root, "control.sqlite"),

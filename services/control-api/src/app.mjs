@@ -144,6 +144,7 @@ export function createApp({
   candidateRelayConfig = null,
   engineeringAdapterOverrides = {},
   cleanupConnectorOverrides = {},
+  discoveryConnectorOverrides = {},
   twinManagerClientOverride = null,
 } = {}) {
   const registry = createEvalRegistry({ m15Cases: CASES, m2Cases: M2_CASES, m3Cases: M3_CASES });
@@ -215,6 +216,7 @@ export function createApp({
     ...engineeringAdapterOverrides,
   };  const frozenCandidate = (ref) => frozenM31Manifest.contestants.find((item) => item.ref === ref);
   const realCandidateConnectors = {};
+  const candidateDiscoveryConnectors = {};
   const connectorConfigs = [
     { ref: "agent-harness-v2", origin: process.env.EVALOS_AGENT_HARNESS_ORIGIN,
       token: process.env.EVALOS_AGENT_HARNESS_TOKEN, approvalToken: process.env.EVALOS_AGENT_HARNESS_APPROVAL_TOKEN,
@@ -232,12 +234,19 @@ export function createApp({
     const directConfigured = config.origin && config.token && config.approvalToken && config.adminToken;
     if ((!directConfigured && !relayTransport) || !tenantId || !frozen) continue;
     const useV5 = frozen.adapter_contract_version === "5.0";
-    const connector = (useV5 ? config.createV5 : config.createV4)({ origin: config.origin, token: config.token,
+    const connectorOptions = { origin: config.origin, token: config.token,
       approvalToken: config.approvalToken, adminToken: config.adminToken, tenantId,
       requestTransport: relayTransport,
       declaredRuntimeLimits: relayCandidates[config.ref]?.evaluation_limits ?? null,
-      declaredCandidateRuntime: frozen.candidate_runtime ?? null,
-      attestation: { source_revision: frozen.source_revision, artifact_digest: frozen.artifact_digest } });
+      attestation: { source_revision: frozen.source_revision, artifact_digest: frozen.artifact_digest } };
+    const connectorsByVersion = {
+      "4.0": config.createV4(connectorOptions),
+      "5.0": config.createV5({ ...connectorOptions,
+        declaredCandidateRuntime: useV5 ? frozen.candidate_runtime ?? null : null }),
+    };
+    Object.assign(candidateDiscoveryConnectors, Object.fromEntries(Object.entries(connectorsByVersion)
+      .map(([version, connector]) => [`${config.ref}:${version}`, connector])));
+    const connector = connectorsByVersion[useV5 ? "5.0" : "4.0"];
     const adapter = useV5 ? createCandidateAdapterV5({ id: config.ref, connector })
       : createCandidateAdapterV4({ id: config.ref, connector });
     realCandidateConnectors[config.ref] = connector;
@@ -247,6 +256,7 @@ export function createApp({
     }
   }
   Object.assign(realCandidateConnectors, cleanupConnectorOverrides);
+  Object.assign(candidateDiscoveryConnectors, discoveryConnectorOverrides);
   const liveDeepSeekAvailable = Boolean(process.env.DEEPSEEK_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN ?? process.env.ANTHROPIC_API_KEY);
   const adapterFor = (ref, lane, contractVersion = null) => (contractVersion
     ? adapters[`${ref}:${lane}:${contractVersion}`] : null) ?? adapters[`${ref}:${lane}`] ?? adapters[ref];
@@ -984,19 +994,31 @@ export function createApp({
       }
       if (request.method === "GET" && url.pathname === "/api/candidate-adapters/discover") {
         if (!isAdmin(request)) return json({ error: "authenticated control-plane token required" }, 401, cors);
+        const requestedContractVersion = url.searchParams.get("contract_version");
+        if (requestedContractVersion && !new Set(["4.0", "5.0"]).has(requestedContractVersion)) {
+          return json({ error: "candidate adapter discovery contract_version must be 4.0 or 5.0" }, 400, cors);
+        }
         const items = [];
         for (const ref of ["agent-harness-v2", "langgraph-v1"]) {
-          const connector = realCandidateConnectors[ref];
+          const frozen = frozenCandidate(ref);
+          const contractVersion = requestedContractVersion ?? frozen?.adapter_contract_version;
+          const connector = requestedContractVersion
+            ? candidateDiscoveryConnectors[`${ref}:${requestedContractVersion}`] : realCandidateConnectors[ref];
           if (!connector) { items.push({ ref, configured: false, ready: false, reason: "connector_not_configured" }); continue; }
           try {
             const discovered = await connector.discover();
-            const frozen = frozenCandidate(ref);
             const drift = ["source_revision", "artifact_digest", "runtime_digest", "runtime_manifest_digest", "capability_contract_digest"]
               .filter((field) => discovered[field] !== frozen[field]);
-            items.push({ ref, configured: true, ready: drift.length === 0, drift, discovery: discovered });
+            if (contractVersion === "5.0" && frozen?.adapter_contract_version === "5.0" &&
+                sha256(discovered.candidate_runtime) !== sha256(frozen.candidate_runtime)) drift.push("candidate_runtime");
+            const freezeRequired = contractVersion !== frozen?.adapter_contract_version;
+            items.push({ ref, configured: true, ready: !freezeRequired && drift.length === 0,
+              contract_version: contractVersion, frozen_contract_version: frozen?.adapter_contract_version ?? null,
+              freeze_required: freezeRequired, drift, discovery: discovered });
           } catch (error) { items.push({ ref, configured: true, ready: false, reason: error.message }); }
         }
-        return json({ contract: "candidate-discovery.3", items, production_writes: false }, 200, cors);
+        return json({ contract: "candidate-discovery.4", requested_contract_version: requestedContractVersion,
+          items, production_writes: false, creates_trial: false, touches_twin: false }, 200, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/suites") return json({ items: store.listSuites() }, 200, cors);
       if (request.method === "GET" && url.pathname === "/api/cases") return json({ items: store.listCases() }, 200, cors);
