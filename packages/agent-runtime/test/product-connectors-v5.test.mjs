@@ -108,6 +108,23 @@ test("Adapter 5 Agent+Harness连接器用产品证据链绑定，保留权威Gat
   assert.equal(finalized.evalos_authoritative_reset_pending, true);
 });
 
+test("Adapter 5 Agent+Harness模式管理员必须具备产品切换模式所需的精确权限", async (t) => {
+  const fixture = await fixtureServer({
+    "GET /v2/auth/me": async ({ request }) => request.headers.authorization === "Bearer submitter"
+      ? { user_id: "submitter", tenant_id: "tenant-ah", permissions: { investigate: true } }
+      : request.headers.authorization === "Bearer approver"
+        ? { user_id: "approver", tenant_id: "tenant-ah", permissions: { approve_action: true } }
+        : { user_id: "administrator", tenant_id: "tenant-ah", permissions: { manage_users: true } },
+    "GET /v2/protocol-lab": async () => ({ configured: true, connected: true, slot_id: "slot-ah" }),
+  });
+  t.after(fixture.close);
+  const connector = createAgentHarnessProductConnectorV5({ origin: fixture.origin, token: "submitter",
+    approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-ah", attestation: ATTESTATION });
+  const readiness = await connector.evaluationReadiness();
+  assert.equal(readiness.credential_checks.administrator_authorized, false);
+  assert.equal(readiness.least_privilege, false);
+});
+
 test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归档和外部清场交接", async (t) => {
   let runContext = null;
   const modelPortfolio = [

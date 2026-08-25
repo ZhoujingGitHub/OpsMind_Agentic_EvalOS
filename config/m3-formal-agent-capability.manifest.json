@@ -215,7 +215,7 @@
             "provider": "deepseek",
             "id": "deepseek-v4-flash",
             "interface": "anthropic-compatible",
-            "thinking": "unknown",
+            "thinking": "enabled",
             "roles": ["investigation"]
           }
         ],

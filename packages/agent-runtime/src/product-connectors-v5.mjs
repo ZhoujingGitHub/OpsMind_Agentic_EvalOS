@@ -542,7 +542,7 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         !permission(submitter, "manage_users") && !permission(submitter, "manage_roles");
       const approverScoped = permission(approver, "approve_action") && !permission(approver, "investigate") &&
         !permission(approver, "manage_users") && !permission(approver, "manage_roles");
-      const administratorScoped = permission(administrator, "manage_users") || permission(administrator, "manage_roles");
+      const administratorScoped = permission(administrator, "manage_roles") || permission(administrator, "platform_admin");
       const twinReady = protocolLab.configured === true && protocolLab.connected === true;
       return { credential_roles: ["candidate_submitter", "approval_oracle", "mode_administrator"],
         identities_separated: identitiesSeparated, least_privilege: submitterScoped && approverScoped && administratorScoped,
