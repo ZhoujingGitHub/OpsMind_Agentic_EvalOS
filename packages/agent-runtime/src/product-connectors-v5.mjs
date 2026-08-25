@@ -742,12 +742,11 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         thinking: thinkingMode(item.thinking ?? item.thinking_mode),
         roles: item.roles ?? (item.role ? [item.role] : ["unknown"]),
       })).filter((item) => item.id);
-      if (declaredCandidateRuntime) {
-        const drift = Object.entries(versions).filter(([name, value]) =>
-          declaredCandidateRuntime.versions?.[name] !== undefined && declaredCandidateRuntime.versions[name] !== value);
-        if (drift.length) throw new Error(`candidate discovery drift: ${drift.map(([name]) => name).join(", ")}`);
+      const observedCandidateRuntime = { contract_version: "1.0", models, versions };
+      if (declaredCandidateRuntime && !sameValue(declaredCandidateRuntime, observedCandidateRuntime)) {
+        throw new Error("candidate discovery drift: declared LangGraph candidate_runtime");
       }
-      const candidateRuntime = declaredCandidateRuntime ?? { contract_version: "1.0", models, versions };
+      const candidateRuntime = declaredCandidateRuntime ?? observedCandidateRuntime;
       const capability = { architecture_type: ready.architecture_type,
         operating_modes: automation.operating_modes ?? ["diagnosis_only", "human_collaboration", "controlled_auto"],
         execution_modes: automation.execution_modes ?? ["controlled_simulation", "replay_read_only"],

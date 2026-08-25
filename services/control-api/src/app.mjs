@@ -1209,6 +1209,24 @@ export function createApp({
       if (url.pathname.startsWith("/api/workbench/") && !isAdmin(request)) {
         return json({ error: "authenticated workbench session required" }, 401, cors);
       }
+      if (request.method === "GET" && url.pathname === "/api/workbench/twin-status") {
+        if (!twinConfigured) return json({ contract: "evalos-twin-status.1", configured: false,
+          ready: false, items: [], production_writes: false, operation: "status" }, 200, cors);
+        const items = await Promise.all(["agent-harness-v2", "langgraph-v1"].map(async (contestantRef) => {
+          try {
+            const status = await twinManagerClient.invoke({ operation: "status", contestant_ref: contestantRef });
+            return { contestant_ref: contestantRef, ready: status.ok === true,
+              active_trial: status.active_trial ?? null, slot_available: status.slot_available === true,
+              slot_lease_present: status.slot_lease_present === true,
+              controller_status: status.controller_status ?? null, topology: status.topology ?? null };
+          } catch (error) {
+            return { contestant_ref: contestantRef, ready: false, error: String(error?.message ?? error) };
+          }
+        }));
+        return json({ contract: "evalos-twin-status.1", configured: true,
+          ready: items.every((item) => item.ready && item.active_trial === null && item.slot_available),
+          items, production_writes: false, operation: "status" }, 200, cors);
+      }
       if (request.method === "GET" && url.pathname === "/api/workbench/run-templates") {
         const requestedSourceExperimentId = url.searchParams.get("source_experiment_id");
         return json({ items: store.listExperiments().filter((item) => ["6.0", "7.0"].includes(item.manifest.manifest_version)

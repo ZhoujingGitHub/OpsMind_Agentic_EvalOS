@@ -27,7 +27,7 @@ async function waitForHealthyPlatform(timeoutMs = 60000) {
 
 const health = await waitForHealthyPlatform();
 assert.equal(health.status, "ok");
-assert.equal(health.milestone, "M3.1");
+assert.equal(health.milestone, "M3.2");
 assert.equal(health.formal_run.enabled, false, "formal 480 Trial must remain disabled");
 
 const overview = await (await get("/api/workbench/overview", /application\/json/)).json();
@@ -39,8 +39,8 @@ assert.ok(overview.counts.cases >= 1, "versioned cases must be visible");
 
 const datasets = await (await get("/api/workbench/datasets", /application\/json/)).json();
 const frozenM3 = datasets.items.find((item) => item.dataset_ref === "m3-l2-agentic-formal@3.0.0");
-assert.ok(frozenM3, "M3.1 frozen dataset must be visible after every deployment");
-assert.equal(frozenM3.case_count, 80, "M3.1 frozen dataset must expose all 80 Cases before the console starts");
+assert.ok(frozenM3, "M3.2 frozen dataset must be visible after every deployment");
+assert.equal(frozenM3.case_count, 80, "M3.2 frozen dataset must expose all 80 Cases before the console starts");
 
 const readiness = await (await get("/api/workbench/candidate-readiness", /application\/json/)).json();
 assert.equal(readiness.contract, "evalos-candidate-readiness.1");
@@ -57,5 +57,5 @@ for (const pathname of ["/", "/experiments", "/datasets", "/run-requests", "/tra
   for (const script of scripts) await get(script, /javascript/);
 }
 
-console.log(JSON.stringify({ status: "PASSED", milestone: "M3.1", origin: base.origin,
+console.log(JSON.stringify({ status: "PASSED", milestone: "M3.2", origin: base.origin,
   checked: [...new Set(checked)], formal_480_enabled: false, candidate_execution: "external-real-products-only" }, null, 2));

@@ -86,7 +86,7 @@ function Topbar({ view }: { view: View }) {
     experiment: "实验详情", trial: "单次评测（Trial）研究工作台", traces: "轨迹与日志", graders: "评分器中心", analyses: "AI 调查员",
     "run-requests": "评测任务（Evaluation Tasks）" };
   return <header className="workbench-top"><div><span className="crumb">EvalOS / </span>{names[view]}</div>
-    <div className="top-meta"><span className="phase-tag">M3.1 · 真实产品评测升级 · 480 Trial 未开考</span><span className="operator">操作者</span></div></header>;
+    <div className="top-meta"><span className="phase-tag">M3.2 · Adapter 5 真实产品评测 · 480 Trial 未开考</span><span className="operator">操作者</span></div></header>;
 }
 
 function Dashboard() {
@@ -535,7 +535,7 @@ function RunComposer({ intent, caseRefs, defaultExperimentId, datasetRef, onClos
     <div className="run-form">{intent === "new" ? <label>冻结参评配置 <small>Source experiment</small><select value={effectiveSourceExperimentId} onChange={(event) => { const nextId = event.target.value; const nextContestants = availableTemplates.find((item: Json) => item.id === nextId)?.contestants ?? []; setSourceExperimentId(nextId); setEvaluationPurpose(nextContestants.length > 1 ? "PAIRED_COMPARISON" : nextContestants[0] ? `SINGLE:${nextContestants[0].ref}` : "PAIRED_COMPARISON"); setPreflight(null); }}><option value="">请选择</option>{availableTemplates.map((item: Json) => <option key={item.id} value={item.id}>{item.name} · {item.suite_ref}</option>)}</select></label>
       : <div className="frozen-config"><span>沿用冻结参评配置 <small>Frozen source experiment</small></span>
         <strong>{templates.loading ? "正在读取…" : incompatibleFrozenSource ? "该实验不符合当前可执行评测合同，不能按原配置重新评测" : selectedTemplate?.name ?? "没有可用的冻结配置"}</strong>
-        <code>{effectiveSourceExperimentId || defaultExperimentId}</code><small>{incompatibleFrozenSource ? "当前 M3.1 只接受 Manifest 6.0 与 Candidate Adapter 4.0；旧实验继续保留查看，但不能冒充真实产品复评。" : "重新评测不可更换考生；需要更换时请从数据集页面新建评测。"}</small>
+        <code>{effectiveSourceExperimentId || defaultExperimentId}</code><small>{incompatibleFrozenSource ? "当前真实产品复评使用 Manifest 7.0 与 Candidate Adapter 5.0；旧实验继续保留查看，但不能冒充本轮冻结版本。" : "重新评测不可更换考生；需要更换时请从数据集页面新建评测。"}</small>
         {incompatibleFrozenSource && <a className="text-link" href="/datasets">前往数据集与 Case →</a>}</div>}
       <label>每个 Seed 的重复次数 <small>Replicates per Seed</small><select value={repetitions} onChange={(event) => { setRepetitions(Number(event.target.value)); setPreflight(null); }}>{[1,2,3,4,5].map((value) => <option value={value} key={value}>{value} 次</option>)}</select></label>
       {mode === "CAPACITY_REHEARSAL" && <label>请求并发 <small>Requested concurrency</small><select value={capacityConcurrency} onChange={(event) => { setCapacityConcurrency(Number(event.target.value)); setPreflight(null); }}><option value={4}>4 路</option><option value={8}>8 路</option></select></label>}

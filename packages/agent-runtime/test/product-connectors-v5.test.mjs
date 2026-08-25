@@ -160,11 +160,27 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
     "GET /api/v1/jobs": async () => ({ items: [{ job_id: "job-lg", investigation_id: "run-lg", status: "completed" }] }),
   });
   t.after(fixture.close);
+  const declaredRuntime = { contract_version: "1.0", models: [
+    { provider: "deepseek", id: "deepseek-v4-flash", interface: "anthropic", thinking: "disabled",
+      roles: ["reason", "tool_selection"] },
+    { provider: "deepseek", id: "deepseek-v4-pro", interface: "openai-chat", thinking: "enabled",
+      roles: ["revise", "adjudicate"] },
+  ], versions: { graph_version: "opsmind-langgraph:5.0.0", state_schema_version: "graph-state:5.0.0",
+    mcp_contract_version: "observation+protocol-lab:3.2.0", knowledge_version: "knowledge:5.0.0",
+    model_version: "deepseek-v4-flash+deepseek-v4-pro",
+    product_e2e_contract_version: "opsmind-controlled-remediation:1.1",
+    public_event_schema_version: "opsmind-public-event:1.0" } };
   const connector = createLangGraphProductConnectorV5({ origin: fixture.origin, token: "submitter",
-    approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-lg", attestation: ATTESTATION });
+    approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-lg", attestation: ATTESTATION,
+    declaredCandidateRuntime: declaredRuntime });
   const discovery = await connector.discover();
+  assert.deepEqual(discovery.candidate_runtime, declaredRuntime);
   assert.deepEqual(discovery.candidate_runtime.models.map((item) => item.id), ["deepseek-v4-flash", "deepseek-v4-pro"]);
   assert.equal(discovery.candidate_runtime.models[1].thinking, "enabled");
+  const drifted = createLangGraphProductConnectorV5({ origin: fixture.origin, token: "submitter",
+    approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-lg", attestation: ATTESTATION,
+    declaredCandidateRuntime: { ...declaredRuntime, models: declaredRuntime.models.slice(0, 1) } });
+  await assert.rejects(drifted.discover(), /declared LangGraph candidate_runtime/);
   const contract = executionContract("evalos-lg-1", discovery.candidate_runtime);
   await connector.prepare({ executionContract: contract });
   const started = await connector.start({ executionContract: contract });

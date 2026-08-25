@@ -57,14 +57,24 @@ assert.doesNotMatch(packageFiles, /"(?:langgraph|@langchain\/langgraph|langchain
 const executableManifests = readdirSync(path.join(root, "config")).filter((name) => name.endsWith(".manifest.json"));
 for (const name of executableManifests) {
   const manifest = JSON.parse(read(name.startsWith("config/") ? name : `config/${name}`));
-  if (name === "m3-formal-agent-capability.manifest.json" || name === "m15-smoke.manifest.json") {
-    assert.equal(manifest.manifest_version, "6.0", `当前可执行清单必须是 Manifest 6.0：${name}`);
+  if (name === "m15-smoke.manifest.json") assert.equal(manifest.manifest_version, "6.0",
+    "工程测试替身必须继续使用历史隔离的 Manifest 6.0");
+  if (name === "m3-formal-agent-capability.manifest.json") {
+    assert.equal(manifest.manifest_version, "7.0", "真实产品冻结源必须使用 Manifest 7.0");
+    assert.equal(manifest.milestone, "M3.2");
+    assert.equal(manifest.contestants.every((item) => item.adapter_contract_version === "5.0"), true);
+    assert.equal(manifest.contestants.every((item) => item.adapter_version === "candidate-adapter-5.0.0"), true);
+    assert.equal(manifest.contestants.every((item) => item.candidate_runtime?.models?.length > 0), true);
   }
 }
 const formal = JSON.parse(read("config/m3-formal-agent-capability.manifest.json"));
 assert.equal(formal.dataset_ref, "m3-l2-agentic-formal@3.0.0");
 assert.equal(formal.suite_ref, "m3-formal-80@3.0.0");
 assert.equal(formal.case_refs.every((ref) => ref.endsWith("@3.0.0")), true);
+assert.equal(formal.model.sdk, "@anthropic-ai/claude-agent-sdk");
+assert.equal(formal.model.id, "deepseek-v4-flash");
+assert.deepEqual(formal.contestants.find((item) => item.ref === "langgraph-v1")
+  .candidate_runtime.models.map((item) => item.id), ["deepseek-v4-flash", "deepseek-v4-pro"]);
 
 for (const removed of [
   "packages/agent-runtime/src/deepseek-claude-adapter.mjs",
@@ -87,4 +97,4 @@ assert.match(statistics, /FORMAL_DECISION/);
 assert.match(statistics, /clusteredPairedBootstrap/);
 assert.match(app, /trial.infrastructure_retry_scheduled/);
 assert.match(app, /decision_report_digest/);
-assert.match(app, /evalos-operations-health.1/);console.log("M3.1 架构检查通过：EvalOS 保持 Claude Agent SDK 开放式单 Agent，真实考生只通过外部产品接口参评，旧考生分身与 Adapter 2.0 已断代移除。");
+assert.match(app, /evalos-operations-health.1/);console.log("M3.2 架构检查通过：EvalOS 保持 Claude Agent SDK + DeepSeek V4 Flash 开放式单 Agent；Manifest 7 只冻结外部产品公开原生模型合同，历史 Manifest 6 继续保留。");

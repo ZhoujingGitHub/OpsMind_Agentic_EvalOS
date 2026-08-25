@@ -65,7 +65,7 @@ test("重评名称只保留一层用途前缀", () => {
   assert.equal(evaluationRunName("定向回归 · M3.1 双考生资格试运行", "FORMAL"), "正式评测 · M3.1 双考生资格试运行");
 });
 
-test("管理员可在不创建Trial或触碰Twin的前提下只读发现Adapter 5迁移合同", async () => {
+test("管理员可在不创建Trial或触碰Twin的前提下只读核验Adapter 5漂移", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "evalos-v5-discovery-"));
   const discovery = {
     source_revision: "candidate-revision-v5", artifact_digest: `sha256:${"a".repeat(64)}`,
@@ -93,10 +93,40 @@ test("管理员可在不创建Trial或触碰Twin的前提下只读发现Adapter 
     assert.equal(body.creates_trial, false);
     assert.equal(body.touches_twin, false);
     assert.equal(body.items[0].contract_version, "5.0");
-    assert.equal(body.items[0].frozen_contract_version, "4.0");
-    assert.equal(body.items[0].freeze_required, true);
+    assert.equal(body.items[0].frozen_contract_version, "5.0");
+    assert.equal(body.items[0].freeze_required, false);
     assert.equal(body.items[0].ready, false);
+    assert.ok(body.items[0].drift.includes("candidate_runtime"));
     assert.deepEqual(body.items[0].discovery.candidate_runtime, discovery.candidate_runtime);
+    assert.equal(app.store.listTrials().length, 0);
+  } finally { app.close(); }
+});
+
+test("Twin状态接口只允许可信服务器执行只读status且不创建Trial", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-twin-status-"));
+  const calls = [];
+  const app = createApp({ databasePath: path.join(root, "control.sqlite"),
+    privateLabelDatabasePath: path.join(root, "private", "labels.sqlite"), runtimeRoot: root,
+    apiToken: "admin-secret", twinManagerClientOverride: { invoke: async (request) => {
+      calls.push(request);
+      return { ok: true, operation: "status", contestant_ref: request.contestant_ref,
+        active_trial: null, slot_available: true, slot_lease_present: false,
+        controller_status: "ready", topology: { ready: true, runtime_isolated: true } };
+    } } });
+  try {
+    assert.equal((await app.handler(new Request("http://local/api/workbench/twin-status"))).status, 401);
+    const response = await app.handler(new Request("http://local/api/workbench/twin-status", {
+      headers: { authorization: "Bearer admin-secret" } }));
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.contract, "evalos-twin-status.1");
+    assert.equal(body.ready, true);
+    assert.equal(body.production_writes, false);
+    assert.equal(body.operation, "status");
+    assert.deepEqual(calls, [
+      { operation: "status", contestant_ref: "agent-harness-v2" },
+      { operation: "status", contestant_ref: "langgraph-v1" },
+    ]);
     assert.equal(app.store.listTrials().length, 0);
   } finally { app.close(); }
 });
@@ -187,7 +217,7 @@ test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏
   try {
     const health = await (await app.handler(new Request("http://local/health"))).json();
     assert.equal(health.contract, "evalos.7");
-    assert.equal(health.milestone, "M3.1");
+    assert.equal(health.milestone, "M3.2");
     assert.equal(health.formal_run.enabled, false);
     assert.equal(health.operations.contract, "evalos-operations-health.1");
     assert.equal(health.operations.ledger.valid, true);

@@ -1,6 +1,6 @@
 {
-  "manifest_version": "6.0",
-  "milestone": "M3.1",
+  "manifest_version": "7.0",
+  "milestone": "M3.2",
   "run_class": "REAL_CANDIDATE",
   "evaluation_mode": "FORMAL",
   "evaluation_lane": "CONTROLLED_CLOSURE",
@@ -14,7 +14,7 @@
     "separation_of_duties": true
   },
   "design": "paired_comparison",
-  "name": "M3 双架构正式独立盲评（480 Trial）",
+  "name": "M3.2 双架构正式独立盲评冻结源（480 Trial 保持锁定）",
   "suite_ref": "m3-formal-80@3.0.0",
   "dataset_ref": "m3-l2-agentic-formal@3.0.0",
   "case_refs": [
@@ -200,25 +200,73 @@
       "ref": "agent-harness-v2",
       "kind": "REAL_PRODUCT",
       "architecture": "CLAUDE_AGENT_SDK_HARNESS",
-      "adapter_contract_version": "4.0",
-      "adapter_version": "candidate-adapter-4.0.0",
+      "adapter_contract_version": "5.0",
+      "adapter_version": "candidate-adapter-5.0.0",
       "source_revision": "e40a8c4433ab293619f7185e555a5789030832ed",
-      "artifact_digest": "sha256:4febaac2b2a6f5d3b7ec49d982a096e5cc7dc46d2c8f1c370138c4eb94dbd34f",
-      "runtime_digest": "sha256:c9f079e1bfce0c0d6e858cfc583ac8d4a4f40fd6be44e83c1dd801cce1d98388",
-      "runtime_manifest_digest": "sha256:cdd1c337d814b1120ce7fcd1683acec42de17b35d69acaa28acc1ab9847f26f9",
-      "capability_contract_digest": "sha256:0dbd11c9b0b5ad8e2a29e4ff1cc3e4cf892c88452c53f185794733f056a33a58"
+      "artifact_digest": "sha256:1f372bfab50b4e78680ad89db266fbde1f1bc471722031b45e2980c9d2417223",
+      "runtime_digest": "sha256:c371b647fda35bf8315ad7c0330c1842ebb82b00a6db92c99c8f6acd050ed430",
+      "runtime_manifest_digest": "sha256:6786016ecb34d137a8fab1650b9ef6bdaab1daa021168e25dfe2435f43da06fa",
+      "capability_contract_digest": "sha256:90ce2d27afb832984e4459bbbcd49821184b6ee47f09e00d731e77c6a999f3b1",
+      "binding_requirement": "EVIDENCE_CHAIN_BOUND",
+      "candidate_runtime": {
+        "contract_version": "1.0",
+        "models": [
+          {
+            "provider": "deepseek",
+            "id": "deepseek-v4-flash",
+            "interface": "anthropic-compatible",
+            "thinking": "unknown",
+            "roles": ["investigation"]
+          }
+        ],
+        "versions": {
+          "service": "2.3.0",
+          "investigation": "unknown",
+          "report": "unknown",
+          "protocol_binding": "unknown"
+        }
+      }
     },
     {
       "ref": "langgraph-v1",
       "kind": "REAL_PRODUCT",
       "architecture": "LANGGRAPH_PRODUCT",
-      "adapter_contract_version": "4.0",
-      "adapter_version": "candidate-adapter-4.0.0",
-      "source_revision": "990c9b50d15b9ae15164e253a2a8de579e6e6a1f",
-      "artifact_digest": "sha256:4cdd404bad016301c86fa580c48b866b87c0b6513799169b8b92b56ae980ae2e",
-      "runtime_digest": "sha256:180658f75800118b6db26fe803282e42749baa3c2a6fb3a810753a00f5d38740",
-      "runtime_manifest_digest": "sha256:4bc6f0d460429ba15e3aa0da6b72855979ada5d6f8dbfa65da667266ec568861",
-      "capability_contract_digest": "sha256:eb50cd6cf29d0590dd8c1c35469dd1a0a30d9130c014b7868f63370a95bfa3f9"
+      "adapter_contract_version": "5.0",
+      "adapter_version": "candidate-adapter-5.0.0",
+      "source_revision": "443d9d9a1badd8c31bf21cb3f039b7ad1b86567f",
+      "artifact_digest": "sha256:f235fd222cb9544d331a3b60188a4e3ff3062e826d46762d64ebc0acc3991e20",
+      "runtime_digest": "sha256:c354d6a28ef528769dc8526191eaca731db1c2b6df624cd9a9ed01f6d8579819",
+      "runtime_manifest_digest": "sha256:55767561e2e3aec7010cc03e6994672fa72d196651174e6166ad0b29dfe33bc9",
+      "capability_contract_digest": "sha256:9f9960b82fca4bb111fb083e8e2cb1993d473cbe04b858983d32c9525a3335ea",
+      "binding_requirement": "PRODUCT_NATIVE_ACK",
+      "candidate_runtime": {
+        "contract_version": "1.0",
+        "models": [
+          {
+            "provider": "deepseek",
+            "id": "deepseek-v4-flash",
+            "interface": "anthropic",
+            "thinking": "disabled",
+            "roles": ["initialize", "reason", "tool_selection"]
+          },
+          {
+            "provider": "deepseek",
+            "id": "deepseek-v4-pro",
+            "interface": "openai-chat",
+            "thinking": "enabled",
+            "roles": ["revise", "adjudicate", "finalize", "action_proposal"]
+          }
+        ],
+        "versions": {
+          "graph_version": "opsmind-langgraph:5.0.0",
+          "state_schema_version": "graph-state:5.0.0",
+          "mcp_contract_version": "observation+protocol-lab:3.2.0",
+          "knowledge_version": "[\"general-investigation@2.0.0\"]",
+          "model_version": "deepseek-v4-flash+deepseek-v4-pro",
+          "product_e2e_contract_version": "opsmind-controlled-remediation:1.1",
+          "public_event_schema_version": "opsmind-public-event:1.0"
+        }
+      }
     }
   ],
   "model": {
@@ -229,6 +277,12 @@
     "thinking": "disabled",
     "temperature": 0,
     "max_turns": 32
+  },
+  "candidate_runtime_policy": {
+    "source": "candidate_public_api",
+    "allow_multi_model": true,
+    "hidden_case_fields": "opaque_digest_only",
+    "usage_accounting": "reported_with_explicit_unknowns"
   },
   "frozen_dependencies": {
     "mcp_catalog": {
@@ -260,8 +314,8 @@
       "digest": "sha256:d838c5e342fae081fa60afccb0b0ecbda01a6b2d08e4c3ba4182f1a32ad2d52b"
     },
     "product_adapter_contract": {
-      "ref": "evalos-candidate-adapter@4.0.0",
-      "digest": "sha256:de5aee193c128cc2be95d2003ef94a9d3aeef7560f0b32115d70d43e148ad212"
+      "ref": "evalos-candidate-adapter@5.0.0",
+      "digest": "sha256:920c17564a20d7325fdda183eae2a827bb4c6e1f68f2a11ac146314163af52bf"
     }
   },
   "budget": {
