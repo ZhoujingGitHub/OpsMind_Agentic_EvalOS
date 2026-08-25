@@ -75,7 +75,12 @@ test -f "$release_root/evalos/RELEASE.json"
 grep -q '"includes_external_candidate_source": false' "$release_root/evalos/RELEASE.json"
 grep -q '"formal_480_enabled": false' "$release_root/evalos/RELEASE.json"
 
-npm --prefix "$release_root/evalos/packages/agent-runtime" ci --omit=dev --ignore-scripts
+# 发布安装只解析冻结 lockfile，不在切换窗口做联网审计或募资查询。
+# prefer-offline 会优先复用服务器已有 npm 缓存；硬超时确保云助手超时后
+# 不会遗留脱离控制面的 npm 进程。
+timeout --kill-after=15s 180s npm --prefix "$release_root/evalos/packages/agent-runtime" ci \
+  --omit=dev --ignore-scripts --no-audit --no-fund --prefer-offline \
+  --fetch-timeout=60000 --fetch-retries=2
 chown -R root:root "$release_root"
 chmod -R a+rX "$release_root"
 
