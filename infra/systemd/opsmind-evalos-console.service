@@ -13,7 +13,8 @@ EnvironmentFile=-/etc/opsmind-evalos/evalos.env
 Environment=CONSOLE_HOST=127.0.0.1
 Environment=CONSOLE_PORT=3000
 Environment=EVALOS_API_ORIGIN=http://127.0.0.1:8787
-ExecStartPre=/bin/sh -c 'for attempt in $(/usr/bin/seq 1 60); do /usr/bin/curl --silent --fail --max-time 2 http://127.0.0.1:8787/health >/dev/null && exit 0; /usr/bin/sleep 1; done; exit 1'
+# 服务器按服务账号限制本机出站；仅让只读健康探针越过 User=，主进程仍以 opsmindeval 运行。
+ExecStartPre=+/bin/sh -c 'for attempt in $(/usr/bin/seq 1 60); do /usr/bin/curl --silent --fail --max-time 2 http://127.0.0.1:8787/health >/dev/null && exit 0; /usr/bin/sleep 1; done; exit 1'
 ExecStart=/usr/local/bin/node serve.mjs
 TimeoutStartSec=90
 Restart=on-failure

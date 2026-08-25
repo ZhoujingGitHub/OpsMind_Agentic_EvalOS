@@ -86,7 +86,11 @@ assert.match(agentHarnessAppArmor, /^\s*mount,\s*$/m);
 assert.match(agentHarnessAppArmor, /^\s*pivot_root,\s*$/m);
 assert.match(agentHarnessEntrypoint, /resumable session directory is not writable/);
 assert.match(consoleUnit, /Requires=opsmind-evalos\.service/);
-assert.match(consoleUnit, /ExecStartPre=.*127\.0\.0\.1:8787\/health/);
+assert.match(consoleUnit, /^User=opsmindeval$/m);
+assert.match(consoleUnit, /^ExecStartPre=\+\/bin\/sh .*127\.0\.0\.1:8787\/health/m);
+assert.match(consoleUnit, /^ExecStart=\/usr\/local\/bin\/node serve\.mjs$/m);
+assert.match(consoleUnit, /^NoNewPrivileges=true$/m);
+assert.match(consoleUnit, /^ProtectSystem=strict$/m);
 assert.match(deploymentSmoke, /m3-l2-agentic-formal@3\.0\.0/);
 assert.match(deploymentSmoke, /case_count, 80/);
 assert.doesNotMatch(`${app}\n${adapter}\n${connectors}\n${adapterV5}\n${connectorsV5}`,
