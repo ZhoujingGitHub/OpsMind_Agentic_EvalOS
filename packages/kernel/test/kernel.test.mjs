@@ -296,6 +296,8 @@ test("失败分类不会把考生能力、考生超时或考场清理故障洗�
   assert.equal(classifyTrialFailure("output schema invalid").category, "CANDIDATE_CAPABILITY_FAILURE");
   assert.equal(classifyTrialFailure("ReportNotSubmitted - Agent 未通过提交调查报告接口交付可校验的最终报告。").category,
     "CANDIDATE_CAPABILITY_FAILURE");
+  assert.equal(classifyTrialFailure("external candidate quarantine unresolved: candidate product GET /journal?limit=5000 HTTP 422: limit must be <= 1000",
+    { keepQuarantined: true }).category, "PLATFORM_CONFIGURATION_FAILURE");
   assert.equal(classifyTrialFailure("candidate failed", { resetError: "twin reset failed" }).category,
     "PLATFORM_CLEANUP_FAILURE");
   assert.equal(classifyTrialFailure("external candidate run timed out", { keepQuarantined: true }).retryable, false);

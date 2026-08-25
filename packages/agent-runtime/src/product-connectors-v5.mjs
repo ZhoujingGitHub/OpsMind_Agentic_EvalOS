@@ -492,6 +492,28 @@ function listItems(page) {
   return Array.isArray(page) ? page : page?.items ?? page?.data ?? [];
 }
 
+async function readCursorPages({ api, pathname, cursorParam, nextField, itemCursorField,
+  firstPage = null, initialCursor = 0, pageSize = 1000, maxPages = 128 }) {
+  const items = [];
+  let cursor = Number(initialCursor) || 0;
+  let page = firstPage;
+  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    page ??= await api.request(`${pathname}?${cursorParam}=${cursor}&limit=${pageSize}`);
+    const batch = listItems(page);
+    items.push(...batch);
+    const hasMore = page?.has_more === true || page?.hasMore === true ||
+      (page?.has_more !== false && page?.hasMore !== false && batch.length >= pageSize);
+    if (!hasMore || batch.length === 0) return items;
+    const next = Number(page?.[nextField] ?? batch.at(-1)?.[itemCursorField]);
+    if (!Number.isFinite(next) || next <= cursor) {
+      throw new Error(`candidate product cursor pagination did not advance for ${pathname}`);
+    }
+    cursor = next;
+    page = null;
+  }
+  throw new Error(`candidate product cursor pagination exceeded ${maxPages} pages for ${pathname}`);
+}
+
 function eventPayload(event) {
   return event?.public_payload ?? event?.payload ?? event ?? {};
 }
@@ -581,15 +603,16 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
           idempotencyKey: requestBody.source_ref, channel: "agent-harness:/v2/investigation-candidates" }) };
     },
     async observe({ runRef, cursor = 0, executionContract }) {
+      const logPath = `/v2/investigations/${encodeURIComponent(runRef)}/execution-log`;
       const [detail, log, actionPage, candidatePage] = await Promise.all([
         api.request(`/v2/investigations/${encodeURIComponent(runRef)}`),
-        api.request(`/v2/investigations/${encodeURIComponent(runRef)}/execution-log?after_sequence=${Number(cursor) || 0}&limit=5000`),
+        api.request(`${logPath}?after_sequence=${Number(cursor) || 0}&limit=1000`),
         api.request("/v2/actions?limit=500"), api.request("/v2/investigation-candidates")]);
       const state = String(detail.status ?? "").toLowerCase();
       const terminal = ["resolved", "inconclusive", "insufficient_evidence", "failed", "cancelled", "budget_exhausted"].includes(state);
-      const events = terminal && Number(cursor) > 0
-        ? listItems(await api.request(`/v2/investigations/${encodeURIComponent(runRef)}/execution-log?after_sequence=0&limit=5000`))
-        : listItems(log);
+      const events = terminal ? await readCursorPages({ api, pathname: logPath, cursorParam: "after_sequence",
+        nextField: "next_sequence", itemCursorField: "sequence", initialCursor: 0,
+        firstPage: Number(cursor) === 0 ? log : null }) : listItems(log);
       const translated = translate(events, "agent-harness-product",
         (event, index) => `agent-harness:${event.sequence ?? Number(cursor) + index + 1}`,
         (event) => event.event_type ?? event.name ?? event.action);
@@ -783,9 +806,10 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
           idempotencyKey: requestBody.client_request_id, channel: "langgraph:/api/v1/candidates" }) };
     },
     async observe({ runRef, cursor = 0, executionContract }) {
+      const journalPath = `/api/v1/investigations/${encodeURIComponent(runRef)}/journal`;
       const [detail, journal, projection, jobsPage] = await Promise.all([
         api.request(`/api/v1/investigations/${encodeURIComponent(runRef)}`),
-        api.request(`/api/v1/investigations/${encodeURIComponent(runRef)}/journal?after_cursor=${Number(cursor) || 0}&limit=1000`),
+        api.request(`${journalPath}?after_cursor=${Number(cursor) || 0}&limit=1000`),
         api.request(`/api/v1/investigations/${encodeURIComponent(runRef)}/product-e2e`),
         api.request("/api/v1/jobs?limit=200")]);
       const run = runs.get(runRef) ?? { expected: frozenEvaluationContext(executionContract),
@@ -799,9 +823,9 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         : jobState === "cancelled" ? "CANCELLED" : langGraphStatus(detailState);
       const semanticTerminal = semanticStatus !== "RUNNING";
       const incrementalEvents = listItems(journal);
-      const events = semanticTerminal && Number(cursor) > 0
-        ? listItems(await api.request(`/api/v1/investigations/${encodeURIComponent(runRef)}/journal?after_cursor=0&limit=5000`))
-        : incrementalEvents;
+      const events = semanticTerminal ? await readCursorPages({ api, pathname: journalPath,
+        cursorParam: "after_cursor", nextField: "next_cursor", itemCursorField: "cursor", initialCursor: 0,
+        firstPage: Number(cursor) === 0 ? journal : null }) : incrementalEvents;
       const publicEvents = projection.public_events ?? events;
       const allEvents = publicEvents.length >= events.length ? publicEvents : events;
       const translated = translate(events, "langgraph-product",

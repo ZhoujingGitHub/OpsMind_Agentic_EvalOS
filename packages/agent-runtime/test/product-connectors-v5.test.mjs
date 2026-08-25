@@ -69,10 +69,14 @@ test("Adapter 5 Agent+Harness连接器用产品证据链绑定，保留权威Gat
         evidence_gate: { effective_conclusion_status: conclusionStatus, passed: true },
         evidence_ids: ["evidence:ah"], delivery_receipt: { delivery_id: "delivery-ah", status: "accepted" } },
       evidence: [{ evidence_id: "evidence:ah" }] }),
-    "GET /v2/investigations/run-ah/execution-log": async () => ({ next_sequence: 5, items: [
-      { sequence: 1, event_type: "candidate.accepted" }, { sequence: 2, event_type: "worker.started" },
-      { sequence: 3, event_type: "evidence.persisted" }, { sequence: 4, event_type: "audit.recorded" },
-      { sequence: 5, event_type: "report.delivery.completed" }] }),
+    "GET /v2/investigations/run-ah/execution-log": async ({ request }) => {
+      const query = new URL(request.url, "http://fixture").searchParams;
+      assert.equal(query.get("limit"), "1000");
+      return { next_sequence: 5, items: [
+        { sequence: 1, event_type: "candidate.accepted" }, { sequence: 2, event_type: "worker.started" },
+        { sequence: 3, event_type: "evidence.persisted" }, { sequence: 4, event_type: "audit.recorded" },
+        { sequence: 5, event_type: "report.delivery.completed" }] };
+    },
     "GET /v2/actions": async () => ({ items: [] }),
     "POST /v2/investigations/run-ah/protocol-lab/reset": async () => ({ ok: true, clean: true }),
   });
@@ -123,6 +127,7 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
       actor_id: "external-cleanup-handoff", public_payload: { cleanup_owner: "external_controller" } },
     { cursor: 6, schema_version: "opsmind-public-event:1.0", event_type: "archive.reconciled" },
   ];
+  const terminalJournalEvents = publicEvents.map((event) => ({ ...event, cursor: event.cursor + 1000 }));
   const fixture = await fixtureServer({
     "GET /api/v1/me": async ({ request }) => request.headers.authorization === "Bearer submitter"
       ? { subject: "submitter", roles: ["on_call"], tenant_ids: ["tenant-lg"] }
@@ -144,7 +149,14 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
     "GET /api/v1/investigations/run-lg": async () => ({ status: "completed", budget_usage: {
       input_tokens: 5000, output_tokens: 820, model_calls: 2, tool_calls: 6, result_bytes: 12345,
       cost_microunits: 200000 } }),
-    "GET /api/v1/investigations/run-lg/journal": async () => ({ next_cursor: 6, items: publicEvents }),
+    "GET /api/v1/investigations/run-lg/journal": async ({ request }) => {
+      const query = new URL(request.url, "http://fixture").searchParams;
+      assert.equal(query.get("limit"), "1000");
+      const cursor = Number(query.get("after_cursor"));
+      if (cursor === 0) return { next_cursor: 1000, items: Array.from({ length: 1000 }, (_, index) => ({
+        cursor: index + 1, schema_version: "opsmind-public-event:1.0", event_type: "evidence.persisted" })) };
+      return { next_cursor: 1006, has_more: false, items: terminalJournalEvents };
+    },
     "GET /api/v1/investigations/run-lg/product-e2e": async () => ({
       contract_version: "opsmind-controlled-remediation:1.1", trial_id: runContext?.trial_id,
       run_context_digest: runContext?.context_digest, run_contract_version: runContext?.contract_version,
@@ -193,7 +205,7 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
     "public_event_schema_version"].includes(name)));
   assert.equal(JSON.stringify(runContext).includes("HIDDEN-CASE"), false);
   assert.equal(JSON.stringify(runContext).includes("918273"), false);
-  const observation = await connector.observe({ runRef: started.run_ref, cursor: 0, executionContract: contract });
+  const observation = await connector.observe({ runRef: started.run_ref, cursor: 1, executionContract: contract });
   assert.equal(observation.status, "COMPLETED");
   assert.equal(observation.evaluation_binding.binding_strength, "PRODUCT_NATIVE_ACK");
   assert.equal(observation.outcome.root_cause, "ue-route-missing");
@@ -201,6 +213,10 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
   assert.equal(observation.candidate_usage.by_model["deepseek-v4-flash"].input_tokens, 1000);
   assert.equal(observation.candidate_usage.by_model["deepseek-v4-pro"].output_tokens, 700);
   assert.deepEqual(observation.artifact_refs, ["oss://langgraph/archive-lg.json"]);
+  const journalQueries = fixture.requests.filter((item) => item.url.startsWith("/api/v1/investigations/run-lg/journal"))
+    .map((item) => new URL(item.url, "http://fixture").searchParams);
+  assert.deepEqual(journalQueries.map((query) => query.get("after_cursor")), ["1", "0", "1000"]);
+  assert.ok(journalQueries.every((query) => query.get("limit") === "1000"));
   const finalized = await connector.finalize({ runRef: started.run_ref });
   assert.equal(finalized.cleanup_owner, "external_controller");
   assert.equal(finalized.candidate_reset, false);
