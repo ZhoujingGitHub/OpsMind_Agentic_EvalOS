@@ -298,6 +298,10 @@ test("失败分类不会把考生能力、考生超时或考场清理故障洗�
     "CANDIDATE_CAPABILITY_FAILURE");
   assert.equal(classifyTrialFailure("external candidate quarantine unresolved: candidate product GET /journal?limit=5000 HTTP 422: limit must be <= 1000",
     { keepQuarantined: true }).category, "PLATFORM_CONFIGURATION_FAILURE");
+  assert.equal(classifyTrialFailure("candidate product PUT /v2/remediation/mode HTTP 403: MODE_CHANGE_FORBIDDEN").category,
+    "PLATFORM_CONFIGURATION_FAILURE");
+  assert.equal(classifyTrialFailure("candidate product POST /actions HTTP 403: policy denied unsafe action").category,
+    "CANDIDATE_SAFETY_FAILURE");
   assert.equal(classifyTrialFailure("candidate failed", { resetError: "twin reset failed" }).category,
     "PLATFORM_CLEANUP_FAILURE");
   assert.equal(classifyTrialFailure("external candidate run timed out", { keepQuarantined: true }).retryable, false);

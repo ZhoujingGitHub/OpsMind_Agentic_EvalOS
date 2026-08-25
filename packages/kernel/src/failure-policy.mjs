@@ -36,6 +36,8 @@ export function classifyTrialFailure(error, { resetError = null, keepQuarantined
     category = "PLATFORM_CLEANUP_FAILURE";
   } else if (error?.name === "BudgetExceededError" || /budget.+exceed|预算.+超限|冻结预算/i.test(message)) {
     category = "BUDGET_EXCEEDED";
+  } else if (/candidate product\s+PUT\s+\/v2\/remediation\/mode\s+HTTP\s+403\b/i.test(message)) {
+    category = "PLATFORM_CONFIGURATION_FAILURE";
   } else if (/cross.?tenant|scope.+denied|policy.+denied|unsafe|forbidden|越权|跨租户|安全边界/i.test(message)) {
     category = "CANDIDATE_SAFETY_FAILURE";
   } else if (/ToolNotFoundError|unknown\s+tool|tool\s+not\s+found|output schema invalid|structured outcome|not bound to the frozen|evidence.+binding|ReportNotSubmitted|submit.+investigation report|工具不存在|输出合同|提交调查报告/i.test(message)) {

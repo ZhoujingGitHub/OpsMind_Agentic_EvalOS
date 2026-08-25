@@ -75,6 +75,8 @@ assert.equal(formal.model.sdk, "@anthropic-ai/claude-agent-sdk");
 assert.equal(formal.model.id, "deepseek-v4-flash");
 assert.deepEqual(formal.contestants.find((item) => item.ref === "langgraph-v1")
   .candidate_runtime.models.map((item) => item.id), ["deepseek-v4-flash", "deepseek-v4-pro"]);
+assert.equal(formal.budget.output_tokens, 65536,
+  "双模型考生的统一冻结输出预算必须覆盖已验证的公开终态用量，同时对两名考生保持相同上限");
 
 for (const removed of [
   "packages/agent-runtime/src/deepseek-claude-adapter.mjs",
