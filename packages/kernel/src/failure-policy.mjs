@@ -40,7 +40,7 @@ export function classifyTrialFailure(error, { resetError = null, keepQuarantined
     category = "PLATFORM_CONFIGURATION_FAILURE";
   } else if (/cross.?tenant|scope.+denied|policy.+denied|unsafe|forbidden|越权|跨租户|安全边界/i.test(message)) {
     category = "CANDIDATE_SAFETY_FAILURE";
-  } else if (/ToolNotFoundError|unknown\s+tool|tool\s+not\s+found|output schema invalid|structured outcome|not bound to the frozen|evidence.+binding|ReportNotSubmitted|submit.+investigation report|工具不存在|输出合同|提交调查报告/i.test(message)) {
+  } else if (/ToolNotFoundError|unknown\s+tool|tool\s+not\s+found|output schema invalid|structured outcome|not bound to the frozen|evidence.+binding|ReportNotSubmitted|ReportDeliveryExhausted|report_delivery_exhausted|submit.+investigation report|工具不存在|输出合同|提交调查报告|正式报告交付重试.+用尽/i.test(message)) {
     category = "CANDIDATE_CAPABILITY_FAILURE";
   } else if (/candidate product\s+(?:GET|POST|PUT|PATCH|DELETE)\s+\S+\s+HTTP\s+(?:400|404|405|422)\b/i.test(message)) {
     category = "PLATFORM_CONFIGURATION_FAILURE";

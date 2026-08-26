@@ -120,12 +120,14 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         Number.isFinite(candidateMaxRunMs) && candidateMaxRunMs > 0;
       const budgetAligned = Number.isFinite(trialWallclockMs) && trialWallclockMs > 0 && budgetObservable
         ? candidateMaxRunMs <= trialWallclockMs : null;
+      const budgetContractConsistent = connectorReadiness.budget_contract?.deployment_declaration_matches !== false;
       const limitations = [];
       if (!budgetObservable) limitations.push("candidate_max_run_time_not_public");
+      if (!budgetContractConsistent) limitations.push("candidate_budget_declaration_drift");
       if (discovery.usage_observability?.complete !== true) limitations.push("candidate_usage_partially_observable");
       const hardReady = healthy && connectorReadiness.identities_separated === true &&
         connectorReadiness.tenant_bound === true && connectorReadiness.least_privilege === true &&
-        (!requiresTwin || twinReady) && budgetAligned !== false;
+        (!requiresTwin || twinReady) && budgetAligned !== false && budgetContractConsistent;
       const formalReady = hardReady && budgetAligned === true &&
         (contestant.binding_requirement !== "PRODUCT_NATIVE_ACK" || discovery.native_run_context_supported === true);
       return {
@@ -152,6 +154,9 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         budget: { trial_wallclock_ms: Number.isFinite(trialWallclockMs) ? trialWallclockMs : null,
           candidate_max_run_ms: budgetObservable ? candidateMaxRunMs : null,
           observable: budgetObservable, aligned: budgetAligned,
+          native_enforcement: connectorReadiness.budget_contract?.native_enforcement === true,
+          enforced_dimensions: connectorReadiness.budget_contract?.dimensions ?? null,
+          deployment_declaration_matches: budgetContractConsistent,
           cancellation_supported: connectorReadiness.budget_contract?.cancellation_supported === true,
           source: connectorReadiness.budget_contract?.source ?? "not-declared" },
         production_writes_available: discovery.production_writes_available,
@@ -185,6 +190,8 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
       let finalObservation = null;
       let rawEventCount = 0;
       let normalizedEventCount = 0;
+      const seenRawEventDigests = new Map();
+      const seenNormalizedEventDigests = new Set();
       let lastProgressHeartbeatAt = 0;
       const runStartedAt = Date.now();
       let nextProgressCheckpointMs = 900000;
@@ -211,14 +218,25 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
           const observation = assertObservation(await connector.observe({ runRef, cursor, executionContract }), runRef);
           cursor = observation.next_cursor ?? cursor;
           status = observation.status;
-          rawEventCount += observation.raw_events.length;
-          normalizedEventCount += observation.normalized_events.length;
           for (const raw of observation.raw_events) {
+            const payloadDigest = raw.payload_digest ?? digest(raw.payload);
+            const previousDigest = seenRawEventDigests.get(raw.source_ref);
+            if (previousDigest && previousDigest !== payloadDigest) {
+              throw new Error(`candidate raw evidence changed after publication: ${raw.source_ref}`);
+            }
+            if (previousDigest) continue;
+            seenRawEventDigests.set(raw.source_ref, payloadDigest);
+            rawEventCount += 1;
             await emit("candidate.raw_event", "external-candidate", { source_ref: raw.source_ref,
               source_system: raw.source_system, recorded_at: raw.recorded_at ?? new Date().toISOString(),
-              payload_digest: raw.payload_digest ?? digest(raw.payload), payload: raw.payload });
+              payload_digest: payloadDigest, payload: raw.payload });
           }
           for (const normalized of observation.normalized_events) {
+            const normalizedDigest = digest({ event_type: normalized.event_type, actor: normalized.actor,
+              status: normalized.status, raw_source_refs: normalized.raw_source_refs, payload: normalized.payload ?? {} });
+            if (seenNormalizedEventDigests.has(normalizedDigest)) continue;
+            seenNormalizedEventDigests.add(normalizedDigest);
+            normalizedEventCount += 1;
             await emit(normalized.event_type, normalized.actor ?? "external-candidate", {
               ...(normalized.payload ?? {}), status: normalized.status, raw_source_refs: normalized.raw_source_refs,
             });

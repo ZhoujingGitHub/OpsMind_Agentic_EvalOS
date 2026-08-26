@@ -11,6 +11,7 @@ import {
   gradeTrial, judgeCalibrationGate, redact, reliabilityMetrics,
   seededShuffle, sha256, judgeSuiteCalibration, isRetryableInfrastructureFailure,
 } from "../src/index.mjs";
+import { measuredUsage } from "../src/runner.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "config", "m15-smoke.manifest.json"), "utf8"));
@@ -296,6 +297,8 @@ test("失败分类不会把考生能力、考生超时或考场清理故障洗�
   assert.equal(classifyTrialFailure("output schema invalid").category, "CANDIDATE_CAPABILITY_FAILURE");
   assert.equal(classifyTrialFailure("ReportNotSubmitted - Agent 未通过提交调查报告接口交付可校验的最终报告。").category,
     "CANDIDATE_CAPABILITY_FAILURE");
+  assert.equal(classifyTrialFailure("external candidate run ended with FAILED: ReportDeliveryExhausted - report_delivery_exhausted").category,
+    "CANDIDATE_CAPABILITY_FAILURE");
   assert.equal(classifyTrialFailure("external candidate quarantine unresolved: candidate product GET /journal?limit=5000 HTTP 422: limit must be <= 1000",
     { keepQuarantined: true }).category, "PLATFORM_CONFIGURATION_FAILURE");
   assert.equal(classifyTrialFailure("candidate product PUT /v2/remediation/mode HTTP 403: MODE_CHANGE_FORBIDDEN").category,
@@ -470,6 +473,18 @@ test("故障现场快照失败不会阻止环境复位", async () => {
     assert.equal(attempt.final_state.quarantine.required, false);
     assert.ok(store.getTrace(claimed.id).some((record) => record.name === "environment.snapshot_failed_after_failure"));
   } finally { labels.close(); store.close(); }
+});
+
+test("真实考生失败时仍保留候选公开用量而不是显示为零", () => {
+  const usage = measuredUsage({ input_tokens: 0, output_tokens: 0, model_calls: 0, tool_calls: 0,
+    wallclock_ms: 230234, compute_ms: 0, storage_bytes: 0, cost_usd: 0 }, {
+    source: "candidate_public_api", values: { tool_calls: 38 }, observed_dimensions: ["tool_calls"],
+    complete: false,
+  }, "REAL_CANDIDATE");
+  assert.equal(usage.tool_calls, 38);
+  assert.equal(usage.wallclock_ms, 230234);
+  assert.deepEqual(usage.measurement.observed_dimensions, ["tool_calls"]);
+  assert.equal(usage.measurement.complete, false);
 });
 
 test("账本首次全量验签后只校验新增尾部且保持同一可信头", () => {

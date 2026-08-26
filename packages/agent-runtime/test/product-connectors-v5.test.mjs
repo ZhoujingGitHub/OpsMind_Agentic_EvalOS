@@ -37,8 +37,10 @@ function executionContract(id, candidateRuntime) {
       time_window: "trial-relative", scope: { resource_ids: ["ue-public-1"], service_ids: ["mec-public-1"] } } } };
 }
 
-test("Adapter 5 Agent+Harness连接器用产品证据链绑定，保留权威Gate和未知用量", async (t) => {
+test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与显式未知用量", async (t) => {
   let sourceRef = null;
+  let runContext = null;
+  let budgetAckOverride = null;
   let conclusionStatus = "confirmed";
   const fixture = await fixtureServer({
     "GET /v2/auth/me": async ({ request }) => request.headers.authorization === "Bearer submitter"
@@ -49,20 +51,34 @@ test("Adapter 5 Agent+Harness连接器用产品证据链绑定，保留权威Gat
     "GET /v2/protocol-lab": async () => ({ configured: true, connected: true, slot_id: "slot-ah" }),
     "GET /v2/capabilities": async () => ({ service_version: "5.0", investigation_schema_version: "5.0",
       report_delivery_contract_version: "opsmind-report-delivery/2.0",
-      protocol_lab_binding_contract_version: "2.0" }),
+      protocol_lab_binding_contract_version: "2.0", native_run_context_supported: true,
+      run_context_contract_version: "opsmind-run-context/1.0",
+      run_budget_contract_version: "opsmind-run-budget/1.0",
+      run_usage_contract_version: "opsmind-run-usage/1.0" }),
     "GET /v2/investigation-runtime": async () => ({ sdk_execution_api: "claude-agent-sdk-query",
-      execution_mode: "agent-loop", model: "deepseek-v4-flash", thinking_mode: "high", reasoning_effort: "max" }),
+      execution_mode: "agent-loop", model: "deepseek-v4-flash", thinking_mode: "high", reasoning_effort: "max",
+      native_run_context_supported: true, run_context_contract_version: "opsmind-run-context/1.0",
+      run_budget_contract_version: "opsmind-run-budget/1.0", run_usage_contract_version: "opsmind-run-usage/1.0",
+      product_budget_limits: { max_duration_seconds: 2700, max_tool_calls: 128, max_model_calls: 32,
+        max_tokens: 1000000, max_cost_microunits: 1000000, max_result_bytes: 8388608 } }),
     "GET /v2/model-profile": async () => ({ provider: "deepseek", model: "deepseek-v4-flash",
       protocol: "anthropic-compatible", thinking_mode: "high", roles: ["investigation"] }),
     "GET /health": async () => ({ status: "healthy", version: "5.0", model: "deepseek-v4-flash" }),
     "GET /v2/remediation/context": async () => ({ safety_framework_version: "2.0" }),
     "PUT /v2/remediation/mode": async ({ body }) => body,
-    "POST /v2/investigation-candidates": async ({ body }) => { sourceRef = body.source_ref; return {
+    "POST /v2/investigation-candidates": async ({ body }) => { sourceRef = body.source_ref; runContext = body.run_context; return {
       candidate: { candidate_id: "candidate-ah", linked_investigation_id: "run-ah" } }; },
     "GET /v2/investigation-candidates": async () => ({ items: [{ candidate_id: "candidate-ah",
-      linked_investigation_id: "run-ah", source_ref: sourceRef }] }),
+      linked_investigation_id: "run-ah", source_ref: sourceRef, run_context: runContext,
+      run_context_ack: { native: true, contract_version: "opsmind-run-context/1.0",
+        budget_contract_version: "opsmind-run-budget/1.0", actual_budget: budgetAckOverride ?? runContext?.budget } }] }),
     "GET /v2/investigations/run-ah": async () => ({ status: "resolved", candidate_id: "candidate-ah",
-      tool_calls: [{}, {}], report: {
+      run_context: runContext, run_context_ack: { native: true, contract_version: "opsmind-run-context/1.0",
+        budget_contract_version: "opsmind-run-budget/1.0", usage_contract_version: "opsmind-run-usage/1.0",
+        actual_budget: budgetAckOverride ?? runContext?.budget }, usage: { contract_version: "opsmind-run-usage/1.0", tool_calls: 2,
+        model_calls: { status: "known", value: 4 }, tokens: { status: "unknown", value: null },
+        input_tokens: { status: "unknown", value: null }, output_tokens: { status: "unknown", value: null },
+        cost_microunits: { status: "known", value: 250000 }, result_bytes: 2048 }, tool_calls: [], report: {
         summary: "确认UE路由缺失", conclusion_status: conclusionStatus,
         hypotheses: [{ cause: "ue-route-missing", status: "leading", confidence: 0.91,
           supporting_evidence_ids: ["evidence:ah"] }],
@@ -72,10 +88,12 @@ test("Adapter 5 Agent+Harness连接器用产品证据链绑定，保留权威Gat
     "GET /v2/investigations/run-ah/execution-log": async ({ request }) => {
       const query = new URL(request.url, "http://fixture").searchParams;
       assert.equal(query.get("limit"), "1000");
-      return { next_sequence: 5, items: [
+      return { next_sequence: 7, items: [
         { sequence: 1, event_type: "candidate.accepted" }, { sequence: 2, event_type: "worker.started" },
         { sequence: 3, event_type: "evidence.persisted" }, { sequence: 4, event_type: "audit.recorded" },
-        { sequence: 5, event_type: "report.delivery.completed" }] };
+        { sequence: 5, event_type: "tool.called", payload: { id: "tool-1" } },
+        { sequence: 6, event_type: "tool.called", payload: { id: "tool-2" } },
+        { sequence: 7, event_type: "report.delivery.completed" }] };
     },
     "GET /v2/actions": async () => ({ items: [] }),
     "POST /v2/investigations/run-ah/protocol-lab/reset": async () => ({ ok: true, clean: true }),
@@ -85,20 +103,39 @@ test("Adapter 5 Agent+Harness连接器用产品证据链绑定，保留权威Gat
     approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-ah", attestation: ATTESTATION });
   const discovery = await connector.discover();
   assert.equal(discovery.candidate_runtime.models[0].thinking, "enabled");
+  assert.equal(discovery.native_run_context_supported, true);
+  const readiness = await connector.evaluationReadiness();
+  assert.equal(readiness.budget_contract.native_enforcement, true);
+  assert.equal(readiness.budget_contract.max_run_ms, 2700000);
+  assert.equal(readiness.budget_contract.dimensions.max_result_bytes, 8388608);
+  assert.equal(readiness.budget_contract.deployment_declaration_matches, true);
   const contract = executionContract("evalos-ah-1", discovery.candidate_runtime);
   await connector.prepare({ executionContract: contract });
   const started = await connector.start({ executionContract: contract });
+  assert.match(runContext.context_digest, /^[a-f0-9]{64}$/);
+  assert.equal(runContext.runtime_version, "5.0");
+  assert.deepEqual(runContext.budget, { max_duration_seconds: 2700, max_tool_calls: 24, max_model_calls: 32,
+    max_tokens: 152768, max_cost_microunits: 1000000, max_result_bytes: 8388608 });
+  assert.equal(JSON.stringify(runContext).includes("HIDDEN-CASE"), false);
+  assert.equal(JSON.stringify(runContext).includes("918273"), false);
+  assert.equal(JSON.stringify(runContext).toLowerCase().includes("grader"), false);
   const observation = await connector.observe({ runRef: started.run_ref, cursor: 0, executionContract: contract });
   assert.equal(observation.status, "COMPLETED");
-  assert.equal(observation.evaluation_binding.binding_strength, "EVIDENCE_CHAIN_BOUND");
+  assert.equal(observation.evaluation_binding.binding_strength, "PRODUCT_NATIVE_ACK");
   assert.equal(observation.evaluation_binding.complete, true);
   assert.equal(observation.outcome.root_cause, "ue-route-missing");
   assert.equal(observation.outcome.evidence_gate_passed, true);
   assert.equal(observation.candidate_usage.measurement_status, "PARTIAL");
-  assert.deepEqual(observation.candidate_usage.values, { tool_calls: 2 });
+  assert.deepEqual(observation.candidate_usage.values,
+    { model_calls: 4, tool_calls: 2, storage_bytes: 2048, cost_usd: 0.25 });
   assert.equal(observation.product_evidence.recovery.applicable, false);
   assert.match(observation.product_evidence.queue.ref, /^agent-harness:/);
   assert.deepEqual(observation.artifact_refs, ["agent-harness:report-delivery:delivery-ah"]);
+  budgetAckOverride = { ...runContext.budget, max_tool_calls: runContext.budget.max_tool_calls + 1 };
+  const drifted = await connector.observe({ runRef: started.run_ref, cursor: 0, executionContract: contract });
+  assert.equal(drifted.evaluation_binding.binding_strength, "UNBOUND");
+  assert.deepEqual(drifted.evaluation_binding.native_conformance.mismatches, ["budget"]);
+  budgetAckOverride = null;
   conclusionStatus = "possible";
   const possible = await connector.observe({ runRef: started.run_ref, cursor: 0, executionContract: contract });
   assert.equal(possible.outcome.status, "inconclusive");
@@ -116,6 +153,14 @@ test("Adapter 5 Agent+Harness模式管理员必须具备产品切换模式所需
         ? { user_id: "approver", tenant_id: "tenant-ah", permissions: { approve_action: true } }
         : { user_id: "administrator", tenant_id: "tenant-ah", permissions: { manage_users: true } },
     "GET /v2/protocol-lab": async () => ({ configured: true, connected: true, slot_id: "slot-ah" }),
+    "GET /v2/capabilities": async () => ({ native_run_context_supported: true,
+      run_context_contract_version: "opsmind-run-context/1.0", run_budget_contract_version: "opsmind-run-budget/1.0",
+      run_usage_contract_version: "opsmind-run-usage/1.0" }),
+    "GET /v2/investigation-runtime": async () => ({ native_run_context_supported: true,
+      run_context_contract_version: "opsmind-run-context/1.0", run_budget_contract_version: "opsmind-run-budget/1.0",
+      run_usage_contract_version: "opsmind-run-usage/1.0", product_budget_limits: { max_duration_seconds: 2700,
+        max_tool_calls: 128, max_model_calls: 32, max_tokens: 1000000, max_cost_microunits: 1000000,
+        max_result_bytes: 8388608 } }),
   });
   t.after(fixture.close);
   const connector = createAgentHarnessProductConnectorV5({ origin: fixture.origin, token: "submitter",

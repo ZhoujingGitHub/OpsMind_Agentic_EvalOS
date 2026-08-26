@@ -104,6 +104,28 @@ function deploymentLimits(value) {
     cancellation_supported: value?.cancellation_supported === true, source: value?.source ?? "not-declared" });
 }
 
+const NATIVE_BUDGET_KEYS = Object.freeze(["max_duration_seconds", "max_tool_calls", "max_model_calls",
+  "max_tokens", "max_cost_microunits", "max_result_bytes"]);
+
+function agentHarnessNativeContract(capability, runtime) {
+  const limits = runtime?.product_budget_limits;
+  const budgetLimits = limits && typeof limits === "object" && !Array.isArray(limits) &&
+    NATIVE_BUDGET_KEYS.every((name) => Number.isFinite(Number(limits[name])) && Number(limits[name]) > 0)
+    ? Object.fromEntries(NATIVE_BUDGET_KEYS.map((name) => [name, Math.floor(Number(limits[name]))])) : null;
+  const versions = {
+    run_context: capability?.run_context_contract_version ?? runtime?.run_context_contract_version,
+    run_budget: capability?.run_budget_contract_version ?? runtime?.run_budget_contract_version,
+    run_usage: capability?.run_usage_contract_version ?? runtime?.run_usage_contract_version,
+  };
+  const versionsAgree = [[capability?.run_context_contract_version, runtime?.run_context_contract_version],
+    [capability?.run_budget_contract_version, runtime?.run_budget_contract_version],
+    [capability?.run_usage_contract_version, runtime?.run_usage_contract_version]]
+    .every(([left, right]) => Boolean(left) && Boolean(right) && String(left) === String(right));
+  return Object.freeze({ supported: capability?.native_run_context_supported === true &&
+      runtime?.native_run_context_supported === true && versionsAgree && budgetLimits !== null,
+    versions, budget_limits: budgetLimits });
+}
+
 function rawEvent(sourceSystem, ref, payload) {
   return { source_ref: ref, source_system: sourceSystem,
     recorded_at: payload?.created_at ?? payload?.timestamp ?? new Date().toISOString(),
@@ -161,14 +183,17 @@ function translate(events, sourceSystem, refOf, nameOf) {
 
 function numericUsage(snapshot) {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return {};
+  const known = (value) => value && typeof value === "object" && !Array.isArray(value) && "status" in value
+    ? String(value.status).toLowerCase() === "known" ? value.value : undefined
+    : value;
   const values = {
-    input_tokens: snapshot.input_tokens,
-    output_tokens: snapshot.output_tokens,
-    model_calls: snapshot.model_calls,
-    tool_calls: snapshot.tool_calls,
-    storage_bytes: snapshot.storage_bytes ?? snapshot.result_bytes,
-    cost_usd: snapshot.cost_usd ?? (Number.isFinite(Number(snapshot.cost_microunits))
-      ? Number(snapshot.cost_microunits) / 1_000_000 : undefined),
+    input_tokens: known(snapshot.input_tokens),
+    output_tokens: known(snapshot.output_tokens),
+    model_calls: known(snapshot.model_calls),
+    tool_calls: known(snapshot.tool_calls),
+    storage_bytes: known(snapshot.storage_bytes) ?? known(snapshot.result_bytes),
+    cost_usd: known(snapshot.cost_usd) ?? (Number.isFinite(Number(known(snapshot.cost_microunits)))
+      ? Number(known(snapshot.cost_microunits)) / 1_000_000 : undefined),
   };
   return Object.fromEntries(Object.entries(values).flatMap(([name, raw]) => {
     const number = Number(raw);
@@ -220,9 +245,19 @@ function candidateUsageSnapshot({ authoritative = [], events = [], directToolCal
       if (!Object.hasOwn(values, name)) { values[name] = number; sources[name] = source; }
     }
   }
-  if (Number.isFinite(Number(directToolCalls)) && !Object.hasOwn(values, "tool_calls")) {
-    values.tool_calls = Number(directToolCalls);
-    sources.tool_calls = "candidate_public_tool_records";
+  const eventToolCallRefs = new Set(events.flatMap((event, index) => {
+    const name = String(event?.event_type ?? event?.name ?? event?.action ?? "").toLowerCase();
+    if (name !== "tool.called") return [];
+    const payload = event?.public_payload ?? event?.payload ?? event ?? {};
+    return [String(payload.tool_use_id ?? payload.id ?? event.sequence ?? event.cursor ?? `event-${index}`)];
+  }));
+  const reportedToolCalls = Number.isFinite(Number(directToolCalls)) ? Number(directToolCalls) : null;
+  const eventToolCalls = eventToolCallRefs.size ? eventToolCallRefs.size : null;
+  if (!Object.hasOwn(values, "tool_calls") && (reportedToolCalls !== null || eventToolCalls !== null)) {
+    values.tool_calls = Math.max(reportedToolCalls ?? 0, eventToolCalls ?? 0);
+    sources.tool_calls = reportedToolCalls !== null && eventToolCalls !== null
+      ? "candidate_public_tool_records_reconciled_with_events"
+      : reportedToolCalls !== null ? "candidate_public_tool_records" : "candidate_public_tool_events";
   }
   const modelAttempts = events.map(modelAttempt).filter(Boolean);
   if (!Object.hasOwn(values, "model_calls") && modelAttempts.length) {
@@ -453,14 +488,34 @@ function discovery(attestation, architecture, capability, runtime, health, candi
     usage_observability: { complete: usageComplete, policy: "reported_with_explicit_unknowns" } };
 }
 
-function agentHarnessSubmission(executionContract) {
+function agentHarnessSubmission(executionContract, nativeContract) {
   const context = frozenEvaluationContext(executionContract);
   const scope = executionContract.case.visible.scope ?? {};
+  const candidateRuntime = executionContract.contestant.candidate_runtime;
+  const limits = nativeContract?.budget_limits;
+  if (nativeContract?.supported !== true || !limits) {
+    throw new Error("Agent+Harness native run-context and budget contract is not publicly available");
+  }
+  const bounded = (requested, maximum) => Math.max(1, Math.min(Math.floor(Number(requested)), Math.floor(Number(maximum))));
+  const budget = {
+    max_duration_seconds: bounded(Number(executionContract.budget.wallclock_ms) / 1000, limits.max_duration_seconds),
+    max_tool_calls: bounded(executionContract.budget.tool_calls, limits.max_tool_calls),
+    max_model_calls: bounded(executionContract.budget.model_calls, limits.max_model_calls),
+    max_tokens: bounded(Number(executionContract.budget.input_tokens) + Number(executionContract.budget.output_tokens),
+      limits.max_tokens),
+    max_cost_microunits: bounded(Number(executionContract.budget.cost_usd) * 1_000_000,
+      limits.max_cost_microunits),
+    max_result_bytes: bounded(executionContract.budget.storage_bytes, limits.max_result_bytes),
+  };
+  const runtimeVersion = candidateRuntime?.versions?.service;
+  if (!runtimeVersion) throw new Error("Agent+Harness public service version is required for native run context");
   return { goal: executionContract.case.goal, trigger_type: "natural_language",
     source_ref: `evalos:${executionContract.trial.id}:${context.context_digest.slice(-16)}`, priority: 70,
     scope_hint: { customer_id: scope.customer_id, service_id: scope.service_id, site_id: scope.site_id,
       entity_ids: scope.entity_ids ?? scope.resource_ids ?? [], source_page: `/evalos/trials/${executionContract.trial.id}` },
-    time_window: timeWindow(executionContract.case.visible.time_window), seed_evidence_refs: [], freshness: "fresh" };
+    time_window: timeWindow(executionContract.case.visible.time_window), seed_evidence_refs: [], freshness: "fresh",
+    run_context: { trial_id: executionContract.trial.id, context_digest: context.context_digest.replace(/^sha256:/, ""),
+      environment_ref: context.environment_ref, runtime_version: runtimeVersion, budget } };
 }
 
 function langGraphSubmission(executionContract) {
@@ -530,12 +585,14 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
   const frozen = assertAttestation(attestation);
   const runtimeLimits = deploymentLimits(declaredRuntimeLimits);
   const runs = new Map();
+  let latestNativeContract = null;
   return Object.freeze({
     kind: "agent-harness-product-api-v5",
     async evaluationReadiness() {
-      const [submitter, approver, administrator, protocolLab] = await Promise.all([
+      const [submitter, approver, administrator, protocolLab, capability, runtime] = await Promise.all([
         api.request("/v2/auth/me"), approvalApi.request("/v2/auth/me"), adminApi.request("/v2/auth/me"),
-        api.request("/v2/protocol-lab")]);
+        api.request("/v2/protocol-lab"), api.request("/v2/capabilities"), api.request("/v2/investigation-runtime")]);
+      latestNativeContract = agentHarnessNativeContract(capability, runtime);
       const identitiesSeparated = distinct([submitter.user_id, approver.user_id, administrator.user_id]);
       const tenantBound = [submitter, approver, administrator].every((principal) => tenantScoped(principal, tenantId, "agent-harness"));
       const submitterScoped = permission(submitter, "investigate") && !permission(submitter, "approve_action") &&
@@ -544,6 +601,10 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         !permission(approver, "manage_users") && !permission(approver, "manage_roles");
       const administratorScoped = permission(administrator, "manage_roles") || permission(administrator, "platform_admin");
       const twinReady = protocolLab.configured === true && protocolLab.connected === true;
+      const publicMaxRunMs = latestNativeContract.supported
+        ? latestNativeContract.budget_limits.max_duration_seconds * 1000 : null;
+      const deploymentDeclarationMatches = !runtimeLimits.observable ||
+        runtimeLimits.max_run_ms === publicMaxRunMs;
       return { credential_roles: ["candidate_submitter", "approval_oracle", "mode_administrator"],
         identities_separated: identitiesSeparated, least_privilege: submitterScoped && approverScoped && administratorScoped,
         tenant_bound: tenantBound, isolated_tenant_slots: 1, safe_parallelism: 1,
@@ -552,7 +613,12 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         external_twin_ready: twinReady, twin: { configured: protocolLab.configured === true,
           connected: protocolLab.connected === true, slot_id: protocolLab.slot_id ?? null,
           roles: protocolLab.roles ?? [], summary: protocolLab.summary ?? null },
-        budget_contract: runtimeLimits, production_writes_available: false };
+        budget_contract: { ...runtimeLimits, observable: latestNativeContract.supported,
+          max_run_ms: publicMaxRunMs, native_enforcement: latestNativeContract.supported,
+          deployment_declaration_matches: deploymentDeclarationMatches,
+          dimensions: latestNativeContract.budget_limits,
+          source: latestNativeContract.supported ? "candidate_public_investigation_runtime" : runtimeLimits.source },
+        production_writes_available: false };
     },
     async discover() {
       const [capability, runtime, modelProfile, health, safety] = await Promise.all([
@@ -567,21 +633,30 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
       }], versions: { service: String(health.version ?? capability.service_version ?? "unknown"),
         investigation: String(capability.investigation_schema_version ?? capability.investigation_contract_version ?? "unknown"),
         report: String(capability.report_delivery_contract_version ?? capability.report_contract_version ?? "unknown"),
-        protocol_binding: String(capability.protocol_lab_binding_contract_version ?? capability.protocol_binding_version ?? "unknown") } };
+        protocol_binding: String(capability.protocol_lab_binding_contract_version ?? capability.protocol_binding_version ?? "unknown"),
+        run_context: String(capability.run_context_contract_version ?? runtime.run_context_contract_version ?? "unknown"),
+        run_budget: String(capability.run_budget_contract_version ?? runtime.run_budget_contract_version ?? "unknown"),
+        run_usage: String(capability.run_usage_contract_version ?? runtime.run_usage_contract_version ?? "unknown") } };
       if (declaredCandidateRuntime && !sameValue(declaredCandidateRuntime, observedCandidateRuntime)) {
         throw new Error("candidate discovery drift: declared Agent+Harness candidate_runtime");
       }
       const candidateRuntime = declaredCandidateRuntime ?? observedCandidateRuntime;
+      latestNativeContract = agentHarnessNativeContract(capability, runtime);
       const stableRuntime = { execution_api: runtime.sdk_execution_api, execution_mode: runtime.execution_mode,
         thinking_mode: runtime.thinking_mode, reasoning_effort: runtime.reasoning_effort,
         concurrency_limit: runtime.concurrency_limit, queue_policy: runtime.queue_policy,
         heartbeat_interval_seconds: runtime.heartbeat_interval_seconds,
         safety_framework_version: safety.safety_framework_version ?? safety.contract_version,
+        native_run_context_supported: latestNativeContract.supported,
+        run_context_contract_version: latestNativeContract.versions.run_context,
+        run_budget_contract_version: latestNativeContract.versions.run_budget,
+        run_usage_contract_version: latestNativeContract.versions.run_usage,
+        product_budget_limits: latestNativeContract.budget_limits,
         capability_versions: candidateRuntime.versions, production_writes_available: false };
       return discovery(frozen, "CLAUDE_AGENT_SDK_HARNESS", capability, stableRuntime,
         { status: health.status ?? "reachable", active_count: runtime.active_count,
           queued_count: runtime.queued_count, available_slots: runtime.available_slots }, candidateRuntime,
-        { nativeRunContextSupported: false, usageComplete: false });
+        { nativeRunContextSupported: latestNativeContract.supported, usageComplete: false });
     },
     async prepare({ executionContract }) {
       const operatingMode = executionContract.case.visible.operating_mode;
@@ -591,12 +666,19 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         execution_mode: executionContract.execution_mode, production_writes_available: false };
     },
     async start({ executionContract }) {
-      const requestBody = agentHarnessSubmission(executionContract);
+      const requestBody = agentHarnessSubmission(executionContract, latestNativeContract);
       const result = await api.request("/v2/investigation-candidates", { method: "POST", body: requestBody });
       const candidate = result.candidate ?? result;
       const runRef = result.investigation_id ?? result.linked_investigation_id ?? candidate.linked_investigation_id;
       if (!runRef) throw new Error("Agent+Harness product did not create a real investigation");
-      const expected = frozenEvaluationContext(executionContract);
+      const expected = { trial_id: requestBody.run_context.trial_id,
+        context_digest: requestBody.run_context.context_digest,
+        environment_ref: requestBody.run_context.environment_ref,
+        runtime_version: requestBody.run_context.runtime_version,
+        budget: requestBody.run_context.budget, native: true,
+        run_context_contract_version: latestNativeContract.versions.run_context,
+        run_budget_contract_version: latestNativeContract.versions.run_budget,
+        run_usage_contract_version: latestNativeContract.versions.run_usage };
       runs.set(runRef, { expected, requestBody, candidate_id: candidate.candidate_id ?? result.candidate_id ?? null });
       return { run_ref: runRef, status: "RUNNING", cursor: 0,
         binding_receipt: submissionReceipt({ runRef, expected, requestBody,
@@ -620,8 +702,15 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
       const approvalRequests = actions.filter((item) => ["awaiting_approval", "human_approval_required", "prechecked"].includes(item.status))
         .map((item) => ({ request_ref: `agent-harness-approval:${item.action_id}`, action_id: item.action_id,
           proposal: item, proposal_digest: item.proposal_digest, scope: item.scope, policy_decision: item.policy_decision }));
-      const run = runs.get(runRef) ?? { expected: frozenEvaluationContext(executionContract),
-        requestBody: agentHarnessSubmission(executionContract), candidate_id: detail.candidate_id ?? null };
+      const fallbackRequest = runs.has(runRef) ? null : agentHarnessSubmission(executionContract, latestNativeContract);
+      const run = runs.get(runRef) ?? { expected: { trial_id: fallbackRequest.run_context.trial_id,
+        context_digest: fallbackRequest.run_context.context_digest,
+        environment_ref: fallbackRequest.run_context.environment_ref,
+        runtime_version: fallbackRequest.run_context.runtime_version, budget: fallbackRequest.run_context.budget,
+        native: true, run_context_contract_version: latestNativeContract.versions.run_context,
+        run_budget_contract_version: latestNativeContract.versions.run_budget,
+        run_usage_contract_version: latestNativeContract.versions.run_usage },
+        requestBody: fallbackRequest, candidate_id: detail.candidate_id ?? null };
       const candidateRecord = listItems(candidatePage).find((item) => item.candidate_id === (detail.candidate_id ?? run.candidate_id) ||
         item.linked_investigation_id === runRef || item.investigation_id === runRef) ?? null;
       const candidateId = detail.candidate_id ?? run.candidate_id ?? candidateRecord?.candidate_id ?? null;
@@ -637,8 +726,17 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         evidenceChecks.protocol_binding_fingerprint = String(boundPayload.binding_fingerprint)
           .endsWith(run.expected.context_digest.slice(-16));
       }
-      const evaluationBinding = terminal ? binding({ runRef, expected: run.expected, evidenceChecks,
-        evidenceRequired: ["candidate_record_found", "source_ref", "linked_investigation", "investigation_candidate_id"] }) : null;
+      const nativeContext = detail.run_context ?? candidateRecord?.run_context ?? {};
+      const nativeAck = detail.run_context_ack ?? candidateRecord?.run_context_ack ?? {};
+      const nativeFields = { trial_id: nativeContext.trial_id, context_digest: nativeContext.context_digest,
+        environment_ref: nativeContext.environment_ref, runtime_version: nativeContext.runtime_version,
+        budget: nativeAck.actual_budget ?? nativeContext.budget, native: nativeAck.native,
+        run_context_contract_version: nativeAck.contract_version,
+        run_budget_contract_version: nativeAck.budget_contract_version,
+        run_usage_contract_version: nativeAck.usage_contract_version ?? detail.usage?.contract_version };
+      const evaluationBinding = terminal ? binding({ runRef, expected: run.expected, nativeFields,
+        nativeRequired: ["trial_id", "context_digest", "environment_ref", "runtime_version", "budget", "native",
+          "run_context_contract_version", "run_budget_contract_version", "run_usage_contract_version"] }) : null;
       const bindingRaw = terminal && candidateRecord
         ? [rawEvent("agent-harness-product", `agent-harness:candidate:${candidateRecord.candidate_id}`, candidateRecord)] : [];
       const delivery = detail.report?.delivery_receipt;

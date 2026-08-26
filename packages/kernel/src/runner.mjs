@@ -9,12 +9,19 @@ import { redact } from "./redaction.mjs";
 import { sha256, stableStringify } from "./utils.mjs";
 
 
-function measuredUsage(budgetUsage, candidateUsage, runClass) {
+export function measuredUsage(budgetUsage, candidateUsage, runClass) {
   const dimensions = ["input_tokens", "output_tokens", "model_calls", "tool_calls", "wallclock_ms",
     "compute_ms", "storage_bytes", "cost_usd"];
-  const observed = candidateUsage?.observed_dimensions ?? [];
+  const candidateValues = runClass === "REAL_CANDIDATE"
+    ? Object.fromEntries(Object.entries(candidateUsage?.values ?? {}).filter(([name, value]) =>
+      name !== "wallclock_ms" && dimensions.includes(name) && Number.isFinite(Number(value)) && Number(value) >= 0)
+      .map(([name, value]) => [name, Number(value)]))
+    : {};
+  const observed = [...new Set(candidateUsage?.observed_dimensions ?? Object.keys(candidateValues))]
+    .filter((name) => Object.hasOwn(candidateValues, name));
   return {
     ...budgetUsage,
+    ...candidateValues,
     measurement: runClass === "REAL_CANDIDATE" ? {
       source: candidateUsage?.source ?? "unavailable",
       observed_dimensions: observed,
