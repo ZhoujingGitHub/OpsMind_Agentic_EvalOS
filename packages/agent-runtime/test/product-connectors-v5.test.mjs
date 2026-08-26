@@ -56,6 +56,14 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
       protocol_tool_loading: { contract_version: "opsmind-protocol-tool-loading/1.0",
         always_loaded: ["publish_investigation_progress", "submit_investigation_report"],
         tool_search_required: false },
+      identifier_scope_contract: { contract_version: "opsmind-identifier-scope/1.0",
+        scope_enforcement: "server_injected_narrowest_scope",
+        unresolved_behavior: "structured_coverage_no_tenant_fallback",
+        exact_lookup_semantics: "no_alias_or_similarity_mapping" },
+      native_tool_availability: { contract_version: "opsmind-native-tool-availability/1.0",
+        available: ["Read", "Glob", "Grep", "Write", "Edit", "WebSearch", "WebFetch", "Skill", "ToolSearch"],
+        unavailable: { Bash: { status: "unavailable", reason_code: "SDK_SANDBOX_PROC_MOUNT_NOT_PERMITTED",
+          sandbox_required: true, unsafe_fallback_allowed: false } } },
       protocol_lab_binding_contract_version: "2.0", native_run_context_supported: true,
       run_context_contract_version: "opsmind-run-context/1.0",
       run_budget_contract_version: "opsmind-run-budget/1.0",
@@ -117,6 +125,10 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   assert.equal(discovery.candidate_runtime.models[0].thinking, "enabled");
   assert.equal(discovery.candidate_runtime.versions.protocol_tool_loading,
     "opsmind-protocol-tool-loading/1.0");
+  assert.equal(discovery.candidate_runtime.versions.identifier_scope,
+    "opsmind-identifier-scope/1.0");
+  assert.equal(discovery.candidate_runtime.versions.native_tool_availability,
+    "opsmind-native-tool-availability/1.0");
   assert.equal(discovery.native_run_context_supported, true);
   const readiness = await connector.evaluationReadiness();
   assert.equal(readiness.budget_contract.native_enforcement, true);

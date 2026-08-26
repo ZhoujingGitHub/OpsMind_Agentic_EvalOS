@@ -662,6 +662,12 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         ...(capability.protocol_tool_loading?.contract_version ? {
           protocol_tool_loading: String(capability.protocol_tool_loading.contract_version),
         } : {}),
+        ...(capability.identifier_scope_contract?.contract_version ? {
+          identifier_scope: String(capability.identifier_scope_contract.contract_version),
+        } : {}),
+        ...(capability.native_tool_availability?.contract_version ? {
+          native_tool_availability: String(capability.native_tool_availability.contract_version),
+        } : {}),
         run_context: String(capability.run_context_contract_version ?? runtime.run_context_contract_version ?? "unknown"),
         run_budget: String(capability.run_budget_contract_version ?? runtime.run_budget_contract_version ?? "unknown"),
         run_usage: String(capability.run_usage_contract_version ?? runtime.run_usage_contract_version ?? "unknown") } };
