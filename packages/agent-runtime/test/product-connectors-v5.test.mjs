@@ -42,6 +42,8 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   let runContext = null;
   let budgetAckOverride = null;
   let conclusionStatus = "confirmed";
+  let investigationStatus = "resolved";
+  let usageExhausted = [];
   const fixture = await fixtureServer({
     "GET /v2/auth/me": async ({ request }) => request.headers.authorization === "Bearer submitter"
       ? { user_id: "submitter", tenant_id: "tenant-ah", permissions: { investigate: true } }
@@ -51,6 +53,9 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
     "GET /v2/protocol-lab": async () => ({ configured: true, connected: true, slot_id: "slot-ah" }),
     "GET /v2/capabilities": async () => ({ service_version: "5.0", investigation_schema_version: "5.0",
       report_delivery_contract_version: "opsmind-report-delivery/2.0",
+      protocol_tool_loading: { contract_version: "opsmind-protocol-tool-loading/1.0",
+        always_loaded: ["publish_investigation_progress", "submit_investigation_report"],
+        tool_search_required: false },
       protocol_lab_binding_contract_version: "2.0", native_run_context_supported: true,
       run_context_contract_version: "opsmind-run-context/1.0",
       run_budget_contract_version: "opsmind-run-budget/1.0",
@@ -72,13 +77,14 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
       linked_investigation_id: "run-ah", source_ref: sourceRef, run_context: runContext,
       run_context_ack: { native: true, contract_version: "opsmind-run-context/1.0",
         budget_contract_version: "opsmind-run-budget/1.0", actual_budget: budgetAckOverride ?? runContext?.budget } }] }),
-    "GET /v2/investigations/run-ah": async () => ({ status: "resolved", candidate_id: "candidate-ah",
+    "GET /v2/investigations/run-ah": async () => ({ status: investigationStatus, candidate_id: "candidate-ah",
       run_context: runContext, run_context_ack: { native: true, contract_version: "opsmind-run-context/1.0",
         budget_contract_version: "opsmind-run-budget/1.0", usage_contract_version: "opsmind-run-usage/1.0",
         actual_budget: budgetAckOverride ?? runContext?.budget }, usage: { contract_version: "opsmind-run-usage/1.0", tool_calls: 2,
         model_calls: { status: "known", value: 4 }, tokens: { status: "unknown", value: null },
         input_tokens: { status: "unknown", value: null }, output_tokens: { status: "unknown", value: null },
-        cost_microunits: { status: "known", value: 250000 }, result_bytes: 2048 }, tool_calls: [], report: {
+        cost_microunits: { status: "known", value: 250000 }, result_bytes: 2048,
+        exhausted: usageExhausted }, tool_calls: [], report: {
         summary: "确认UE路由缺失", conclusion_status: conclusionStatus,
         hypotheses: [{ cause: "ue-route-missing", status: "leading", confidence: 0.91,
           supporting_evidence_ids: ["evidence:ah"] }],
@@ -88,12 +94,17 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
     "GET /v2/investigations/run-ah/execution-log": async ({ request }) => {
       const query = new URL(request.url, "http://fixture").searchParams;
       assert.equal(query.get("limit"), "1000");
-      return { next_sequence: 7, items: [
+      const items = [
         { sequence: 1, event_type: "candidate.accepted" }, { sequence: 2, event_type: "worker.started" },
         { sequence: 3, event_type: "evidence.persisted" }, { sequence: 4, event_type: "audit.recorded" },
         { sequence: 5, event_type: "tool.called", payload: { id: "tool-1" } },
         { sequence: 6, event_type: "tool.called", payload: { id: "tool-2" } },
-        { sequence: 7, event_type: "report.delivery.completed" }] };
+        { sequence: 7, event_type: "report.delivery.completed" },
+        ...(investigationStatus === "failed" ? [{ sequence: 8, event_type: "agent.result_received",
+          payload: { subtype: "error_max_budget_usd", is_error: true, stop_reason: "tool_use" } },
+        { sequence: 9, event_type: "investigation.failed", payload: { status: "failed" } }] : []),
+      ];
+      return { next_sequence: items.at(-1).sequence, items };
     },
     "GET /v2/actions": async () => ({ items: [] }),
     "POST /v2/investigations/run-ah/protocol-lab/reset": async () => ({ ok: true, clean: true }),
@@ -103,6 +114,8 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
     approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-ah", attestation: ATTESTATION });
   const discovery = await connector.discover();
   assert.equal(discovery.candidate_runtime.models[0].thinking, "enabled");
+  assert.equal(discovery.candidate_runtime.versions.protocol_tool_loading,
+    "opsmind-protocol-tool-loading/1.0");
   assert.equal(discovery.native_run_context_supported, true);
   const readiness = await connector.evaluationReadiness();
   assert.equal(readiness.budget_contract.native_enforcement, true);
@@ -140,6 +153,14 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   const possible = await connector.observe({ runRef: started.run_ref, cursor: 0, executionContract: contract });
   assert.equal(possible.outcome.status, "inconclusive");
   assert.equal(possible.outcome.root_cause, null);
+  investigationStatus = "failed";
+  usageExhausted = ["max_cost_microunits", "max_tool_calls"];
+  const exhausted = await connector.observe({ runRef: started.run_ref, cursor: 0, executionContract: contract });
+  assert.equal(exhausted.status, "FAILED");
+  assert.equal(exhausted.error.code, "BUDGET_EXCEEDED");
+  assert.match(exhausted.error.message, /max_cost_microunits/);
+  assert.deepEqual(exhausted.candidate_usage.exhausted_dimensions,
+    ["max_cost_microunits", "max_tool_calls"]);
   const finalized = await connector.finalize({ runRef: started.run_ref });
   assert.equal(finalized.candidate_reset, true);
   assert.equal(finalized.evalos_authoritative_reset_pending, true);

@@ -300,6 +300,18 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         isolationError.candidateUsage = error.candidateUsage ?? null;
         throw isolationError;
       }
+      const requiredStrength = executionContract.contestant.binding_requirement ?? "EVIDENCE_CHAIN_BOUND";
+      try { assertBinding(finalObservation?.evaluation_binding, requiredStrength); }
+      catch (error) {
+        error.candidateUsage = finalObservation?.candidate_usage ?? null;
+        error.runRef = runRef;
+        error.candidateTerminal = true;
+        throw error;
+      }
+      await emit("candidate.evaluation_binding.verified", "candidate-adapter", { run_ref: runRef,
+        binding_strength: finalObservation.evaluation_binding.binding_strength,
+        required_strength: requiredStrength,
+        expected_context_digest: finalObservation.evaluation_binding.expected_context_digest });
       if (status !== "COMPLETED" && status !== "INCONCLUSIVE") {
         const terminalError = finalObservation?.error ?? {};
         const detail = [terminalError.code, terminalError.message].filter(Boolean).join(" - ") || "unknown";
@@ -316,14 +328,7 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         error.candidateTerminal = true;
         throw error;
       }
-      const requiredStrength = executionContract.contestant.binding_requirement ?? "EVIDENCE_CHAIN_BOUND";
-      try { assertBinding(finalObservation.evaluation_binding, requiredStrength); }
-      catch (error) { error.runRef = runRef; error.candidateTerminal = true; throw error; }
       if (executionContract.evaluation_lane === "PRODUCT_RELIABILITY") assertProductEvidence(finalObservation.product_evidence);
-      await emit("candidate.evaluation_binding.verified", "candidate-adapter", { run_ref: runRef,
-        binding_strength: finalObservation.evaluation_binding.binding_strength,
-        required_strength: requiredStrength,
-        expected_context_digest: finalObservation.evaluation_binding.expected_context_digest });
       await emit("candidate.evidence.frozen", "candidate-adapter", { run_ref: runRef,
         raw_event_count: rawEventCount, normalized_event_count: normalizedEventCount,
         artifact_refs: finalObservation.artifact_refs ?? [] });

@@ -29,12 +29,15 @@ function messageOf(error) {
 
 export function classifyTrialFailure(error, { resetError = null, keepQuarantined = false } = {}) {
   const message = messageOf(error);
+  const candidateBudgetExhausted = Array.isArray(error?.candidateUsage?.exhausted_dimensions) &&
+    error.candidateUsage.exhausted_dimensions.length > 0;
   let category = "UNCLASSIFIED_NON_RETRYABLE";
   if (error?.cancelled === true || /operator.+cancel|操作员.+取消|evaluation cancellation requested/i.test(message)) {
     category = "OPERATOR_CANCELLED";
   } else if (resetError) {
     category = "PLATFORM_CLEANUP_FAILURE";
-  } else if (error?.name === "BudgetExceededError" || /budget.+exceed|预算.+超限|冻结预算/i.test(message)) {
+  } else if (error?.name === "BudgetExceededError" || error?.name === "BUDGET_EXCEEDED" ||
+      candidateBudgetExhausted || /budget.+exceed|预算.+超限|冻结预算/i.test(message)) {
     category = "BUDGET_EXCEEDED";
   } else if (/candidate product\s+PUT\s+\/v2\/remediation\/mode\s+HTTP\s+403\b/i.test(message)) {
     category = "PLATFORM_CONFIGURATION_FAILURE";

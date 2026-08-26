@@ -202,11 +202,11 @@
       "architecture": "CLAUDE_AGENT_SDK_HARNESS",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "8dd066ebcfba59026af8003d71985598702fc9a3",
-      "artifact_digest": "sha256:da1124a263a48a09232b9b0ee6823aaf8290d7003c0f5ff16001ff673c0c54d5",
-      "runtime_digest": "sha256:be1067032c7dfea9812c4c49ce7eaa4cd2528c629629179c2c483d7f4f289fb5",
-      "runtime_manifest_digest": "sha256:d217d115beea7a306f4226dc147c50084e6c089d3a863e47cb6610c8e2a60ca3",
-      "capability_contract_digest": "sha256:eb81d508161319179322622d8e57152b56c2e65aeb4b80ca291e40ba97b17f01",
+      "source_revision": "e8d16cec2a6a881271969c83821ab29e11229228",
+      "artifact_digest": "sha256:327ba3168366feb31096aa36a843edec5aa55bd1c52c59ff0a8b3bbbb6b673bb",
+      "runtime_digest": "sha256:3418543054b41094a03b86bc054e7b71cc1a42160cea9e4e06b41f00033229fc",
+      "runtime_manifest_digest": "sha256:09d6ee897b012beb53d33ccaaad252568b994c82542156c542ce72abc339792e",
+      "capability_contract_digest": "sha256:9186bb69d64e450c4abfbb077063713e60d7dd0566c1a23138f106bc36c43ebf",
       "binding_requirement": "PRODUCT_NATIVE_ACK",
       "candidate_runtime": {
         "contract_version": "1.0",
@@ -220,13 +220,14 @@
           }
         ],
         "versions": {
-          "service": "2.4.0",
+          "service": "2.4.1",
           "investigation": "opsmind-investigation/3.0",
           "report": "opsmind-report-delivery/2.0",
           "protocol_binding": "opsmind-protocol-lab-binding/2.0",
           "run_context": "opsmind-run-context/1.0",
           "run_budget": "opsmind-run-budget/1.0",
-          "run_usage": "opsmind-run-usage/1.0"
+          "run_usage": "opsmind-run-usage/1.0",
+          "protocol_tool_loading": "opsmind-protocol-tool-loading/1.0"
         }
       }
     },

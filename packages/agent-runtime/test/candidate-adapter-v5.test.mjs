@@ -68,6 +68,21 @@ test("Candidate Adapter 5.0拒绝本地提交回执冒充产品绑定，也执�
     /not bound to the frozen Trial context: EVIDENCE_CHAIN_BOUND/);
 });
 
+test("Candidate Adapter 5.0在真实产品失败前仍先核验并落账原生Trial绑定", async () => {
+  const base = connector("PRODUCT_NATIVE_ACK");
+  const failed = { ...base, observe: async ({ runRef }) => ({ ...(await base.observe({ runRef })),
+    status: "FAILED", error: { code: "BUDGET_EXCEEDED", message: "candidate exhausted frozen budget" },
+    candidate_usage: { values: { model_calls: 16, tool_calls: 24 },
+      observed_dimensions: ["model_calls", "tool_calls"], exhausted_dimensions: ["max_cost_microunits"],
+      complete: false } }) };
+  const emitted = [];
+  const adapter = createCandidateAdapterV5({ id: "candidate", connector: failed, pollIntervalMs: 1 });
+  await assert.rejects(adapter.execute({ executionContract: contract("PRODUCT_NATIVE_ACK"),
+    emit: async (name, actor, payload) => emitted.push([name, actor, payload]) }), /BUDGET_EXCEEDED/);
+  const binding = emitted.find(([name]) => name === "candidate.evaluation_binding.verified");
+  assert.equal(binding?.[2].binding_strength, "PRODUCT_NATIVE_ACK");
+});
+
 test("Candidate Adapter 5.0在产品公开预算与部署声明漂移时阻止开考", async () => {
   const base = connector("PRODUCT_NATIVE_ACK");
   const drifted = { ...base,

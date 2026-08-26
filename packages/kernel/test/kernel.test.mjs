@@ -308,6 +308,10 @@ test("失败分类不会把考生能力、考生超时或考场清理故障洗�
   assert.equal(classifyTrialFailure("candidate failed", { resetError: "twin reset failed" }).category,
     "PLATFORM_CLEANUP_FAILURE");
   assert.equal(classifyTrialFailure("external candidate run timed out", { keepQuarantined: true }).retryable, false);
+  const exhausted = new Error("external candidate failed after provider result");
+  exhausted.name = "BUDGET_EXCEEDED";
+  exhausted.candidateUsage = { exhausted_dimensions: ["max_cost_microunits"] };
+  assert.equal(classifyTrialFailure(exhausted).category, "BUDGET_EXCEEDED");
 });
 
 test("冻结重试策略只给明确瞬态基础设施故障一次机会并保留原失败尝试", () => {

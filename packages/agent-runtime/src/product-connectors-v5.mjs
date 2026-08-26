@@ -201,6 +201,13 @@ function numericUsage(snapshot) {
   }));
 }
 
+function exhaustedUsage(snapshot) {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return [];
+  const raw = snapshot.exhausted ?? snapshot.exhausted_dimensions ?? [];
+  return [...new Set((Array.isArray(raw) ? raw : [raw])
+    .map((item) => String(item ?? "").trim()).filter((item) => NATIVE_BUDGET_KEYS.includes(item)))];
+}
+
 function modelAttempt(event, index) {
   const payload = event?.public_payload ?? event?.payload ?? event ?? {};
   const snapshot = payload.output_snapshot ?? payload.model_usage ?? payload.usage ?? payload;
@@ -240,10 +247,12 @@ function aggregateAttempts(attempts, key) {
 function candidateUsageSnapshot({ authoritative = [], events = [], directToolCalls = null } = {}) {
   const values = {};
   const sources = {};
+  const exhaustedDimensions = [];
   for (const { source, value } of authoritative) {
     for (const [name, number] of Object.entries(numericUsage(value))) {
       if (!Object.hasOwn(values, name)) { values[name] = number; sources[name] = source; }
     }
+    exhaustedDimensions.push(...exhaustedUsage(value));
   }
   const eventToolCallRefs = new Set(events.flatMap((event, index) => {
     const name = String(event?.event_type ?? event?.name ?? event?.action ?? "").toLowerCase();
@@ -282,7 +291,7 @@ function candidateUsageSnapshot({ authoritative = [], events = [], directToolCal
       .map((item) => item.ref),
     measurement_status: complete ? "COMPLETE"
       : observedDimensions.length ? "PARTIAL" : "UNAVAILABLE",
-    complete,
+    complete, exhausted_dimensions: [...new Set(exhaustedDimensions)],
     by_model: aggregateAttempts(modelAttempts, "model_id"),
     by_stage: aggregateAttempts(modelAttempts, "stage"), model_attempts: modelAttempts };
 }
@@ -424,6 +433,22 @@ function authoritativeOutcome({ status, detail = {}, projection = null, events =
 }
 
 function terminalFailure(detail = {}, events = [], job = null) {
+  const resultError = [...events].reverse().find((event) => {
+    const name = String(event?.event_type ?? event?.name ?? event?.action ?? "").toLowerCase();
+    const payload = event?.public_payload ?? event?.payload ?? {};
+    return name === "agent.result_received" && payload.is_error === true;
+  });
+  const resultPayload = resultError?.public_payload ?? resultError?.payload ?? {};
+  const exhaustedDimensions = [...new Set([
+    ...exhaustedUsage(detail.usage), ...exhaustedUsage(detail.report?.usage),
+  ])];
+  const resultSubtype = String(resultPayload.subtype ?? resultPayload.error_type ?? "").toLowerCase();
+  if (exhaustedDimensions.length || /budget/.test(resultSubtype)) {
+    const dimensions = exhaustedDimensions.length ? exhaustedDimensions : [resultSubtype];
+    return { code: "BUDGET_EXCEEDED",
+      message: `candidate exhausted frozen budget: ${dimensions.join(",")}`,
+      source_event: resultError?.event_type ?? resultError?.name ?? "candidate_usage" };
+  }
   const failedEvent = [...events].reverse().find((event) => {
     const name = String(event?.event_type ?? event?.name ?? event?.action ?? "").toLowerCase();
     const payload = event?.public_payload ?? event?.payload ?? {};
@@ -634,6 +659,9 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         investigation: String(capability.investigation_schema_version ?? capability.investigation_contract_version ?? "unknown"),
         report: String(capability.report_delivery_contract_version ?? capability.report_contract_version ?? "unknown"),
         protocol_binding: String(capability.protocol_lab_binding_contract_version ?? capability.protocol_binding_version ?? "unknown"),
+        ...(capability.protocol_tool_loading?.contract_version ? {
+          protocol_tool_loading: String(capability.protocol_tool_loading.contract_version),
+        } : {}),
         run_context: String(capability.run_context_contract_version ?? runtime.run_context_contract_version ?? "unknown"),
         run_budget: String(capability.run_budget_contract_version ?? runtime.run_budget_contract_version ?? "unknown"),
         run_usage: String(capability.run_usage_contract_version ?? runtime.run_usage_contract_version ?? "unknown") } };
