@@ -60,12 +60,21 @@ test("超时后的考场清理核验采用追加式记录且不能篡改原Trial
   } finally { labels.close(); store.close(); }
 });
 
-test("预算在80%预警并在100%前阻止超限，超限尝试仍如实记账", () => {
+test("预算允许刚好用满并在下一次消费时阻止超限，超限尝试仍如实记账", () => {
   const tracker = new BudgetTracker({ tool_calls: 10 });
   assert.deepEqual(tracker.consume({ tool_calls: 7 }), []);
   assert.equal(tracker.consume({ tool_calls: 1 }).length, 1);
-  assert.throws(() => tracker.consume({ tool_calls: 2 }), BudgetExceededError);
+  assert.deepEqual(tracker.consume({ tool_calls: 2 }), []);
   assert.equal(tracker.snapshot().usage.tool_calls, 10);
+  assert.throws(() => tracker.consume({ tool_calls: 1 }), BudgetExceededError);
+  assert.equal(tracker.snapshot().usage.tool_calls, 11);
+});
+
+test("真实考生在冻结工具预算边界完成时不能被EvalOS误判为超限", () => {
+  const tracker = new BudgetTracker({ tool_calls: 24 });
+  assert.doesNotThrow(() => tracker.consume({ tool_calls: 24 }));
+  assert.equal(tracker.snapshot().ratios.tool_calls, 1);
+  assert.throws(() => tracker.consume({ tool_calls: 1 }), BudgetExceededError);
 });
 
 test("脱敏器从嵌套载荷清除凭据", () => {
