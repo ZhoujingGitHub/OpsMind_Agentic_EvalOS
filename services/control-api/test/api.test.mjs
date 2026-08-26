@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createApp, evaluationRunName, trialLiveProgressView } from "../src/app.mjs";
+import { buildCandidateConnectorSet, createApp, evaluationRunName, trialLiveProgressView } from "../src/app.mjs";
 import { createTestDouble, freezeSourceSnapshot } from "../../../packages/kernel/src/index.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
@@ -100,6 +100,24 @@ test("管理员可在不创建Trial或触碰Twin的前提下只读核验Adapter 
     assert.deepEqual(body.items[0].discovery.candidate_runtime, discovery.candidate_runtime);
     assert.equal(app.store.listTrials().length, 0);
   } finally { app.close(); }
+});
+
+test("新版候选的只读发现不被旧冻结运行合同阻断，而执行连接器继续严格绑定", () => {
+  const v4Calls = [];
+  const v5Calls = [];
+  const createV4 = (options) => { v4Calls.push(options); return { kind: "v4-discovery" }; };
+  const createV5 = (options) => { v5Calls.push(options); return { kind: options.declaredCandidateRuntime
+    ? "v5-execution" : "v5-discovery" }; };
+  const candidateRuntime = { contract_version: "1.0", models: [], versions: { service: "2.3.4" } };
+  const connectorOptions = { attestation: { source_revision: "new", artifact_digest: `sha256:${"a".repeat(64)}` } };
+  const built = buildCandidateConnectorSet({ createV4, createV5, connectorOptions,
+    useV5: true, candidateRuntime });
+  assert.equal(v4Calls.length, 1);
+  assert.equal(v5Calls.length, 2);
+  assert.equal(v5Calls[0].declaredCandidateRuntime, undefined);
+  assert.equal(v5Calls[1].declaredCandidateRuntime, candidateRuntime);
+  assert.equal(built.discoveryConnectorsByVersion["5.0"].kind, "v5-discovery");
+  assert.equal(built.executionConnector.kind, "v5-execution");
 });
 
 test("Twin状态接口只允许可信服务器执行只读status且不创建Trial", async () => {

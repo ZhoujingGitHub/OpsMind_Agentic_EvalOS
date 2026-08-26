@@ -126,6 +126,16 @@ export function evaluationRunName(sourceName, mode) {
   return `${runLabel} · ${baseName}`;
 }
 
+export function buildCandidateConnectorSet({ createV4, createV5, connectorOptions, useV5, candidateRuntime }) {
+  const discoveryConnectorsByVersion = {
+    "4.0": createV4(connectorOptions),
+    "5.0": createV5(connectorOptions),
+  };
+  const executionConnector = useV5 ? createV5({ ...connectorOptions,
+    declaredCandidateRuntime: candidateRuntime ?? null }) : discoveryConnectorsByVersion["4.0"];
+  return { discoveryConnectorsByVersion, executionConnector };
+}
+
 export function createApp({
   databasePath = path.join(ROOT, "runtime", "evalos", "control.sqlite"),
   privateLabelDatabasePath = path.join(ROOT, "runtime", "evalos-private", "labels.sqlite"),
@@ -241,14 +251,12 @@ export function createApp({
       requestTransport: relayTransport,
       declaredRuntimeLimits: relayCandidates[config.ref]?.evaluation_limits ?? null,
       attestation: { source_revision: frozen.source_revision, artifact_digest: frozen.artifact_digest } };
-    const connectorsByVersion = {
-      "4.0": config.createV4(connectorOptions),
-      "5.0": config.createV5({ ...connectorOptions,
-        declaredCandidateRuntime: useV5 ? frozen.candidate_runtime ?? null : null }),
-    };
-    Object.assign(candidateDiscoveryConnectors, Object.fromEntries(Object.entries(connectorsByVersion)
+    const { discoveryConnectorsByVersion, executionConnector } = buildCandidateConnectorSet({
+      createV4: config.createV4, createV5: config.createV5, connectorOptions, useV5,
+      candidateRuntime: frozen.candidate_runtime ?? null });
+    Object.assign(candidateDiscoveryConnectors, Object.fromEntries(Object.entries(discoveryConnectorsByVersion)
       .map(([version, connector]) => [`${config.ref}:${version}`, connector])));
-    const connector = connectorsByVersion[useV5 ? "5.0" : "4.0"];
+    const connector = executionConnector;
     const adapter = useV5 ? createCandidateAdapterV5({ id: config.ref, connector })
       : createCandidateAdapterV4({ id: config.ref, connector });
     realCandidateConnectors[config.ref] = connector;
