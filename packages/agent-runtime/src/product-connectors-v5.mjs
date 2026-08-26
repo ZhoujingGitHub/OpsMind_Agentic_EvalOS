@@ -772,7 +772,12 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         (delivery?.delivery_id ? `agent-harness:report-delivery:${delivery.delivery_id}` : null);
       const reportRaw = terminal && (detail.report || reportRef)
         ? [rawEvent("agent-harness-product", `agent-harness:report:${runRef}`, { report_ref: reportRef, report: detail.report })] : [];
-      const allRaw = [...translated.raw, ...bindingRaw, ...reportRaw];
+      const evidenceRaw = terminal && Array.isArray(detail.evidence)
+        ? detail.evidence.filter((item) => item && typeof item === "object").map((item, index) =>
+          rawEvent("agent-harness-product",
+            `agent-harness:evidence:${runRef}:${item.evidence_id ?? index + 1}`, item))
+        : [];
+      const allRaw = [...translated.raw, ...bindingRaw, ...reportRaw, ...evidenceRaw];
       const status = terminal ? state === "failed" ? "FAILED" : state === "cancelled" ? "CANCELLED"
         : ["inconclusive", "insufficient_evidence", "budget_exhausted"].includes(state) ? "INCONCLUSIVE" : "COMPLETED" : "RUNNING";
       return { run_ref: runRef, status, next_cursor: log.next_sequence ?? cursor, raw_events: allRaw,

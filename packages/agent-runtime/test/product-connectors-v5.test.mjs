@@ -90,7 +90,8 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
           supporting_evidence_ids: ["evidence:ah"] }],
         evidence_gate: { effective_conclusion_status: conclusionStatus, passed: true },
         evidence_ids: ["evidence:ah"], delivery_receipt: { delivery_id: "delivery-ah", status: "accepted" } },
-      evidence: [{ evidence_id: "evidence:ah" }] }),
+      evidence: [{ evidence_id: "evidence:ah", source_ref: "mcp:probe_sctp_association",
+        raw_value_json: { records: [{ evidence_refs: ["probe:sctp-38412-refused"], accepted: false }] } }] }),
     "GET /v2/investigations/run-ah/execution-log": async ({ request }) => {
       const query = new URL(request.url, "http://fixture").searchParams;
       assert.equal(query.get("limit"), "1000");
@@ -144,6 +145,12 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   assert.equal(observation.product_evidence.recovery.applicable, false);
   assert.match(observation.product_evidence.queue.ref, /^agent-harness:/);
   assert.deepEqual(observation.artifact_refs, ["agent-harness:report-delivery:delivery-ah"]);
+  const frozenEvidence = observation.raw_events.find((item) =>
+    item.source_ref === "agent-harness:evidence:run-ah:evidence:ah");
+  assert.equal(frozenEvidence.payload.evidence_id, "evidence:ah");
+  assert.deepEqual(frozenEvidence.payload.raw_value_json.records[0].evidence_refs,
+    ["probe:sctp-38412-refused"]);
+  assert.match(frozenEvidence.payload_digest, /^sha256:[a-f0-9]{64}$/);
   budgetAckOverride = { ...runContext.budget, max_tool_calls: runContext.budget.max_tool_calls + 1 };
   const drifted = await connector.observe({ runRef: started.run_ref, cursor: 0, executionContract: contract });
   assert.equal(drifted.evaluation_binding.binding_strength, "UNBOUND");
