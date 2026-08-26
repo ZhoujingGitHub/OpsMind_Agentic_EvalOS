@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsmind.local/contracts/candidate-deployment-attestation-v1.schema.json",
+  "title": "EvalOS Candidate Deployment Attestation 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "source_revision",
+    "artifact_digest",
+    "verification_method",
+    "verified_evidence_ref"
+  ],
+  "properties": {
+    "contract_version": { "const": "evalos-deployment-attestation/1.0" },
+    "source_revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+    "artifact_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "verification_method": {
+      "enum": ["evalos_trusted_read_only_git_oci", "evalos_trusted_runtime_config"]
+    },
+    "verified_evidence_ref": { "type": "string", "minLength": 1 }
+  }
+}

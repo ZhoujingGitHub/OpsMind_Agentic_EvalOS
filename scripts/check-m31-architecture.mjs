@@ -43,6 +43,10 @@ assert.match(adapterV5, /not bound to the frozen Trial context/);
 assert.equal(existsSync(path.join(root, "docs/contracts/product-run-binding-v2.schema.json")), true);
 assert.equal(existsSync(path.join(root, "docs/contracts/product-run-binding-v3.schema.json")), true);
 assert.equal(existsSync(path.join(root, "docs/contracts/experiment-manifest-v7.schema.json")), true);
+assert.equal(existsSync(path.join(root, "docs/contracts/candidate-deployment-attestation-v1.schema.json")), true);
+assert.match(app, /trustedDeploymentAttestation/);
+assert.doesNotMatch(app, /attestation:\s*\{\s*source_revision:\s*frozen\.source_revision/,
+  "Candidate discovery must not return the frozen Manifest as if it were an independently observed deployment identity");
 assert.match(app, /createAgentHarnessProductConnector/);
 assert.match(app, /createLangGraphProductConnector/);
 assert.match(app, /createTestDouble\("test-double-a"/);

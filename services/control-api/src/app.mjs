@@ -17,6 +17,9 @@ import { ExternalProductTwinEnvironment, ProtocolTwinEnvironment, SshTwinClient,
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const ANALYSIS_BUDGET = Object.freeze({ wallclock_ms: 300000, cost_usd: 2, max_turns: 32, max_tool_calls: 24 });
+const DEPLOYMENT_ATTESTATION_CONTRACT = "evalos-deployment-attestation/1.0";
+const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/;
+const GIT_REVISION = /^[a-f0-9]{40}$/;
 
 const CANDIDATE_RELAY_PATHS = Object.freeze({
   "agent-harness-v2": [
@@ -136,6 +139,17 @@ export function buildCandidateConnectorSet({ createV4, createV5, connectorOption
   return { discoveryConnectorsByVersion, executionConnector };
 }
 
+export function trustedDeploymentAttestation(value) {
+  if (value?.contract_version !== DEPLOYMENT_ATTESTATION_CONTRACT ||
+      !GIT_REVISION.test(String(value?.source_revision ?? "")) ||
+      !SHA256_DIGEST.test(String(value?.artifact_digest ?? "")) ||
+      !["evalos_trusted_read_only_git_oci", "evalos_trusted_runtime_config"].includes(value?.verification_method) ||
+      typeof value?.verified_evidence_ref !== "string" || !value.verified_evidence_ref) {
+    throw new Error("candidate deployment identity requires an independent EvalOS deployment attestation");
+  }
+  return Object.freeze({ source_revision: value.source_revision, artifact_digest: value.artifact_digest });
+}
+
 export function createApp({
   databasePath = path.join(ROOT, "runtime", "evalos", "control.sqlite"),
   privateLabelDatabasePath = path.join(ROOT, "runtime", "evalos-private", "labels.sqlite"),
@@ -229,14 +243,19 @@ export function createApp({
   };  const frozenCandidate = (ref) => frozenM31Manifest.contestants.find((item) => item.ref === ref);
   const realCandidateConnectors = {};
   const candidateDiscoveryConnectors = {};
+  const candidateConfigurationErrors = {};
   const connectorConfigs = [
     { ref: "agent-harness-v2", origin: process.env.EVALOS_AGENT_HARNESS_ORIGIN,
       token: process.env.EVALOS_AGENT_HARNESS_TOKEN, approvalToken: process.env.EVALOS_AGENT_HARNESS_APPROVAL_TOKEN,
       adminToken: process.env.EVALOS_AGENT_HARNESS_ADMIN_TOKEN, tenantId: process.env.EVALOS_AGENT_HARNESS_TENANT_ID,
+      sourceRevision: process.env.EVALOS_AGENT_HARNESS_SOURCE_REVISION,
+      artifactDigest: process.env.EVALOS_AGENT_HARNESS_ARTIFACT_DIGEST,
       createV4: createAgentHarnessProductConnector, createV5: createAgentHarnessProductConnectorV5 },
     { ref: "langgraph-v1", origin: process.env.EVALOS_LANGGRAPH_ORIGIN,
       token: process.env.EVALOS_LANGGRAPH_TOKEN, approvalToken: process.env.EVALOS_LANGGRAPH_APPROVAL_TOKEN,
       adminToken: process.env.EVALOS_LANGGRAPH_ADMIN_TOKEN, tenantId: process.env.EVALOS_LANGGRAPH_TENANT_ID,
+      sourceRevision: process.env.EVALOS_LANGGRAPH_SOURCE_REVISION,
+      artifactDigest: process.env.EVALOS_LANGGRAPH_ARTIFACT_DIGEST,
       createV4: createLangGraphProductConnector, createV5: createLangGraphProductConnectorV5 },
   ];
   for (const config of connectorConfigs) {
@@ -245,12 +264,23 @@ export function createApp({
     const tenantId = config.tenantId ?? relayCandidates[config.ref]?.tenant_id;
     const directConfigured = config.origin && config.token && config.approvalToken && config.adminToken;
     if ((!directConfigured && !relayTransport) || !tenantId || !frozen) continue;
+    let attestation;
+    try {
+      attestation = trustedDeploymentAttestation(relayTransport
+        ? relayCandidates[config.ref]?.deployment_attestation
+        : { contract_version: DEPLOYMENT_ATTESTATION_CONTRACT,
+          source_revision: config.sourceRevision, artifact_digest: config.artifactDigest,
+          verification_method: "evalos_trusted_runtime_config", verified_evidence_ref: "evalos-runtime-environment" });
+    } catch (error) {
+      candidateConfigurationErrors[config.ref] = String(error?.message ?? error);
+      continue;
+    }
     const useV5 = frozen.adapter_contract_version === "5.0";
     const connectorOptions = { origin: config.origin, token: config.token,
       approvalToken: config.approvalToken, adminToken: config.adminToken, tenantId,
       requestTransport: relayTransport,
       declaredRuntimeLimits: relayCandidates[config.ref]?.evaluation_limits ?? null,
-      attestation: { source_revision: frozen.source_revision, artifact_digest: frozen.artifact_digest } };
+      attestation };
     const { discoveryConnectorsByVersion, executionConnector } = buildCandidateConnectorSet({
       createV4: config.createV4, createV5: config.createV5, connectorOptions, useV5,
       candidateRuntime: frozen.candidate_runtime ?? null });
@@ -995,7 +1025,8 @@ export function createApp({
           const adapter = adapterFor(ref, frozenM31Manifest.evaluation_lane, frozen?.adapter_contract_version);
           if (!frozen || !adapter || typeof adapter.preflight !== "function") {
             items.push({ ref, kind: "REAL_PRODUCT", configured: false, ready: false,
-              status_label: "尚未连接", explanation: "EvalOS 尚未取得该真实产品的独立评测凭据或公开产品接口。" });
+              status_label: candidateConfigurationErrors[ref] ? "部署身份未验证" : "尚未连接",
+              explanation: candidateConfigurationErrors[ref] ?? "EvalOS 尚未取得该真实产品的独立评测凭据或公开产品接口。" });
             continue;
           }
           try {
@@ -1030,7 +1061,8 @@ export function createApp({
           const contractVersion = requestedContractVersion ?? frozen?.adapter_contract_version;
           const connector = requestedContractVersion
             ? candidateDiscoveryConnectors[`${ref}:${requestedContractVersion}`] : realCandidateConnectors[ref];
-          if (!connector) { items.push({ ref, configured: false, ready: false, reason: "connector_not_configured" }); continue; }
+          if (!connector) { items.push({ ref, configured: false, ready: false,
+            reason: candidateConfigurationErrors[ref] ?? "connector_not_configured" }); continue; }
           try {
             const discovered = await connector.discover();
             const drift = ["source_revision", "artifact_digest", "runtime_digest", "runtime_manifest_digest", "capability_contract_digest"]

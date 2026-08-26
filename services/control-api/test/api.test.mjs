@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { buildCandidateConnectorSet, createApp, evaluationRunName, trialLiveProgressView } from "../src/app.mjs";
+import { buildCandidateConnectorSet, createApp, evaluationRunName, trialLiveProgressView,
+  trustedDeploymentAttestation } from "../src/app.mjs";
 import { createTestDouble, freezeSourceSnapshot } from "../../../packages/kernel/src/index.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
@@ -118,6 +119,15 @@ test("新版候选的只读发现不被旧冻结运行合同阻断，而执行�
   assert.equal(v5Calls[1].declaredCandidateRuntime, candidateRuntime);
   assert.equal(built.discoveryConnectorsByVersion["5.0"].kind, "v5-discovery");
   assert.equal(built.executionConnector.kind, "v5-execution");
+});
+
+test("候选当前部署身份必须来自独立可信证明而不是正式Manifest循环自证", () => {
+  const observed = trustedDeploymentAttestation({ contract_version: "evalos-deployment-attestation/1.0",
+    source_revision: "a".repeat(40), artifact_digest: `sha256:${"b".repeat(64)}`,
+    verification_method: "evalos_trusted_read_only_git_oci", verified_evidence_ref: "oci-readback:test" });
+  assert.deepEqual(observed, { source_revision: "a".repeat(40), artifact_digest: `sha256:${"b".repeat(64)}` });
+  assert.throws(() => trustedDeploymentAttestation({ source_revision: "a".repeat(40),
+    artifact_digest: `sha256:${"b".repeat(64)}` }), /independent EvalOS deployment attestation/);
 });
 
 test("Twin状态接口只允许可信服务器执行只读status且不创建Trial", async () => {

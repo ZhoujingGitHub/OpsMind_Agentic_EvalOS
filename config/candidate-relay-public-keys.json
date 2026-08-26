@@ -3,6 +3,13 @@
   "candidates": {
     "agent-harness-v2": {
       "tenant_id": "tenant-ctyun-ops-demo",
+      "deployment_attestation": {
+        "contract_version": "evalos-deployment-attestation/1.0",
+        "source_revision": "a652352c98560c23cba8b3154c39b5af1781dcdf",
+        "artifact_digest": "sha256:de5797abf54700fa37ecd0915c6b6009bf3ca81cf48f703a6bc75b485bdb3ffd",
+        "verification_method": "evalos_trusted_read_only_git_oci",
+        "verified_evidence_ref": "agent-harness-freeze:a652352c98560c23cba8b3154c39b5af1781dcdf:b7344daa0fbe230dad86cb90b11ca4955a925ceef5d1051c2507cc71e18307ed"
+      },
       "evaluation_limits": {
         "max_run_ms": 2700000,
         "cancellation_supported": false,
@@ -12,6 +19,13 @@
     },
     "langgraph-v1": {
       "tenant_id": "tenant-ctyun-ops-demo",
+      "deployment_attestation": {
+        "contract_version": "evalos-deployment-attestation/1.0",
+        "source_revision": "443d9d9a1badd8c31bf21cb3f039b7ad1b86567f",
+        "artifact_digest": "sha256:f235fd222cb9544d331a3b60188a4e3ff3062e826d46762d64ebc0acc3991e20",
+        "verification_method": "evalos_trusted_read_only_git_oci",
+        "verified_evidence_ref": "langgraph-deployment:443d9d9a1badd8c31bf21cb3f039b7ad1b86567f:sha256:f235fd222cb9544d331a3b60188a4e3ff3062e826d46762d64ebc0acc3991e20"
+      },
       "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAM8Loi2EnMWmPEW3l3TTvOWwuj9wXw1GA3jBnIyTM2Ak=\n-----END PUBLIC KEY-----\n"
     }
   }

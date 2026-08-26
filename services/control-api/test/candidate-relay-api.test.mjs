@@ -25,6 +25,9 @@ test("产品侧出站中继只能以登记公钥签名领取任务，且签名�
     privateLabelDatabasePath: path.join(root, "private.sqlite"), runtimeRoot: root, apiToken: "admin-secret",
     candidateRelayConfig: { candidates: { "agent-harness-v2": { tenant_id: "tenant-ctyun-ops-demo",
       public_key_pem: publicKey.export({ type: "spki", format: "pem" }),
+      deployment_attestation: { contract_version: "evalos-deployment-attestation/1.0",
+        source_revision: "a".repeat(40), artifact_digest: `sha256:${"b".repeat(64)}`,
+        verification_method: "evalos_trusted_read_only_git_oci", verified_evidence_ref: "test-read-only-proof" },
     } } } });
   try {
     const url = "http://local/api/candidate-relay/agent-harness-v2/claim";
