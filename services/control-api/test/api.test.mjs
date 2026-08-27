@@ -128,9 +128,9 @@ test("就绪页与运行预检共用Manifest 8开放资源合同，不再回退�
       .find((item) => item.contestant_ref === contestant.ref);
     const input = candidatePreflightInput(formalM3Manifest, contestant);
     assert.deepEqual(input.budget, profile.candidate_resources);
+    assert.deepEqual(input.settlementBudget, profile.settlement_reserve);
     assert.deepEqual(input.resourcePolicy, formalM3Manifest.candidate_resource_contract.policy);
     assert.equal(input.requiresTwin, true);
-    assert.equal(Object.hasOwn(input, "settlement_reserve"), false);
   }
 });
 

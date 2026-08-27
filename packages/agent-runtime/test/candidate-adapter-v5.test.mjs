@@ -162,15 +162,16 @@ test("Candidate Adapter 5.0开放资源模式必须给满产品公开资源且�
       usage_observability: { complete: false }, ...FINGERPRINTS }),
     evaluationReadiness: async () => ({ identities_separated: true, tenant_bound: true, least_privilege: true,
       isolated_tenant_slots: 1, safe_parallelism: 1, external_twin_ready: true,
-      budget_contract: { observable: true, max_run_ms: 1800000, native_enforcement: true, dimensions,
+      budget_contract: { observable: true, max_run_ms: 2000000, native_enforcement: true, dimensions,
         deployment_declaration_matches: true, open_resource_policy: openPolicy } }),
   };
   const adapter = createCandidateAdapterV5({ id: "candidate", connector: open });
   const resourcePolicy = { candidate_limit_source: "product_public_maximum" };
   const full = await adapter.preflight({ contestant: contract("PRODUCT_NATIVE_ACK").contestant,
-    requiresTwin: true, budget: dimensions, resourcePolicy });
+    requiresTwin: true, budget: dimensions, settlementBudget: { wallclock_ms: 2100000 }, resourcePolicy });
   assert.equal(full.ready, true);
   assert.equal(full.formal_ready, true);
+  assert.equal(full.budget.trial_wallclock_ms, 2100000);
   assert.equal(full.budget.dimension_alignment.aligned, true);
   const reduced = await adapter.preflight({ contestant: contract("PRODUCT_NATIVE_ACK").contestant,
     requiresTwin: true, budget: { ...dimensions, max_tool_calls: 24 }, resourcePolicy });

@@ -145,6 +145,7 @@ export function candidatePreflightInput(manifest, contestant, { requiresTwin = t
     contestant,
     requiresTwin,
     budget: candidateExecutionBudget(manifest, contestant.ref),
+    settlementBudget: trialSettlementBudget(manifest, contestant.ref),
     resourcePolicy: manifest.candidate_resource_contract?.policy ?? null,
   };
 }

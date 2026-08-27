@@ -137,15 +137,19 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
       if (result?.ok !== true) throw new Error("candidate product did not prove terminal cleanup handoff");
       return { required: true, ...result };
     },
-    async preflight({ contestant, requiresTwin = false, budget = null, resourcePolicy = null }) {
+    async preflight({ contestant, requiresTwin = false, budget = null, settlementBudget = null,
+      resourcePolicy = null }) {
       const discovery = await connector.discover();
       assertDiscovery(discovery, contestant);
       const connectorReadiness = typeof connector.evaluationReadiness === "function"
         ? await connector.evaluationReadiness() : { isolated_tenant_slots: 1, safe_parallelism: 1 };
       const healthy = new Set(["reachable", "ready", "healthy", "ok"]).has(String(discovery.health?.status ?? "").toLowerCase());
       const twinReady = connectorReadiness.external_twin_ready === true;
-      const trialWallclockMs = Object.hasOwn(budget ?? {}, "max_duration_seconds")
-        ? Number(budget.max_duration_seconds) * 1000 : Number(budget?.wallclock_ms);
+      const settlementWallclockMs = Number(settlementBudget?.wallclock_ms);
+      const trialWallclockMs = Number.isFinite(settlementWallclockMs) && settlementWallclockMs > 0
+        ? settlementWallclockMs
+        : Object.hasOwn(budget ?? {}, "max_duration_seconds")
+          ? Number(budget.max_duration_seconds) * 1000 : Number(budget?.wallclock_ms);
       const candidateMaxRunMs = Number(connectorReadiness.budget_contract?.max_run_ms);
       const budgetObservable = connectorReadiness.budget_contract?.observable === true &&
         Number.isFinite(candidateMaxRunMs) && candidateMaxRunMs > 0;
