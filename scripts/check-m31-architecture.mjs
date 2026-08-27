@@ -70,11 +70,14 @@ for (const name of executableManifests) {
   if (name === "m15-smoke.manifest.json") assert.equal(manifest.manifest_version, "6.0",
     "工程测试替身必须继续使用历史隔离的 Manifest 6.0");
   if (name === "m3-formal-agent-capability.manifest.json") {
-    assert.equal(manifest.manifest_version, "7.0", "真实产品冻结源必须使用 Manifest 7.0");
+    assert.equal(manifest.manifest_version, "8.0", "新的真实产品冻结源必须使用 Manifest 8.0 开放资源合同");
     assert.equal(manifest.milestone, "M3.2");
     assert.equal(manifest.contestants.every((item) => item.adapter_contract_version === "5.0"), true);
     assert.equal(manifest.contestants.every((item) => item.adapter_version === "candidate-adapter-5.0.0"), true);
     assert.equal(manifest.contestants.every((item) => item.candidate_runtime?.models?.length > 0), true);
+    assert.equal(manifest.candidate_resource_contract.mode, "OPEN");
+    assert.equal(manifest.candidate_resource_contract.policy.usage_affects_score, false);
+    assert.equal(manifest.candidate_resource_contract.policy.cross_architecture_equal_limits_required, false);
   }
 }
 const formal = JSON.parse(read("config/m3-formal-agent-capability.manifest.json"));

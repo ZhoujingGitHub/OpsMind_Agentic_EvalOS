@@ -1,5 +1,5 @@
 {
-  "manifest_version": "7.0",
+  "manifest_version": "8.0",
   "milestone": "M3.2",
   "run_class": "REAL_CANDIDATE",
   "evaluation_mode": "FORMAL",
@@ -14,7 +14,7 @@
     "separation_of_duties": true
   },
   "design": "paired_comparison",
-  "name": "M3.2 双架构正式独立盲评冻结源（480 Trial 保持锁定）",
+  "name": "M3.2 双架构开放资源独立盲评冻结源（480 Trial 保持锁定）",
   "suite_ref": "m3-formal-80@3.0.0",
   "dataset_ref": "m3-l2-agentic-formal@3.0.0",
   "case_refs": [
@@ -202,11 +202,11 @@
       "architecture": "CLAUDE_AGENT_SDK_HARNESS",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "a652352c98560c23cba8b3154c39b5af1781dcdf",
-      "artifact_digest": "sha256:de5797abf54700fa37ecd0915c6b6009bf3ca81cf48f703a6bc75b485bdb3ffd",
-      "runtime_digest": "sha256:8cf8aab83142d31f30bcbb707d922af306e6cfa4f2f545847f1f88ec54e96fb0",
-      "runtime_manifest_digest": "sha256:50824e6cf417a20017f4bcea8e42974d7395d6c56800372856d8205421552a85",
-      "capability_contract_digest": "sha256:8e137644a59a2963dcc269c106d9ab6ddab8a40ddd059cbbf2cd9acdc1a5a854",
+      "source_revision": "fbe15cd075175e6143040be8e284ea49afbff187",
+      "artifact_digest": "sha256:4eeadc9d3848848d166776508c9ed35c5f37ec6b5fb0f70eeb46ca9d9162d583",
+      "runtime_digest": "sha256:03d34760f401526060fc65e5ee4e18618c28d4d578de2f7aecc8062c634030e6",
+      "runtime_manifest_digest": "sha256:d74093b6c63defc2e22e6b8e876d8f4c30db6098c0277c41167d56e45dce2f15",
+      "capability_contract_digest": "sha256:35405dfe1de83aeee342c198b2082bffced129ec021104c897dd0615193e2786",
       "binding_requirement": "PRODUCT_NATIVE_ACK",
       "candidate_runtime": {
         "contract_version": "1.0",
@@ -220,12 +220,12 @@
           }
         ],
         "versions": {
-          "service": "2.5.0",
+          "service": "2.6.0",
           "investigation": "opsmind-investigation/3.0",
           "report": "opsmind-report-delivery/2.0",
           "protocol_binding": "opsmind-protocol-lab-binding/2.0",
           "run_context": "opsmind-run-context/1.0",
-          "run_budget": "opsmind-run-budget/1.0",
+          "run_budget": "opsmind-run-budget/2.0",
           "run_usage": "opsmind-run-usage/1.0",
           "protocol_tool_loading": "opsmind-protocol-tool-loading/1.0",
           "identifier_scope": "opsmind-identifier-scope/1.0",
@@ -239,10 +239,10 @@
       "architecture": "LANGGRAPH_PRODUCT",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "14e847f152c09fc3daecde4e091cbcae43067b9d",
-      "artifact_digest": "sha256:acf452d4e6c6835a951b87781aebb20cb5bd128996a2283aea8ad66cc934ae8e",
-      "runtime_digest": "sha256:642affa7c46d6cca7b09e05835338b3be51d8ad9cb8d789846dcf84bffc58503",
-      "runtime_manifest_digest": "sha256:2f1fd5c3298d88f6cac9baf3b1b106e8393e9033ad1ebbd57f19d79f19eebd6b",
+      "source_revision": "4c2528d99ec22cf61ec5529606454e15aefbcc10",
+      "artifact_digest": "sha256:62558bddb66eb54c0c73e015eb1c92e43019c305c203e28fb2a7988738be86bb",
+      "runtime_digest": "sha256:b9a60c11fe321b9feedaf3c958df6cd24c83fe8357d6d52fe4c4b85c400103d7",
+      "runtime_manifest_digest": "sha256:5baf736d276480b43964ac2da4ba281795112c9578cc947a4e51badbf715a2c6",
       "capability_contract_digest": "sha256:c6d1bcb0e01d9d69787f1623304441998d5369396003013f6ef6216fdd368f24",
       "binding_requirement": "PRODUCT_NATIVE_ACK",
       "candidate_runtime": {
@@ -325,15 +325,91 @@
       "digest": "sha256:920c17564a20d7325fdda183eae2a827bb4c6e1f68f2a11ac146314163af52bf"
     }
   },
-  "budget": {
-    "input_tokens": 120000,
-    "output_tokens": 65536,
-    "model_calls": 32,
-    "tool_calls": 24,
-    "wallclock_ms": 3000000,
-    "compute_ms": 3000000,
-    "storage_bytes": 10485760,
-    "cost_usd": 1
+  "candidate_resource_contract": {
+    "contract_version": "evalos-candidate-open-resource/1.0",
+    "mode": "OPEN",
+    "policy": {
+      "candidate_limit_source": "product_public_maximum",
+      "limits_are_safety_fuses_only": true,
+      "usage_affects_score": false,
+      "efficiency_reporting_only": true,
+      "case_specific_limits_forbidden": true,
+      "cross_architecture_equal_limits_required": false
+    },
+    "profiles": [
+      {
+        "contestant_ref": "agent-harness-v2",
+        "candidate_resources": {
+          "max_duration_seconds": 7200,
+          "max_model_calls": 256,
+          "max_tool_calls": 1024,
+          "max_tokens": 8000000,
+          "max_cost_microunits": 20000000,
+          "max_result_bytes": 67108864
+        },
+        "settlement_reserve": {
+          "input_tokens": 8000000,
+          "output_tokens": 8000000,
+          "model_calls": 256,
+          "tool_calls": 1024,
+          "wallclock_ms": 8100000,
+          "compute_ms": 8100000,
+          "storage_bytes": 134217728,
+          "cost_usd": 25
+        },
+        "enforcement": {
+          "max_duration_seconds": "enforced",
+          "max_model_calls": "enforced",
+          "max_tool_calls": "enforced",
+          "max_tokens": "enforced",
+          "max_cost_microunits": "enforced",
+          "max_result_bytes": "enforced"
+        },
+        "provenance": {
+          "status": "product_public_maximum",
+          "method": "candidate_public_runtime_contract",
+          "source_revision": "fbe15cd075175e6143040be8e284ea49afbff187",
+          "artifact_digest": "sha256:4eeadc9d3848848d166776508c9ed35c5f37ec6b5fb0f70eeb46ca9d9162d583",
+          "evidence_ref": "candidate-public-contract:agent-harness:2.6.0:opsmind-open-resource/1.0"
+        }
+      },
+      {
+        "contestant_ref": "langgraph-v1",
+        "candidate_resources": {
+          "max_duration_seconds": 2400,
+          "max_model_calls": 128,
+          "max_tool_calls": 512,
+          "max_tokens": 5000000,
+          "max_cost_microunits": 200000000,
+          "max_result_bytes": 134217728
+        },
+        "settlement_reserve": {
+          "input_tokens": 5000000,
+          "output_tokens": 5000000,
+          "model_calls": 128,
+          "tool_calls": 512,
+          "wallclock_ms": 3300000,
+          "compute_ms": 3300000,
+          "storage_bytes": 268435456,
+          "cost_usd": 210
+        },
+        "enforcement": {
+          "max_duration_seconds": "enforced",
+          "max_model_calls": "enforced",
+          "max_tool_calls": "enforced",
+          "max_tokens": "enforced",
+          "max_cost_microunits": "enforced",
+          "max_result_bytes": "enforced"
+        },
+        "provenance": {
+          "status": "product_public_maximum",
+          "method": "candidate_public_runtime_contract",
+          "source_revision": "4c2528d99ec22cf61ec5529606454e15aefbcc10",
+          "artifact_digest": "sha256:62558bddb66eb54c0c73e015eb1c92e43019c305c203e28fb2a7988738be86bb",
+          "evidence_ref": "candidate-public-contract:langgraph:4c2528d99ec2:opsmind-open-resource/1.0"
+        }
+      }
+    ]
   },
   "policy": {
     "allowed_tools": [
@@ -398,9 +474,11 @@
     "max_queue_depth": 480
   },
   "statistics_policy": {
-    "paired_by_case_seed": true,
+    "comparison_design": "independent_stratified",
     "confidence_level": 0.95,
     "cluster_by_case": true,
-    "report_failures": true
+    "report_failures": true,
+    "per_architecture_usage_reporting": true,
+    "resource_usage_affects_score": false
   }
 }

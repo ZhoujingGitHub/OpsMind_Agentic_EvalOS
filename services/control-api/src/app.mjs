@@ -140,6 +140,15 @@ export function buildCandidateConnectorSet({ createV4, createV5, connectorOption
   return { discoveryConnectorsByVersion, executionConnector };
 }
 
+export function candidatePreflightInput(manifest, contestant, { requiresTwin = true } = {}) {
+  return {
+    contestant,
+    requiresTwin,
+    budget: candidateExecutionBudget(manifest, contestant.ref),
+    resourcePolicy: manifest.candidate_resource_contract?.policy ?? null,
+  };
+}
+
 export function trustedDeploymentAttestation(value) {
   if (value?.contract_version !== DEPLOYMENT_ATTESTATION_CONTRACT ||
       !GIT_REVISION.test(String(value?.source_revision ?? "")) ||
@@ -612,9 +621,8 @@ export function createApp({
       }
       try {
         return { ref: contestant.ref, kind: contestant.kind,
-          ...(await adapter.preflight({ contestant, requiresTwin: needsTwin,
-            budget: candidateExecutionBudget(source.manifest, contestant.ref),
-            resourcePolicy: source.manifest.candidate_resource_contract?.policy ?? null })) };
+          ...(await adapter.preflight(candidatePreflightInput(source.manifest, contestant,
+            { requiresTwin: needsTwin }))) };
       } catch (error) {
         return { ref: contestant.ref, kind: contestant.kind, ready: false,
           error: String(error?.message ?? error) };
@@ -1059,8 +1067,7 @@ export function createApp({
             continue;
           }
           try {
-            const check = await adapter.preflight({ contestant: frozen, requiresTwin: true,
-              budget: frozenM31Manifest.budget });
+            const check = await adapter.preflight(candidatePreflightInput(frozenM31Manifest, frozen));
             const budgetLimited = check.formal_ready !== true;
             items.push({ ref, kind: "REAL_PRODUCT", configured: true, ready: check.ready,
               architecture: check.architecture, source_revision: check.source_revision,
@@ -1068,10 +1075,15 @@ export function createApp({
               status_label: check.ready ? (budgetLimited ? "资格试跑可用，容量与正式评测未放行" : "可以参加资格试运行") : "产品未就绪",
               explanation: check.ready ? (budgetLimited
                 ? "外部产品、身份隔离和数字孪生均已就绪，可以进行少量不计分资格试跑；但最长运行时间、原生预算强制或原生运行绑定仍有缺口，容量和正式评测不能放行。"
-                : "外部产品可达，版本指纹一致，评测身份相互独立，数字孪生已连接，且候选超时没有超过 Trial 时间预算。")
+                : "外部产品可达，版本指纹一致，评测身份相互独立，数字孪生已连接；Candidate 获得产品公开最大资源，数值只作安全熔断且用量不参与评分。")
                 : "产品健康、数字孪生、身份隔离、最小权限、评测租户或候选超时预算未达到开考要求。",
               health: check.health, isolation: check.isolation, credentials: check.credentials,
-              twin: check.twin, budget: check.budget });
+              twin: check.twin, budget: check.budget,
+              resource_contract: frozenM31Manifest.manifest_version === "8.0" ? {
+                manifest_version: frozenM31Manifest.manifest_version,
+                mode: frozenM31Manifest.candidate_resource_contract.mode,
+                policy: frozenM31Manifest.candidate_resource_contract.policy,
+              } : null });
           } catch (error) {
             items.push({ ref, kind: "REAL_PRODUCT", configured: true, ready: false, status_label: "开考检查失败",
               explanation: String(error?.message ?? error) });

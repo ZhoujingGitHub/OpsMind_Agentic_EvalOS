@@ -5,15 +5,15 @@
       "tenant_id": "tenant-ctyun-ops-demo",
       "deployment_attestation": {
         "contract_version": "evalos-deployment-attestation/1.0",
-        "source_revision": "a652352c98560c23cba8b3154c39b5af1781dcdf",
-        "artifact_digest": "sha256:de5797abf54700fa37ecd0915c6b6009bf3ca81cf48f703a6bc75b485bdb3ffd",
+        "source_revision": "fbe15cd075175e6143040be8e284ea49afbff187",
+        "artifact_digest": "sha256:4eeadc9d3848848d166776508c9ed35c5f37ec6b5fb0f70eeb46ca9d9162d583",
         "verification_method": "evalos_trusted_read_only_git_oci",
-        "verified_evidence_ref": "agent-harness-freeze:a652352c98560c23cba8b3154c39b5af1781dcdf:b7344daa0fbe230dad86cb90b11ca4955a925ceef5d1051c2507cc71e18307ed"
+        "verified_evidence_ref": "agent-harness-freeze:fbe15cd075175e6143040be8e284ea49afbff187:aa2378f44e74925eae9b673f69e827e58b86389904e40f904c6e96b40561d84d"
       },
       "evaluation_limits": {
-        "max_run_ms": 2700000,
+        "max_run_ms": 7200000,
         "cancellation_supported": false,
-        "source": "evalos-agent-harness-deployment-20260823-standard-5g-rca-budget"
+        "source": "evalos-agent-harness-deployment-20260827-open-resource-safety-fuse"
       },
       "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAB6LbPyIjJvq0lzjp7U6hwk0Clnm4E0OBtunUav4mkA8=\n-----END PUBLIC KEY-----\n"
     },
@@ -21,15 +21,15 @@
       "tenant_id": "tenant-ctyun-ops-demo",
       "deployment_attestation": {
         "contract_version": "evalos-deployment-attestation/1.0",
-        "source_revision": "14e847f152c09fc3daecde4e091cbcae43067b9d",
-        "artifact_digest": "sha256:acf452d4e6c6835a951b87781aebb20cb5bd128996a2283aea8ad66cc934ae8e",
+        "source_revision": "4c2528d99ec22cf61ec5529606454e15aefbcc10",
+        "artifact_digest": "sha256:62558bddb66eb54c0c73e015eb1c92e43019c305c203e28fb2a7988738be86bb",
         "verification_method": "evalos_trusted_runtime_config",
-        "verified_evidence_ref": "operator-approved-langgraph-freeze:14e847f152c09fc3daecde4e091cbcae43067b9d:sha256:acf452d4e6c6835a951b87781aebb20cb5bd128996a2283aea8ad66cc934ae8e"
+        "verified_evidence_ref": "operator-approved-langgraph-freeze:4c2528d99ec22cf61ec5529606454e15aefbcc10:sha256:62558bddb66eb54c0c73e015eb1c92e43019c305c203e28fb2a7988738be86bb"
       },
       "evaluation_limits": {
-        "max_run_ms": 1020000,
+        "max_run_ms": 2700000,
         "cancellation_supported": false,
-        "source": "evalos-langgraph-deployment-20260827-public-runtime-contract"
+        "source": "evalos-langgraph-deployment-20260827-open-resource-safety-fuse"
       },
       "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAM8Loi2EnMWmPEW3l3TTvOWwuj9wXw1GA3jBnIyTM2Ak=\n-----END PUBLIC KEY-----\n"
     }

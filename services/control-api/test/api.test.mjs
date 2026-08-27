@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { buildCandidateConnectorSet, createApp, evaluationRunName, trialLiveProgressView,
+import { buildCandidateConnectorSet, candidatePreflightInput, createApp, evaluationRunName, trialLiveProgressView,
   trustedDeploymentAttestation } from "../src/app.mjs";
 import { createTestDouble, freezeSourceSnapshot } from "../../../packages/kernel/src/index.mjs";
 
@@ -121,6 +121,19 @@ test("新版候选的只读发现不被旧冻结运行合同阻断，而执行�
   assert.equal(built.executionConnector.kind, "v5-execution");
 });
 
+test("就绪页与运行预检共用Manifest 8开放资源合同，不再回退到历史预算", () => {
+  assert.equal(formalM3Manifest.manifest_version, "8.0");
+  for (const contestant of formalM3Manifest.contestants) {
+    const profile = formalM3Manifest.candidate_resource_contract.profiles
+      .find((item) => item.contestant_ref === contestant.ref);
+    const input = candidatePreflightInput(formalM3Manifest, contestant);
+    assert.deepEqual(input.budget, profile.candidate_resources);
+    assert.deepEqual(input.resourcePolicy, formalM3Manifest.candidate_resource_contract.policy);
+    assert.equal(input.requiresTwin, true);
+    assert.equal(Object.hasOwn(input, "settlement_reserve"), false);
+  }
+});
+
 test("候选当前部署身份必须来自独立可信证明而不是正式Manifest循环自证", () => {
   const observed = trustedDeploymentAttestation({ contract_version: "evalos-deployment-attestation/1.0",
     source_revision: "a".repeat(40), artifact_digest: `sha256:${"b".repeat(64)}`,
@@ -211,7 +224,10 @@ test("清理核验必须先确认真实考生终态，再通过受限Twin管理�
   const contestant = formalM3Manifest.contestants[0];
   const smallManifest = { ...formalM3Manifest, name: "清理核验测试", design: "single_system_acceptance",
     evaluation_mode: "QUALIFICATION", contestants: [contestant], case_refs: [caseRef], environment_seeds: [2026082301],
-    replicates_per_seed: 1, case_partitions: { public: [caseRef], hidden: [], safety: [], regression: [] } };
+    replicates_per_seed: 1, case_partitions: { public: [caseRef], hidden: [], safety: [], regression: [] },
+    candidate_resource_contract: { ...formalM3Manifest.candidate_resource_contract,
+      profiles: formalM3Manifest.candidate_resource_contract.profiles
+        .filter((item) => item.contestant_ref === contestant.ref) } };
   const resetCalls = [];
   const candidateFinalizeCalls = [];
   const app = createApp({ databasePath: path.join(root, "control.sqlite"),
@@ -697,8 +713,11 @@ test("M3冻结设计可用于新建评测预检但不能绕过门禁直接启动
     const preflightBody = (await preflight.json()).preflight;
     assert.equal(preflightBody.total_trials, 6);
     assert.equal(preflightBody.affects_official_score, false);
-    assert.equal(preflightBody.blockers.some((item) => item.includes("Manifest 8.0")), true);
+    assert.equal(preflightBody.blockers.some((item) => item.includes("Manifest 8.0")), false);
     assert.equal(preflightBody.blockers.some((item) => item.includes("参评适配器未就绪")), true);
+    assert.deepEqual(preflightBody.budget.per_contestant["agent-harness-v2"].candidate_public_maximum,
+      formalM3Manifest.candidate_resource_contract.profiles
+        .find((item) => item.contestant_ref === "agent-harness-v2").candidate_resources);
   } finally { app.close(); }
 });
 
