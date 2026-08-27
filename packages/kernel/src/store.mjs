@@ -4,6 +4,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { entityId, isoNow, parseJson, seedFromString, seededShuffle, sha256, stableStringify } from "./utils.mjs";
 import { redact } from "./redaction.mjs";
+import { LEGACY_BUDGET_DIMENSIONS, trialSettlementBudget, validateCandidateBudgetContract } from "./budget-profile.mjs";
 
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/;
 
@@ -46,11 +47,11 @@ function trialSelect(where = "") {
 
 function manifestRefs(manifest) {
   const manifestVersion = manifest.manifest_version;
-  if (!["6.0", "7.0"].includes(manifestVersion)) {
-    throw new Error("EvalOS requires experiment manifest 6.0 or 7.0; legacy manifests are archived read-only and cannot execute");
+  if (!["6.0", "7.0", "8.0"].includes(manifestVersion)) {
+    throw new Error("EvalOS requires experiment manifest 6.0, 7.0 or 8.0; legacy manifests are archived read-only and cannot execute");
   }
-  const expectedMilestone = manifestVersion === "7.0" ? "M3.2" : "M3.1";
-  const expectedAdapterContract = manifestVersion === "7.0" ? "5.0" : "4.0";
+  const expectedMilestone = ["7.0", "8.0"].includes(manifestVersion) ? "M3.2" : "M3.1";
+  const expectedAdapterContract = ["7.0", "8.0"].includes(manifestVersion) ? "5.0" : "4.0";
   if (manifest.milestone !== expectedMilestone) throw new Error(`Manifest ${manifestVersion} requires milestone ${expectedMilestone}`);
   if (!["ENGINEERING_TEST", "REAL_CANDIDATE"].includes(manifest.run_class)) {
     throw new Error("run_class must be ENGINEERING_TEST or REAL_CANDIDATE");
@@ -129,9 +130,10 @@ function manifestRefs(manifest) {
   if (manifest.run_class === "REAL_CANDIDATE" && !contestantKinds.has("REAL_PRODUCT")) {
     throw new Error("REAL_CANDIDATE accepts only frozen external REAL_PRODUCT contestants");
   }
-  if (!manifest.model || !manifest.frozen_dependencies || !manifest.budget || !manifest.policy ||
+  if (!manifest.model || !manifest.frozen_dependencies ||
+      (manifestVersion === "8.0" ? !manifest.candidate_budget_contract : !manifest.budget) || !manifest.policy ||
       !manifest.retry_policy || !manifest.capacity_policy || !manifest.statistics_policy) {
-    throw new Error(`Manifest ${manifestVersion} must freeze model, dependencies, budget, policy, retry, capacity, and statistics`);
+    throw new Error(`Manifest ${manifestVersion} must freeze model, dependencies, candidate budget, policy, retry, capacity, and statistics`);
   }
   assertExactKeys(manifest.model, ["provider", "id", "interface", "sdk", "thinking", "temperature", "max_turns"], "model");
   if (manifest.model.provider !== "deepseek" || manifest.model.id !== "deepseek-v4-flash" ||
@@ -139,8 +141,8 @@ function manifestRefs(manifest) {
       !["enabled", "disabled"].includes(manifest.model.thinking) || !Number.isFinite(manifest.model.temperature) ||
       !Number.isInteger(manifest.model.max_turns) || manifest.model.max_turns < 1) throw new Error("model freeze is invalid");
 
-  if (manifestVersion === "7.0") {
-    if (manifest.run_class !== "REAL_CANDIDATE") throw new Error("Manifest 7.0 is reserved for external REAL_CANDIDATE products");
+  if (["7.0", "8.0"].includes(manifestVersion)) {
+    if (manifest.run_class !== "REAL_CANDIDATE") throw new Error(`Manifest ${manifestVersion} is reserved for external REAL_CANDIDATE products`);
     assertExactKeys(manifest.candidate_runtime_policy,
       ["source", "allow_multi_model", "hidden_case_fields", "usage_accounting"], "candidate_runtime_policy");
     if (manifest.candidate_runtime_policy.source !== "candidate_public_api" ||
@@ -151,7 +153,7 @@ function manifestRefs(manifest) {
     }
     for (const contestant of manifest.contestants) {
       if (contestant.adapter_version !== "candidate-adapter-5.0.0") {
-        throw new Error("Manifest 7.0 contestants must use candidate-adapter-5.0.0");
+        throw new Error(`Manifest ${manifestVersion} contestants must use candidate-adapter-5.0.0`);
       }
       if (!['PRODUCT_NATIVE_ACK', 'EVIDENCE_CHAIN_BOUND'].includes(contestant.binding_requirement)) {
         throw new Error("Manifest 7.0 contestants must freeze a supported binding_requirement");
@@ -178,6 +180,8 @@ function manifestRefs(manifest) {
     }
   }
 
+  if (manifestVersion === "8.0") validateCandidateBudgetContract(manifest);
+
   const dependencyKeys = ["mcp_catalog", "agent_harness_skill_pack", "langgraph_knowledge_pack", "scope_policy", "grader", "twin", "trace_schema", "product_adapter_contract"];
   assertExactKeys(manifest.frozen_dependencies, dependencyKeys, "frozen_dependencies");
   for (const key of dependencyKeys) {
@@ -187,10 +191,11 @@ function manifestRefs(manifest) {
     }
   }
 
-  const budgetKeys = ["input_tokens", "output_tokens", "model_calls", "tool_calls", "wallclock_ms", "compute_ms", "storage_bytes", "cost_usd"];
-  assertExactKeys(manifest.budget, budgetKeys, "budget");
-  if (budgetKeys.some((key) => !Number.isFinite(manifest.budget[key]) || manifest.budget[key] <= 0)) {
-    throw new Error("all frozen budget values must be positive numbers");
+  if (manifestVersion !== "8.0") {
+    assertExactKeys(manifest.budget, LEGACY_BUDGET_DIMENSIONS, "budget");
+    if (LEGACY_BUDGET_DIMENSIONS.some((key) => !Number.isFinite(manifest.budget[key]) || manifest.budget[key] <= 0)) {
+      throw new Error("all frozen budget values must be positive numbers");
+    }
   }
 
   assertExactKeys(manifest.policy, ["allowed_tools", "allowed_native_tools", "forbidden_actions", "heartbeat_ms", "result_contract", "production_writes", "action_approval"], "policy");
@@ -213,10 +218,21 @@ function manifestRefs(manifest) {
   if (["runner_workers", "twin_slots", "max_queue_depth"].some((key) => !Number.isInteger(manifest.capacity_policy[key]) || manifest.capacity_policy[key] < 1)) {
     throw new Error("capacity_policy values must be positive integers");
   }
-  assertExactKeys(manifest.statistics_policy, ["paired_by_case_seed", "confidence_level", "cluster_by_case", "report_failures"], "statistics_policy");
-  if (manifest.statistics_policy.paired_by_case_seed !== true || manifest.statistics_policy.confidence_level !== 0.95 ||
-      manifest.statistics_policy.cluster_by_case !== true || manifest.statistics_policy.report_failures !== true) {
-    throw new Error("statistics_policy must preserve the frozen paired design");
+  if (manifestVersion === "8.0") {
+    assertExactKeys(manifest.statistics_policy,
+      ["comparison_design", "confidence_level", "cluster_by_case", "report_failures", "per_architecture_calibration"],
+      "statistics_policy");
+    if (!["independent_stratified", "paired_case_control"].includes(manifest.statistics_policy.comparison_design) ||
+        manifest.statistics_policy.confidence_level !== 0.95 || manifest.statistics_policy.cluster_by_case !== true ||
+        manifest.statistics_policy.report_failures !== true || manifest.statistics_policy.per_architecture_calibration !== true) {
+      throw new Error("Manifest 8.0 statistics_policy must preserve per-architecture calibration and failure reporting");
+    }
+  } else {
+    assertExactKeys(manifest.statistics_policy, ["paired_by_case_seed", "confidence_level", "cluster_by_case", "report_failures"], "statistics_policy");
+    if (manifest.statistics_policy.paired_by_case_seed !== true || manifest.statistics_policy.confidence_level !== 0.95 ||
+        manifest.statistics_policy.cluster_by_case !== true || manifest.statistics_policy.report_failures !== true) {
+      throw new Error("statistics_policy must preserve the frozen paired design");
+    }
   }
 }
 
@@ -386,7 +402,7 @@ export class EvalStore {
           ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
             trialId, key, id, pair.caseRef, pair.environmentSeed, pair.replicateId,
             blind.blind_id, blind.contestant_ref, runOrder, "PRIMARY", "QUEUED", namespace,
-            stableStringify(manifest.budget), now,
+            stableStringify(trialSettlementBudget(manifest, blind.contestant_ref)), now,
           );
           runOrder += 1;
         }

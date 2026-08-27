@@ -84,6 +84,34 @@ function assertBinding(binding, requiredStrength) {
   }
 }
 
+function nativeBudgetAlignment(budget, dimensions) {
+  if (!budget || !dimensions || typeof dimensions !== "object") return { aligned: null, checks: {} };
+  const requested = Object.hasOwn(budget, "max_duration_seconds") ? {
+    max_duration_seconds: Number(budget.max_duration_seconds),
+    max_tool_calls: Number(budget.max_tool_calls),
+    max_model_calls: Number(budget.max_model_calls),
+    max_tokens: Number(budget.max_tokens),
+    max_cost_microunits: Number(budget.max_cost_microunits),
+    max_result_bytes: Number(budget.max_result_bytes),
+  } : {
+    max_duration_seconds: Math.ceil(Number(budget.wallclock_ms) / 1000),
+    max_tool_calls: Number(budget.tool_calls),
+    max_model_calls: Number(budget.model_calls),
+    max_tokens: Number(budget.input_tokens) + Number(budget.output_tokens),
+    max_cost_microunits: Number(budget.cost_usd) * 1_000_000,
+    max_result_bytes: Number(budget.storage_bytes),
+  };
+  const checks = Object.fromEntries(Object.entries(requested).map(([name, value]) => {
+    const productLimit = Number(dimensions[name]);
+    const observable = Number.isFinite(productLimit) && productLimit > 0;
+    return [name, { requested: Number.isFinite(value) ? value : null,
+      product_limit: observable ? productLimit : null,
+      aligned: observable && Number.isFinite(value) ? value <= productLimit : null }];
+  }));
+  const known = Object.values(checks).filter((item) => item.aligned !== null);
+  return { aligned: known.length === Object.keys(requested).length ? known.every((item) => item.aligned) : null, checks };
+}
+
 export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, timeoutMs = Number.POSITIVE_INFINITY,
   quarantineTimeoutMs = 300000, progressHeartbeatMs = 30000 } = {}) {
   requiredString(id, "candidate id");
@@ -122,15 +150,18 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         ? candidateMaxRunMs <= trialWallclockMs : null;
       const budgetNative = connectorReadiness.budget_contract?.native_enforcement === true;
       const budgetContractConsistent = connectorReadiness.budget_contract?.deployment_declaration_matches !== false;
+      const dimensionAlignment = nativeBudgetAlignment(budget, connectorReadiness.budget_contract?.dimensions);
       const limitations = [];
       if (!budgetObservable) limitations.push("candidate_max_run_time_not_public");
       if (!budgetNative) limitations.push("candidate_budget_not_natively_enforced");
       if (!budgetContractConsistent) limitations.push("candidate_budget_declaration_drift");
+      if (dimensionAlignment.aligned === false) limitations.push("candidate_budget_would_be_clamped_by_product");
+      if (dimensionAlignment.aligned === null) limitations.push("candidate_budget_dimension_alignment_unknown");
       if (discovery.usage_observability?.complete !== true) limitations.push("candidate_usage_partially_observable");
       const hardReady = healthy && connectorReadiness.identities_separated === true &&
         connectorReadiness.tenant_bound === true && connectorReadiness.least_privilege === true &&
-        (!requiresTwin || twinReady) && budgetAligned !== false && budgetContractConsistent;
-      const formalReady = hardReady && budgetAligned === true && budgetNative &&
+        (!requiresTwin || twinReady) && budgetAligned !== false && dimensionAlignment.aligned !== false && budgetContractConsistent;
+      const formalReady = hardReady && budgetAligned === true && dimensionAlignment.aligned === true && budgetNative &&
         (contestant.binding_requirement !== "PRODUCT_NATIVE_ACK" || discovery.native_run_context_supported === true);
       return {
         ready: hardReady,
@@ -158,6 +189,7 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
           observable: budgetObservable, aligned: budgetAligned,
           native_enforcement: budgetNative,
           enforced_dimensions: connectorReadiness.budget_contract?.dimensions ?? null,
+          dimension_alignment: dimensionAlignment,
           deployment_declaration_matches: budgetContractConsistent,
           cancellation_supported: connectorReadiness.budget_contract?.cancellation_supported === true,
           source: connectorReadiness.budget_contract?.source ?? "not-declared" },
@@ -198,7 +230,8 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
       const runStartedAt = Date.now();
       let nextProgressCheckpointMs = 900000;
       const handledApprovalRefs = new Set();
-      const deadline = Date.now() + Math.min(timeoutMs, executionContract.budget.wallclock_ms);
+      const deadline = Date.now() + Math.min(timeoutMs,
+        executionContract.settlement_budget?.wallclock_ms ?? executionContract.budget.wallclock_ms);
       try {
         while (!TERMINAL.has(status)) {
           const cancellation = typeof shouldCancel === "function" ? await shouldCancel() : { requested: false };

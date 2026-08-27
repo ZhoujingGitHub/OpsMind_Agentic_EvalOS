@@ -156,7 +156,12 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   assert.equal(readiness.budget_contract.max_run_ms, 2700000);
   assert.equal(readiness.budget_contract.dimensions.max_result_bytes, 8388608);
   assert.equal(readiness.budget_contract.deployment_declaration_matches, true);
-  const contract = executionContract("evalos-ah-1", discovery.candidate_runtime);
+  const oversized = executionContract("evalos-ah-oversized", discovery.candidate_runtime);
+  await assert.rejects(connector.start({ executionContract: oversized }),
+    /requested native budget exceeds the public product limit: max_duration_seconds/);
+  const contract = { ...executionContract("evalos-ah-1", discovery.candidate_runtime), budget: {
+    max_duration_seconds: 2700, max_tool_calls: 24, max_model_calls: 32,
+    max_tokens: 152768, max_cost_microunits: 1000000, max_result_bytes: 8388608 } };
   await connector.prepare({ executionContract: contract });
   const started = await connector.start({ executionContract: contract });
   assert.match(runContext.context_digest, /^[a-f0-9]{64}$/);
@@ -328,7 +333,12 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
     approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-lg", attestation: ATTESTATION,
     declaredCandidateRuntime: { ...declaredRuntime, models: declaredRuntime.models.slice(0, 1) } });
   await assert.rejects(drifted.discover(), /declared LangGraph candidate_runtime/);
-  const contract = executionContract("evalos-lg-1", discovery.candidate_runtime);
+  const oversized = executionContract("evalos-lg-oversized", discovery.candidate_runtime);
+  await assert.rejects(connector.start({ executionContract: oversized }),
+    /requested native budget exceeds the public product limit: max_duration_seconds/);
+  const contract = { ...executionContract("evalos-lg-1", discovery.candidate_runtime), budget: {
+    max_duration_seconds: 900, max_tool_calls: 24, max_model_calls: 20,
+    max_tokens: 100000, max_cost_microunits: 1000000, max_result_bytes: 8388608 } };
   await connector.prepare({ executionContract: contract });
   const started = await connector.start({ executionContract: contract });
   assert.equal(Object.hasOwn(runContext, "case_id"), false);

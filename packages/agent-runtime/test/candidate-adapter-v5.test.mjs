@@ -124,6 +124,31 @@ test("Candidate Adapter 5.0不把仅公开数值但未原生强制的预算当�
   assert.ok(check.limitations.includes("candidate_budget_not_natively_enforced"));
 });
 
+test("Candidate Adapter 5.0逐维核对冻结预算，拒绝产品用更低原生上限静默截断校准", async () => {
+  const base = connector("PRODUCT_NATIVE_ACK");
+  const bounded = { ...base,
+    discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "EXTERNAL_PRODUCT",
+      production_writes_available: false, health: { status: "healthy" }, native_run_context_supported: true,
+      usage_observability: { complete: true }, ...FINGERPRINTS }),
+    evaluationReadiness: async () => ({ identities_separated: true, tenant_bound: true, least_privilege: true,
+      isolated_tenant_slots: 1, safe_parallelism: 1, external_twin_ready: true,
+      budget_contract: { observable: true, max_run_ms: 120000, native_enforcement: true,
+        dimensions: { max_duration_seconds: 120, max_tool_calls: 20, max_model_calls: 10,
+          max_tokens: 10000, max_cost_microunits: 500000, max_result_bytes: 4096 },
+        deployment_declaration_matches: true } }),
+  };
+  const adapter = createCandidateAdapterV5({ id: "candidate", connector: bounded });
+  const budget = { wallclock_ms: 120000, tool_calls: 24, model_calls: 10,
+    input_tokens: 6000, output_tokens: 3000, cost_usd: 0.4, storage_bytes: 4096 };
+  const check = await adapter.preflight({ contestant: contract("PRODUCT_NATIVE_ACK").contestant,
+    requiresTwin: true, budget });
+  assert.equal(check.ready, false);
+  assert.equal(check.formal_ready, false);
+  assert.equal(check.budget.dimension_alignment.aligned, false);
+  assert.equal(check.budget.dimension_alignment.checks.max_tool_calls.aligned, false);
+  assert.ok(check.limitations.includes("candidate_budget_would_be_clamped_by_product"));
+});
+
 test("Candidate Adapter 5.0按不可变source_ref去重轮询重放且拒绝证据漂移", async () => {
   let poll = 0;
   const base = connector();

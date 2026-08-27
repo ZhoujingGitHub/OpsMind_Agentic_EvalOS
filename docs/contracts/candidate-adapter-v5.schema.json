@@ -40,7 +40,10 @@
     "scope": { "type": "object" },
     "tools": { "type": "array", "items": { "type": "object" } },
     "model": { "type": "object" }, "frozen_dependencies": { "type": "object" },
-    "budget": { "type": "object" }, "policy": { "type": "object" },
+    "budget": { "type": "object" },
+    "settlement_budget": { "type": "object" },
+    "candidate_budget_contract": { "type": "object" },
+    "policy": { "type": "object" },
     "approval_oracle": { "type": "object" }, "retry_policy": { "type": "object" },
     "suite_ref": { "type": "string", "minLength": 1 }, "dataset_ref": { "type": "string", "minLength": 1 },
     "candidate_runtime_policy": { "type": "object" }, "contract_digest": { "$ref": "#/$defs/digest" }

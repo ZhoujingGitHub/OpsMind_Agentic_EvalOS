@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsmind.local/contracts/trial-efficiency-audit-v1.schema.json",
+  "title": "OpsMind EvalOS Trial Efficiency Audit 1.0",
+  "description": "基于公开事件的描述性运行效率审计。只保存计数、时间和脱敏输入指纹，不自动判定无效循环，不替代确定性 Grader。",
+  "type": "object",
+  "required": ["contract", "authority", "privacy", "public_event_count", "milestones", "tool_execution", "loop_review", "model_timing", "public_event_gaps", "usage", "calibration_sample_eligibility"],
+  "properties": {
+    "contract": { "const": "evalos-trial-efficiency-audit/1.0" },
+    "authority": { "const": "descriptive_post_hoc_review_not_official_grader" },
+    "privacy": { "type": "object" },
+    "public_event_count": { "type": "integer", "minimum": 0 },
+    "milestones": { "type": "array" },
+    "tool_execution": { "type": "object" },
+    "loop_review": { "type": "object" },
+    "model_timing": { "type": "object" },
+    "public_event_gaps": { "type": "object" },
+    "usage": { "type": "object" },
+    "calibration_sample_eligibility": { "enum": ["PENDING_HUMAN_REVIEW", "ELIGIBLE_ON_EFFICIENCY_SIGNALS_ONLY"] }
+  },
+  "additionalProperties": false
+}

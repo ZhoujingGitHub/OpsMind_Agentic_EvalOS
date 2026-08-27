@@ -44,6 +44,10 @@ assert.equal(existsSync(path.join(root, "docs/contracts/product-run-binding-v2.s
 assert.equal(existsSync(path.join(root, "docs/contracts/product-run-binding-v3.schema.json")), true);
 assert.equal(existsSync(path.join(root, "docs/contracts/experiment-manifest-v7.schema.json")), true);
 assert.equal(existsSync(path.join(root, "docs/contracts/candidate-deployment-attestation-v1.schema.json")), true);
+assert.equal(existsSync(path.join(root, "docs/contracts/experiment-manifest-v8.schema.json")), true);
+assert.equal(existsSync(path.join(root, "docs/contracts/trial-efficiency-audit-v1.schema.json")), true);
+assert.equal(existsSync(path.join(root, "packages/kernel/src/budget-profile.mjs")), true);
+assert.equal(existsSync(path.join(root, "packages/kernel/src/efficiency-audit.mjs")), true);
 assert.match(app, /trustedDeploymentAttestation/);
 assert.doesNotMatch(app, /attestation:\s*\{\s*source_revision:\s*frozen\.source_revision/,
   "Candidate discovery must not return the frozen Manifest as if it were an independently observed deployment identity");
@@ -113,4 +117,5 @@ assert.match(statistics, /FORMAL_DECISION/);
 assert.match(statistics, /clusteredPairedBootstrap/);
 assert.match(app, /trial.infrastructure_retry_scheduled/);
 assert.match(app, /decision_report_digest/);
-assert.match(app, /evalos-operations-health.1/);console.log("M3.2 架构检查通过：EvalOS 保持 Claude Agent SDK + DeepSeek V4 Flash 开放式单 Agent；Manifest 7 只冻结外部产品公开原生模型合同，历史 Manifest 6 继续保留。");
+assert.match(app, /evalos-operations-health.1/);
+console.log("M3.2 架构检查通过：EvalOS 保持 Claude Agent SDK + DeepSeek V4 Flash 开放式单 Agent；Manifest 8 分架构冻结原生预算和收尾信封，Manifest 7/6 只读保留历史证据。");

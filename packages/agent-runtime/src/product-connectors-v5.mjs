@@ -597,17 +597,22 @@ function agentHarnessSubmission(executionContract, nativeContract) {
   if (nativeContract?.supported !== true || !limits) {
     throw new Error("Agent+Harness native run-context and budget contract is not publicly available");
   }
-  const bounded = (requested, maximum) => Math.max(1, Math.min(Math.floor(Number(requested)), Math.floor(Number(maximum))));
-  const budget = {
-    max_duration_seconds: bounded(Number(executionContract.budget.wallclock_ms) / 1000, limits.max_duration_seconds),
-    max_tool_calls: bounded(executionContract.budget.tool_calls, limits.max_tool_calls),
-    max_model_calls: bounded(executionContract.budget.model_calls, limits.max_model_calls),
-    max_tokens: bounded(Number(executionContract.budget.input_tokens) + Number(executionContract.budget.output_tokens),
-      limits.max_tokens),
-    max_cost_microunits: bounded(Number(executionContract.budget.cost_usd) * 1_000_000,
-      limits.max_cost_microunits),
-    max_result_bytes: bounded(executionContract.budget.storage_bytes, limits.max_result_bytes),
-  };
+  const requestedBudget = Object.hasOwn(executionContract.budget, "max_duration_seconds")
+    ? executionContract.budget : {
+    max_duration_seconds: Number(executionContract.budget.wallclock_ms) / 1000,
+    max_tool_calls: executionContract.budget.tool_calls,
+    max_model_calls: executionContract.budget.model_calls,
+    max_tokens: Number(executionContract.budget.input_tokens) + Number(executionContract.budget.output_tokens),
+    max_cost_microunits: Number(executionContract.budget.cost_usd) * 1_000_000,
+    max_result_bytes: executionContract.budget.storage_bytes };
+  const budget = Object.fromEntries(NATIVE_BUDGET_KEYS.map((name) => {
+    const requested = Math.floor(Number(requestedBudget[name]));
+    const maximum = Math.floor(Number(limits[name]));
+    if (!Number.isSafeInteger(requested) || requested < 1 || requested > maximum) {
+      throw new Error(`Agent+Harness requested native budget exceeds the public product limit: ${name}`);
+    }
+    return [name, requested];
+  }));
   const runtimeVersion = candidateRuntime?.versions?.service;
   if (!runtimeVersion) throw new Error("Agent+Harness public service version is required for native run context");
   return { goal: executionContract.case.goal, trigger_type: "natural_language",
@@ -626,17 +631,23 @@ function langGraphSubmission(executionContract, nativeContract = null) {
     max_duration_seconds: 86400, max_tool_calls: 1000, max_model_calls: 1000,
     max_tokens: 10_000_000, max_cost_microunits: Number.MAX_SAFE_INTEGER,
     max_result_bytes: Number.MAX_SAFE_INTEGER };
-  const bounded = (requested, maximum) => Math.max(1,
-    Math.min(Math.floor(Number(requested)), Math.floor(Number(maximum))));
-  const budget = { max_duration_seconds: bounded(Number(executionContract.budget.wallclock_ms) / 1000,
-    productLimits.max_duration_seconds),
-  max_tool_calls: bounded(executionContract.budget.tool_calls, productLimits.max_tool_calls),
-  max_model_calls: bounded(executionContract.budget.model_calls, productLimits.max_model_calls),
-  max_tokens: bounded(Number(executionContract.budget.input_tokens) + Number(executionContract.budget.output_tokens),
-    productLimits.max_tokens),
-  max_cost_microunits: bounded(Number(executionContract.budget.cost_usd) * 1_000_000,
-    productLimits.max_cost_microunits),
-  max_result_bytes: bounded(executionContract.budget.storage_bytes, productLimits.max_result_bytes) };
+  const requestedBudget = Object.hasOwn(executionContract.budget, "max_duration_seconds")
+    ? executionContract.budget : {
+      max_duration_seconds: Number(executionContract.budget.wallclock_ms) / 1000,
+      max_tool_calls: executionContract.budget.tool_calls,
+      max_model_calls: executionContract.budget.model_calls,
+      max_tokens: Number(executionContract.budget.input_tokens) + Number(executionContract.budget.output_tokens),
+      max_cost_microunits: Number(executionContract.budget.cost_usd) * 1_000_000,
+      max_result_bytes: executionContract.budget.storage_bytes,
+    };
+  const budget = Object.fromEntries(NATIVE_BUDGET_KEYS.map((name) => {
+    const requested = Math.floor(Number(requestedBudget[name]));
+    const maximum = Math.floor(Number(productLimits[name]));
+    if (!Number.isSafeInteger(requested) || requested < 1 || requested > maximum) {
+      throw new Error(`LangGraph requested native budget exceeds the public product limit: ${name}`);
+    }
+    return [name, requested];
+  }));
   const allowedVersionNames = new Set(["graph_version", "state_schema_version", "mcp_contract_version",
     "knowledge_version", "model_version", "product_e2e_contract_version", "public_event_schema_version"]);
   const runtimeVersions = Object.fromEntries(Object.entries(executionContract.contestant.candidate_runtime?.versions ?? {})

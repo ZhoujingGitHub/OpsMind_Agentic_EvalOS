@@ -1,9 +1,11 @@
 import { sha256 } from "./utils.mjs";
+import { candidateBudgetProfile, candidateExecutionBudget } from "./budget-profile.mjs";
 
 export const EVALUATION_ADAPTER_CONTRACT_VERSION = "4.0";
 export const EVALUATION_ADAPTER_CONTRACT_VERSIONS = Object.freeze({
   "6.0": "4.0",
   "7.0": "5.0",
+  "8.0": "5.0",
 });
 
 function descriptor(name, definition) {
@@ -65,7 +67,7 @@ export function buildEvaluationContract({ experiment, trial, caseSpec, adapter }
       capability_contract_digest: contestant.capability_contract_digest,
       kind: contestant.kind,
       architecture: contestant.architecture,
-      ...(manifestVersion === "7.0" ? {
+      ...(["7.0", "8.0"].includes(manifestVersion) ? {
         binding_requirement: contestant.binding_requirement,
         candidate_runtime: contestant.candidate_runtime,
       } : {}),
@@ -86,11 +88,20 @@ export function buildEvaluationContract({ experiment, trial, caseSpec, adapter }
     tools: Object.entries(caseSpec.tools ?? {}).map(([name, definition]) => descriptor(name, definition)),
     model: experiment.manifest.model,
     frozen_dependencies: experiment.manifest.frozen_dependencies,
-    budget: trial.budget,
+    budget: candidateExecutionBudget(experiment.manifest, contestant.ref),
+    ...(manifestVersion === "8.0" ? {
+      settlement_budget: trial.budget,
+      candidate_budget_contract: {
+        contract_version: experiment.manifest.candidate_budget_contract.contract_version,
+        phase: experiment.manifest.candidate_budget_contract.phase,
+        joint_envelope_policy: experiment.manifest.candidate_budget_contract.joint_envelope_policy,
+        profile: candidateBudgetProfile(experiment.manifest, contestant.ref),
+      },
+    } : {}),
     policy: experiment.manifest.policy,
     approval_oracle: experiment.manifest.approval_oracle,
     retry_policy: experiment.manifest.retry_policy,
-    ...(manifestVersion === "7.0" ? {
+    ...(["7.0", "8.0"].includes(manifestVersion) ? {
       suite_ref: experiment.manifest.suite_ref,
       dataset_ref: experiment.manifest.dataset_ref,
       candidate_runtime_policy: experiment.manifest.candidate_runtime_policy,

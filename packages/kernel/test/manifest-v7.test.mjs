@@ -49,6 +49,40 @@ function manifestV7() {
   return item;
 }
 
+function manifestV8() {
+  const item = manifestV7();
+  item.manifest_version = "8.0";
+  const legacy = structuredClone(item.budget);
+  delete item.budget;
+  item.candidate_budget_contract = {
+    contract_version: "evalos-candidate-budget-profile/1.0",
+    phase: "CALIBRATION",
+    joint_envelope_policy: { method: "whole_trial_multidimensional_envelope", target_coverage: 0.95,
+      holdout_required: true, case_specific_limits_forbidden: true },
+    profiles: [{
+      contestant_ref: item.contestants[0].ref,
+      candidate_limits: { max_duration_seconds: legacy.wallclock_ms / 1000,
+        max_model_calls: legacy.model_calls, max_tool_calls: legacy.tool_calls,
+        max_tokens: legacy.input_tokens + legacy.output_tokens,
+        max_cost_microunits: legacy.cost_usd * 1_000_000,
+        max_result_bytes: legacy.storage_bytes },
+      settlement_limits: { ...legacy,
+        input_tokens: legacy.input_tokens + legacy.output_tokens,
+        output_tokens: legacy.input_tokens + legacy.output_tokens,
+        wallclock_ms: legacy.wallclock_ms + 120000, cost_usd: legacy.cost_usd + 1 },
+      enforcement: { max_duration_seconds: "enforced", max_model_calls: "enforced", max_tool_calls: "enforced",
+        max_tokens: "enforced", max_cost_microunits: "observed_only", max_result_bytes: "enforced" },
+      provenance: { status: "product_native_baseline", method: "candidate_public_native_limits",
+        source_revision: item.contestants[0].source_revision,
+        artifact_digest: item.contestants[0].artifact_digest,
+        sample_trial_ids: [], evidence_ref: "public-readiness:fixture" },
+    }],
+  };
+  item.statistics_policy = { comparison_design: "independent_stratified", confidence_level: 0.95,
+    cluster_by_case: true, report_failures: true, per_architecture_calibration: true };
+  return item;
+}
+
 test("Manifest 7.0旁路接受多模型外部产品，同时Manifest 6.0历史合同仍可执行", () => {
   const { store, labels } = fixture();
   try {
@@ -79,5 +113,42 @@ test("Manifest 7.0拒绝把隐藏Case字段直传策略或Adapter 4.0伪装成�
     const downgraded = manifestV7();
     downgraded.contestants[0].adapter_contract_version = "4.0";
     assert.throws(() => store.createExperiment(downgraded, "downgraded-v7"), /Adapter 5.0/);
+  } finally { labels.close(); store.close(); }
+});
+
+test("Manifest 8.0为每套架构分别冻结Candidate与结算预算，并把预算来源绑定到镜像", () => {
+  const { store, labels } = fixture();
+  try {
+    const manifest = manifestV8();
+    const created = store.createExperiment(manifest, "manifest-v8", { scheduleTrials: true });
+    const trial = store.listTrials(created.experiment.id)[0];
+    const profile = manifest.candidate_budget_contract.profiles[0];
+    assert.deepEqual(trial.budget, profile.settlement_limits);
+    const adapter = { id: "langgraph-v1", adapterVersion: "candidate-adapter-5.0.0",
+      adapterContractVersion: "5.0", supportedEvaluationLanes: ["PRODUCT_RELIABILITY"] };
+    const contract = buildEvaluationContract({ experiment: created.experiment, trial,
+      caseSpec: store.getExecutionCase(trial.case_ref), adapter });
+    assert.deepEqual(contract.budget, profile.candidate_limits);
+    assert.deepEqual(contract.settlement_budget, profile.settlement_limits);
+    assert.equal(contract.candidate_budget_contract.phase, "CALIBRATION");
+    assert.equal(contract.candidate_budget_contract.profile.provenance.status, "product_native_baseline");
+  } finally { labels.close(); store.close(); }
+});
+
+test("Manifest 8.0拒绝结算上限低于Candidate、伪造来源或无样本正式化", () => {
+  const { store, labels } = fixture();
+  try {
+    const lowerSettlement = manifestV8();
+    lowerSettlement.candidate_budget_contract.profiles[0].settlement_limits.tool_calls =
+      lowerSettlement.candidate_budget_contract.profiles[0].candidate_limits.max_tool_calls - 1;
+    assert.throws(() => store.createExperiment(lowerSettlement, "v8-lower-settlement"),
+      /settlement budget cannot be lower/);
+    const drift = manifestV8();
+    drift.candidate_budget_contract.profiles[0].provenance.source_revision = "different-revision";
+    assert.throws(() => store.createExperiment(drift, "v8-provenance-drift"), /bind the frozen contestant/);
+    const uncalibratedQualification = manifestV8();
+    uncalibratedQualification.candidate_budget_contract.phase = "QUALIFICATION";
+    assert.throws(() => store.createExperiment(uncalibratedQualification, "v8-uncalibrated-qualification"),
+      /requires empirical samples/);
   } finally { labels.close(); store.close(); }
 });

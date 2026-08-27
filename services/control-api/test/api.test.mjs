@@ -188,6 +188,23 @@ test("后续安全复位会解除平台健康阻塞但不会改写失败Trial", 
   } finally { app.close(); }
 });
 
+test("冻结设计中的未开考Trial与真正可运行队列分开统计", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-frozen-template-health-"));
+  const app = createApp({ databasePath: path.join(root, "control.sqlite"),
+    privateLabelDatabasePath: path.join(root, "private", "labels.sqlite"), runtimeRoot: root,
+    apiToken: "admin-secret" });
+  try {
+    const created = app.store.createExperiment(manifest, "frozen-template-health-test");
+    const planned = app.store.listTrials(created.experiment.id).length;
+    assert.equal(planned > 0, true);
+    const health = await (await app.handler(new Request("http://local/api/workbench/operations-health", {
+      headers: { authorization: "Bearer admin-secret" } }))).json();
+    assert.equal(health.trials.queued, 0);
+    assert.equal(health.trials.frozen_template_trials, planned);
+    assert.equal(health.requests.queued, 0);
+  } finally { app.close(); }
+});
+
 test("清理核验必须先确认真实考生终态，再通过受限Twin管理器恢复干净基线", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "evalos-cleanup-reconcile-"));
   const caseRef = formalM3Manifest.case_refs[0];
@@ -207,6 +224,9 @@ test("清理核验必须先确认真实考生终态，再通过受限Twin管理�
       operation: "reset", reset_hash: "sha256:clean" }; } } });
   try {
     const created = app.store.createExperiment(smallManifest, "cleanup-reconcile-test");
+    const bypass = await app.handler(new Request(`http://local/api/experiments/${created.experiment.id}/run`, {
+      method: "POST", headers: { authorization: "Bearer admin-secret" } }));
+    assert.equal(bypass.status, 409);
     const trial = app.store.claimNext("cleanup-test-worker", 30000, created.experiment.id);
     app.store.failTrial(trial.id, "external candidate quarantine unresolved: timed out", { finalState: {
       candidate_finalization_error: "candidate relay path was temporarily unavailable",
@@ -321,6 +341,9 @@ test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏
     assert.equal(JSON.stringify(workbenchTrials).includes("canonical_labels"), false);
     const workbenchTrial = await (await app.handler(new Request(`http://local/api/workbench/trials/${trialId}`, {
       headers: { authorization: "Bearer admin-secret" } }))).json();
+    assert.equal(workbenchTrial.efficiency_audit.contract, "evalos-trial-efficiency-audit/1.0");
+    assert.equal(workbenchTrial.efficiency_audit.authority, "descriptive_post_hoc_review_not_official_grader");
+    assert.equal(workbenchTrial.efficiency_audit.privacy.audit_contains_model_text, false);
     assert.equal(workbenchTrial.graders[0].result.rule.includes("工具名称"), true);
     assert.equal(JSON.stringify(workbenchTrial.graders).includes("canonical_labels"), false);
     assert.equal(workbenchTrial.attempts.length, 1);
@@ -674,6 +697,7 @@ test("M3冻结设计可用于新建评测预检但不能绕过门禁直接启动
     const preflightBody = (await preflight.json()).preflight;
     assert.equal(preflightBody.total_trials, 6);
     assert.equal(preflightBody.affects_official_score, false);
+    assert.equal(preflightBody.blockers.some((item) => item.includes("Manifest 8.0")), true);
     assert.equal(preflightBody.blockers.some((item) => item.includes("参评适配器未就绪")), true);
   } finally { app.close(); }
 });

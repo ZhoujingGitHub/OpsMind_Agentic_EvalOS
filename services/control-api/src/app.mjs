@@ -6,6 +6,7 @@ import {
   auditableGraderRunView, blindExperimentView, blindGraderRunView, blindTraceView, blindTrialView,
   expertCalibrationFromConsensusSamples, createEvalRegistry, createCaseEnvironment, createTestDouble,
   evaluationDecisionReport, evaluationEvidenceTraceView, explainTraceRecord, TRACE_FILTERS, readSnapshotFile, sha256,
+  auditTrialEfficiency, candidateExecutionBudget, trialSettlementBudget,
 } from "../../../packages/kernel/src/index.mjs";
 import {
   BLIND_JUDGE_VERSION, CASE_INVESTIGATOR_RUNTIME, createAgentHarnessProductConnector, createAgentHarnessProductConnectorV5,
@@ -69,7 +70,7 @@ export function trialLiveProgressView(trial, experiment, trace, nowMs = Date.now
   const startedAtMs = parsedTime(trial?.started_at);
   const endedAtMs = parsedTime(trial?.completed_at);
   const elapsedMs = startedAtMs === null ? 0 : Math.max(0, (endedAtMs ?? nowMs) - startedAtMs);
-  const totalBudgetMs = Number(experiment?.manifest?.budget?.wallclock_ms);
+  const totalBudgetMs = Number(trial?.budget?.wallclock_ms ?? experiment?.manifest?.budget?.wallclock_ms);
   const budgetMs = Number.isFinite(totalBudgetMs) && totalBudgetMs > 0 ? totalBudgetMs : null;
   const records = Array.isArray(trace) ? trace : [];
   const latest = records.at(-1) ?? null;
@@ -113,7 +114,7 @@ export function trialLiveProgressView(trial, experiment, trace, nowMs = Date.now
       candidate_events: records.filter((item) =>
         (item.actor === "external-candidate" || item.name === "candidate.raw_event") && isMeaningfulProgressRecord(item)).length,
     },
-    interpretation_zh: progressState === "QUEUED" ? "正在等待独立考场和安全隔离槽位；真实考生尚未开始作答，50分钟 Trial 预算也尚未计时。"
+    interpretation_zh: progressState === "QUEUED" ? "正在等待独立考场和安全隔离槽位；真实考生尚未开始作答，本 Trial 的冻结预算也尚未计时。"
       : progressState === "ACTIVE" ? "真实考生在线，最近5分钟内有新的外显调查进展。"
       : progressState === "WAITING" ? "真实考生仍在线，但已超过5分钟没有新证据或动作；页面继续观察，不自动判失败。"
         : progressState === "STOPPING" ? "已发出安全停止，系统正在等待真实考生进入终态，随后复位考场并保留全部证据。"
@@ -537,8 +538,8 @@ export function createApp({
     if (!new Set(["RERUN_FROZEN", "NEW_EVALUATION"]).has(requestKind)) throw new Error("必须明确选择按原配置重新评测或新建评测");
     const source = store.getExperiment(body.source_experiment_id);
     if (!source) throw new Error("source experiment is required");
-    if (!["6.0", "7.0"].includes(source.manifest.manifest_version)) {
-      throw new Error("冻结参评配置属于旧版只读历史；当前只执行 Manifest 6.0 或 7.0，请选择新版实验配置");
+    if (!["6.0", "7.0", "8.0"].includes(source.manifest.manifest_version)) {
+      throw new Error("冻结参评配置属于旧版只读历史；当前只执行 Manifest 6.0、7.0 或 8.0，请选择新版实验配置");
     }
     const suite = store.listSuites().find((item) => item.suite_ref === source.suite_ref);
     const caseRefs = [...new Set(body.case_refs ?? [])];
@@ -582,8 +583,10 @@ export function createApp({
     const selectedHistory = store.listTrials(source.id, { includeReplays: false }).filter((trial) => caseRefs.includes(trial.case_ref));
     const durations = selectedHistory.map((trial) => trial.started_at && trial.completed_at
       ? new Date(trial.completed_at).getTime() - new Date(trial.started_at).getTime() : NaN).filter(Number.isFinite);
+    const frozenSettlementDurations = contestants.map((item) =>
+      Number(trialSettlementBudget(source.manifest, item.ref)?.wallclock_ms ?? 0)).filter((value) => value > 0);
     const perTrialDuration = durations.length ? durations.reduce((sum, value) => sum + value, 0) / durations.length
-      : Number(source.manifest.budget?.wallclock_ms ?? 30000);
+      : Math.max(...frozenSettlementDurations, 30000);
     const totalTrials = caseRefs.length * contestants.length * environmentSeeds.length * repetitions;
     const needsTwin = caseRefs.some((caseRef) => store.getExecutionCase(caseRef)?.source?.level === "L2");
     const missingAdapters = contestants.filter((item) => !adapterFor(item.ref, source.manifest.evaluation_lane,
@@ -616,13 +619,20 @@ export function createApp({
       }
       try {
         return { ref: contestant.ref, kind: contestant.kind,
-          ...(await adapter.preflight({ contestant, requiresTwin: needsTwin, budget: source.manifest.budget })) };
+          ...(await adapter.preflight({ contestant, requiresTwin: needsTwin,
+            budget: candidateExecutionBudget(source.manifest, contestant.ref) })) };
       } catch (error) {
         return { ref: contestant.ref, kind: contestant.kind, ready: false,
           error: String(error?.message ?? error) };
       }
     }));
     const failedCandidateChecks = candidateChecks.filter((item) => !item.ready);
+    const historicalBudgetContract = source.manifest.run_class === "REAL_CANDIDATE" &&
+      source.manifest.manifest_version !== "8.0";
+    const empiricalBudgetRequired = ["CAPACITY_REHEARSAL", "FORMAL"].includes(mode);
+    const empiricalBudgetMissing = source.manifest.manifest_version === "8.0" && empiricalBudgetRequired &&
+      source.manifest.candidate_budget_contract?.profiles?.some((profile) =>
+        profile.provenance?.status !== "empirical_calibrated" || !profile.provenance?.sample_trial_ids?.length);
     const requiresNativeBudgetQualification = ["CAPACITY_REHEARSAL", "FORMAL"].includes(mode);
     const unqualifiedNativeBudgets = requiresNativeBudgetQualification
       ? candidateChecks.filter((item) => item.kind === "REAL_PRODUCT" && item.formal_ready !== true) : [];
@@ -638,9 +648,11 @@ export function createApp({
     const effectiveConcurrency = Math.max(1, Math.min(requestedConcurrency, candidateParallelism, twinParallelism));
     const blockers = [
       ...(missingAdapters.length ? [`参评适配器未就绪：${missingAdapters.join("、")}`] : []),
+      ...(historicalBudgetContract ? ["Manifest 7.0 及更早真实产品预算合同仅保留历史读取；新的校准、资格、容量和正式运行必须使用 Manifest 8.0 分架构预算合同"] : []),
+      ...(empiricalBudgetMissing ? ["容量或正式运行缺少与当前候选源码和镜像绑定的分架构经验校准样本"] : []),
       ...runClassViolations,
       ...failedCandidateChecks.map((item) => `真实考生开考检查失败（${item.ref}）：${item.error ?? "产品未就绪或冻结指纹不一致"}`),
-      ...unqualifiedNativeBudgets.map((item) => `${mode === "CAPACITY_REHEARSAL" ? "容量演练" : "正式评测"}预算合同未取得产品原生强制证明（${item.ref}）：考生必须在 Trial 的 ${source.manifest.budget?.wallclock_ms ?? "未知"}ms 时间预算内自行终止并公开真实预算维度`),
+      ...unqualifiedNativeBudgets.map((item) => `${mode === "CAPACITY_REHEARSAL" ? "容量演练" : "正式评测"}预算合同未取得产品原生强制证明（${item.ref}）：考生必须在自己的冻结预算内自行终止并公开真实预算维度`),
       ...(needsTwin && !twinConfigured ? ["所选 L2 Case 需要数字孪生环境，但 Twin 尚未配置"] : []),
       ...(mode === "FORMAL" && effectiveConcurrency < requestedConcurrency
         ? [`正式评测并发资格未通过：冻结配置要求 ${requestedConcurrency} 并发，当前隔离环境只能安全支持 ${effectiveConcurrency} 并发`] : []),
@@ -658,7 +670,14 @@ export function createApp({
       candidate_checks: candidateChecks,
       estimated_duration_ms: Math.round(perTrialDuration * totalTrials), estimated_cost_usd: null,
       cost_note: "模型单价未写入冻结合同，平台展示预算与真实用量，不伪造费用估算。",
-      budget: { per_trial: source.manifest.budget, maximum_tool_calls: totalTrials * Number(source.manifest.budget?.tool_calls ?? 0),
+      budget: { per_contestant: Object.fromEntries(contestants.map((item) => [item.ref, {
+          candidate: candidateExecutionBudget(source.manifest, item.ref),
+          settlement: trialSettlementBudget(source.manifest, item.ref),
+        }])),
+        maximum_tool_calls: contestants.reduce((sum, item) => sum +
+          caseRefs.length * environmentSeeds.length * repetitions *
+          Number(candidateExecutionBudget(source.manifest, item.ref)?.max_tool_calls ??
+            candidateExecutionBudget(source.manifest, item.ref)?.tool_calls ?? 0), 0),
         requested_concurrency: requestedConcurrency, effective_concurrency: effectiveConcurrency,
         isolation_note: effectiveConcurrency < requestedConcurrency
           ? "当前按安全隔离槽位降为串行/低并发执行；不会让不同工作模式共享同一租户并发切换。"
@@ -796,6 +815,14 @@ export function createApp({
           environment_seeds: request.selection.environment_seeds, replicates_per_seed: request.selection.repetitions,
           evaluation_mode: request.mode === "FORMAL" ? "FORMAL"
             : request.mode === "CAPACITY_REHEARSAL" ? "CAPACITY_REHEARSAL" : "QUALIFICATION",
+          ...(source.manifest.manifest_version === "8.0" ? { candidate_budget_contract: {
+            ...source.manifest.candidate_budget_contract,
+            phase: request.mode === "FORMAL" ? "FORMAL"
+              : request.mode === "CAPACITY_REHEARSAL" ? "CAPACITY"
+                : source.manifest.candidate_budget_contract.phase,
+            profiles: source.manifest.candidate_budget_contract.profiles
+              .filter((profile) => request.selection.contestant_refs.includes(profile.contestant_ref)),
+          } } : {}),
           capacity_policy: { ...source.manifest.capacity_policy,
             runner_workers: Number(request.preflight?.budget?.requested_concurrency ?? source.manifest.capacity_policy?.runner_workers ?? 1) },
           request_kind: request.selection.request_kind,
@@ -910,6 +937,14 @@ export function createApp({
   const operationsHealth = () => {
     const requests = store.listEvaluationRunRequests();
     const trials = store.listTrials(null, { includeReplays: false });
+    const experimentById = new Map(store.listExperiments().map((item) => [item.id, item]));
+    const activeRequestExperimentIds = new Set(requests.filter((item) => ["QUEUED", "RUNNING"].includes(item.status))
+      .map((item) => item.created_experiment_id).filter(Boolean));
+    const frozenTemplateTrials = trials.filter((item) => item.status === "QUEUED" &&
+      experimentById.get(item.experiment_id)?.status === "QUEUED" &&
+      !experimentById.get(item.experiment_id)?.started_at &&
+      !activeRequestExperimentIds.has(item.experiment_id)).length;
+    const runnableQueuedTrials = trials.filter((item) => item.status === "QUEUED").length - frozenTemplateTrials;
     const attemptHistory = store.listTrialAttemptResults().map(attemptView);
     const latestByTrial = new Map();
     for (const attempt of attemptHistory) latestByTrial.set(attempt.trial_id, attempt);
@@ -948,7 +983,8 @@ export function createApp({
         cancelled: requests.filter((item) => item.status === "CANCELLED").length,
       },
       trials: {
-        queued: trials.filter((item) => item.status === "QUEUED").length,
+        queued: runnableQueuedTrials,
+        frozen_template_trials: frozenTemplateTrials,
         running: trials.filter((item) => item.status === "RUNNING").length,
         completed: trials.filter((item) => item.status === "COMPLETED").length,
         failed: trials.filter((item) => item.status === "FAILED").length,
@@ -1117,6 +1153,9 @@ export function createApp({
         if (frozenDesign || (experiment.manifest.evaluation_mode === "FORMAL" && !formalM3RunEnabled)) {
           return json({ error: "M3 正式设计已冻结但尚未放行；必须先通过 Adapter 资格、4/8 并发容量和商用产品通道门禁" }, 423, cors);
         }
+        if (experiment.manifest.run_class === "REAL_CANDIDATE") {
+          return json({ error: "真实产品 Trial 必须通过工作台运行请求执行完整预检，不能从实验直跑接口绕过候选预算、Twin 和清场门禁" }, 409, cors);
+        }
         const concurrency = Number(url.searchParams.get("concurrency") ?? 1);
         const maximumConcurrency = experiment.manifest.capacity_policy.runner_workers;
         if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > maximumConcurrency) {
@@ -1283,7 +1322,7 @@ export function createApp({
       }
       if (request.method === "GET" && url.pathname === "/api/workbench/run-templates") {
         const requestedSourceExperimentId = url.searchParams.get("source_experiment_id");
-        return json({ items: store.listExperiments().filter((item) => ["6.0", "7.0"].includes(item.manifest.manifest_version)
+        return json({ items: store.listExperiments().filter((item) => ["6.0", "7.0", "8.0"].includes(item.manifest.manifest_version)
           && (requestedSourceExperimentId
             ? item.id === requestedSourceExperimentId
             : ((store.listTrials(item.id, { includeReplays: false }).length === 0
@@ -1483,6 +1522,7 @@ export function createApp({
         return json({ trial: auditTrial(trial, experiment), case: store.getPublicCase(trial.case_ref),
           experiment: workbenchExperiments().find((item) => item.id === trial.experiment_id),
           live_progress: trialLiveProgressView(trial, experiment, trace),
+          efficiency_audit: auditTrialEfficiency(trace, { usage: trial.usage ?? {}, budget: trial.budget ?? {} }),
           evidence: { trace_records: trace.length, trace_hash: trial.trace_hash,
             actors: [...new Set(trace.map((item) => item.actor))],
             tools: trace.filter((item) => item.span_kind === "TOOL" && item.record_type === "SPAN_END").length,

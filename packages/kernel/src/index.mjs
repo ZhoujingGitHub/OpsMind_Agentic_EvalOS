@@ -1,4 +1,5 @@
 export * from "./budget.mjs";
+export * from "./budget-profile.mjs";
 export * from "./cases.mjs";
 export * from "./m2-cases.mjs";
 export * from "./m3-cases.mjs";
@@ -15,6 +16,7 @@ export * from "./store.mjs";
 export * from "./source-snapshot.mjs";
 export * from "./event-semantics.mjs";
 export * from "./evaluation-contract.mjs";
+export * from "./efficiency-audit.mjs";
 export * from "./failure-policy.mjs";
 export * from "./approval-oracle.mjs";
 export * from "./candidate-relay.mjs";
