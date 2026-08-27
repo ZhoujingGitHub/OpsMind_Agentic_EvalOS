@@ -762,6 +762,57 @@ test("多Seed新建评测会生成并绑定每个Seed下的独立Trial", async (
   } finally { app.close(); }
 });
 
+test("失败Trial汇总使用不可变attempt中的真实用量而不是误报未知", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-failed-attempt-usage-"));
+  const app = createApp({
+    databasePath: path.join(root, "control.sqlite"),
+    privateLabelDatabasePath: path.join(root, "private", "labels.sqlite"),
+    runtimeRoot: root,
+    apiToken: "admin-secret",
+    bootstrapEngineeringTestDesign: true,
+  });
+  try {
+    const source = app.store.listExperiments().find((item) => item.manifest.run_class === "ENGINEERING_TEST");
+    const caseRef = source.manifest.case_refs[0];
+    const contestant = source.manifest.contestants[0];
+    const selection = { request_kind: "NEW_EVALUATION", evaluation_purpose: "SINGLE_SYSTEM_REGRESSION",
+      case_refs: [caseRef], contestant_refs: [contestant.ref], environment_seeds: [20260813], repetitions: 1 };
+    const createdRequest = app.store.createEvaluationRunRequest({ idempotencyKey: "failed-attempt-usage",
+      mode: "QUICK_VALIDATION", sourceExperimentId: source.id, requestedBy: "api-test-operator",
+      reason: "验证失败Trial仍从不可变attempt展示真实用量", selection, preflight: {} }).request;
+    app.store.startEvaluationRunRequest(createdRequest.id);
+    const runManifest = structuredClone(source.manifest);
+    runManifest.name = "失败Trial用量汇总回归";
+    runManifest.design = "single_system_acceptance";
+    runManifest.case_refs = [caseRef];
+    runManifest.case_partitions = { public: [caseRef], hidden: [], safety: [], regression: [] };
+    runManifest.environment_seeds = [20260813];
+    runManifest.replicates_per_seed = 1;
+    runManifest.contestants = [contestant];
+    const experiment = app.store.createExperiment(runManifest, "failed-attempt-usage-experiment").experiment;
+    app.store.bindEvaluationRunExperiment(createdRequest.id, experiment.id);
+    const trial = app.store.listTrials(experiment.id)[0];
+    const usage = { input_tokens: 79561, output_tokens: 12982, model_calls: 10, tool_calls: 24,
+      wallclock_ms: 277100, compute_ms: 0, storage_bytes: 45945, cost_usd: 1.139239,
+      measurement: { source: "candidate_public_api", observed_dimensions: ["input_tokens", "output_tokens",
+        "model_calls", "tool_calls", "storage_bytes", "cost_usd"], unavailable_dimensions: ["compute_ms"],
+        platform_wallclock_observed: true, complete: true } };
+    app.store.failTrial(trial.id, "budget exceeded for cost_usd: 1.139239/1", { usage,
+      finalState: { failure_classification: { category: "BUDGET_EXCEEDED" }, reset: { ok: true, clean: true } },
+      traceHash: "failed-attempt-trace" });
+    app.store.finishEvaluationRunRequest(createdRequest.id, "FAILED");
+
+    const response = await app.handler(new Request(`http://local/api/workbench/run-requests/${createdRequest.id}`, {
+      headers: { authorization: "Bearer admin-secret" },
+    }));
+    const request = (await response.json()).request;
+    assert.equal(request.items[0].current.cost_usd, 1.139239);
+    assert.equal(request.items[0].current.tool_calls, 24);
+    assert.equal(request.items[0].current.usage_measurement.complete, true);
+    assert.equal(request.decision_report.evidence_quality.usage_incomplete_trials, 0);
+  } finally { app.close(); }
+});
+
 test("可选专家管理必须启用管理员Token且不会获得排名权", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "evalos-api-reviewer-"));
   const app = createApp({ databasePath: path.join(root, "control.sqlite"), privateLabelDatabasePath: path.join(root, "private.sqlite"),

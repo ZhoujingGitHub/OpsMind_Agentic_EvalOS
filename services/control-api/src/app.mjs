@@ -696,14 +696,16 @@ export function createApp({
   };
   const runRequestView = (request) => {
     if (!request) return null;
-    const measuredValue = (trial, name) => {
-      if (!trial?.usage || !Object.prototype.hasOwnProperty.call(trial.usage, name)) return null;
-      const value = Number(trial.usage[name]);
+    const recordedUsage = (trial, attempt = null) => trial?.usage ?? attempt?.usage ?? null;
+    const measuredValue = (trial, name, attempt = null) => {
+      const usage = recordedUsage(trial, attempt);
+      if (!usage || !Object.prototype.hasOwnProperty.call(usage, name)) return null;
+      const value = Number(usage[name]);
       return Number.isFinite(value) ? value : null;
     };
-    const measurementView = (trial) => {
+    const measurementView = (trial, attempt = null) => {
       if (!trial) return null;
-      return trial.usage?.measurement ?? {
+      return recordedUsage(trial, attempt)?.measurement ?? {
         source: "candidate_not_reported",
         observed_dimensions: [],
         unavailable_dimensions: ["input_tokens", "output_tokens", "model_calls", "tool_calls", "compute_ms", "storage_bytes", "cost_usd"],
@@ -728,14 +730,16 @@ export function createApp({
         attempt: item.trial?.attempt ?? null, failure: currentAttempt?.failure ?? null,
         trace_hash: currentAttempt?.trace_hash ?? null, cleanup: currentAttempt?.cleanup ?? null,
         baseline: baselineTrial ? { score: baselineGrade?.total ?? null, passed: baselineGrade?.passed ?? null,
-          duration_ms: duration(baselineTrial), tool_calls: measuredValue(baselineTrial, "tool_calls"),
-          cost_usd: measuredValue(baselineTrial, "cost_usd"), usage_measurement: measurementView(baselineTrial),
+          duration_ms: duration(baselineTrial), tool_calls: measuredValue(baselineTrial, "tool_calls", baselineAttempt),
+          cost_usd: measuredValue(baselineTrial, "cost_usd", baselineAttempt),
+          usage_measurement: measurementView(baselineTrial, baselineAttempt),
           failure: baselineAttempt?.failure ?? null,
           hard_gates_passed: Object.values(baselineGrade?.hard_gates ?? {}).filter(Boolean).length,
           hard_gates_total: Object.keys(baselineGrade?.hard_gates ?? {}).length } : null,
         current: item.trial ? { score: currentGrade?.total ?? null, passed: currentGrade?.passed ?? null,
-          duration_ms: duration(item.trial), tool_calls: measuredValue(item.trial, "tool_calls"),
-          cost_usd: measuredValue(item.trial, "cost_usd"), usage_measurement: measurementView(item.trial),
+          duration_ms: duration(item.trial), tool_calls: measuredValue(item.trial, "tool_calls", currentAttempt),
+          cost_usd: measuredValue(item.trial, "cost_usd", currentAttempt),
+          usage_measurement: measurementView(item.trial, currentAttempt),
           hard_gates_passed: Object.values(currentGrade?.hard_gates ?? {}).filter(Boolean).length,
           hard_gates_total: Object.keys(currentGrade?.hard_gates ?? {}).length, error: item.trial.error } : null };
     });

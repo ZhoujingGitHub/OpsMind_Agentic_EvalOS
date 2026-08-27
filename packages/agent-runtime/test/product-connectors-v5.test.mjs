@@ -388,6 +388,35 @@ test("Adapter 5 LangGraph连接器拒绝缺失、伪原生或单位错误的公�
   await assert.rejects(connector().discover(), /active duration and terminalization reserve exceed max_run_ms/);
 });
 
+test("Adapter 5 LangGraph连接器不会把运行中可变Job状态发布为不可变原始证据", async (t) => {
+  let jobsPoll = 0;
+  const fixture = await fixtureServer({
+    "GET /api/v1/investigations/run-changing": async () => ({ status: "running" }),
+    "GET /api/v1/investigations/run-changing/journal": async ({ request }) => {
+      const cursor = Number(new URL(request.url, "http://fixture").searchParams.get("after_cursor"));
+      return cursor === 0
+        ? { next_cursor: 1, items: [{ cursor: 1, event_type: "job.accepted" }] }
+        : { next_cursor: 2, items: [{ cursor: 2, event_type: "job.retry_scheduled" }] };
+    },
+    "GET /api/v1/investigations/run-changing/product-e2e": async () => ({ public_events: [] }),
+    "GET /api/v1/jobs": async () => ({ items: [{ job_id: "job-changing", investigation_id: "run-changing",
+      status: jobsPoll++ === 0 ? "claimed" : "retry_scheduled", attempts: jobsPoll }] }),
+  });
+  t.after(fixture.close);
+  const connector = createLangGraphProductConnectorV5({ origin: fixture.origin, token: "submitter",
+    approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-lg", attestation: ATTESTATION });
+  const contract = executionContract("evalos-lg-changing", { contract_version: "1.0", models: [{ provider: "deepseek",
+    id: "deepseek-v4-flash", interface: "anthropic", thinking: "disabled", roles: ["reason"] }],
+  versions: { graph: "5.0.0" } });
+
+  const first = await connector.observe({ runRef: "run-changing", cursor: 0, executionContract: contract });
+  const second = await connector.observe({ runRef: "run-changing", cursor: first.next_cursor, executionContract: contract });
+  assert.equal(first.status, "RUNNING");
+  assert.equal(second.status, "RUNNING");
+  assert.equal([...first.raw_events, ...second.raw_events]
+    .some((item) => item.source_ref === "langgraph:job:job-changing"), false);
+});
+
 test("Adapter 5 LangGraph连接器以Jobs dead_letter覆盖仍显示running的调查状态", async (t) => {
   const fixture = await fixtureServer({
     "GET /api/v1/investigations/run-dead": async () => ({ status: "running" }),

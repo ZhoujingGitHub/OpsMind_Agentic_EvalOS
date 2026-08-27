@@ -1099,7 +1099,12 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
       const terminalReady = semanticTerminal && (failureTerminal || (jobTerminal && archiveReady && Boolean(handoffEvent)));
       const projected = terminalReady ? projectionEvidence("langgraph-product", `langgraph:product-e2e:${runRef}`, projection)
         : { raw: [], normalized: [] };
-      const jobRaw = job ? [rawEvent("langgraph-product", `langgraph:job:${job.job_id ?? runRef}`, job)] : [];
+      // /api/v1/jobs is a live projection: fields such as status and attempts legitimately change while the
+      // worker is running. Publishing that mutable object under one source_ref would falsely look like an
+      // immutable-evidence rewrite on the next poll. Use it for scheduling until the product has reached its
+      // terminal delivery boundary, then preserve exactly one terminal Job snapshot in the evidence chain.
+      const jobRaw = terminalReady && job
+        ? [rawEvent("langgraph-product", `langgraph:job:${job.job_id ?? runRef}`, job)] : [];
       const runContract = projection.run_contract ?? {};
       const nativeFields = { trial_id: projection.trial_id ?? runContract.trial_id,
         context_digest: projection.run_context_digest ?? projection.context_digest ?? runContract.context_digest,
