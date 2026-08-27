@@ -623,6 +623,9 @@ export function createApp({
       }
     }));
     const failedCandidateChecks = candidateChecks.filter((item) => !item.ready);
+    const requiresNativeBudgetQualification = ["CAPACITY_REHEARSAL", "FORMAL"].includes(mode);
+    const unqualifiedNativeBudgets = requiresNativeBudgetQualification
+      ? candidateChecks.filter((item) => item.kind === "REAL_PRODUCT" && item.formal_ready !== true) : [];
     const frozenMaximumConcurrency = Math.max(1, Number(source.manifest.capacity_policy?.runner_workers ?? 1));
     const requestedConcurrency = Number(body.requested_concurrency ?? (mode === "FORMAL" ? frozenMaximumConcurrency : 1));
     if (!Number.isInteger(requestedConcurrency) || requestedConcurrency < 1 || requestedConcurrency > frozenMaximumConcurrency) {
@@ -637,8 +640,7 @@ export function createApp({
       ...(missingAdapters.length ? [`参评适配器未就绪：${missingAdapters.join("、")}`] : []),
       ...runClassViolations,
       ...failedCandidateChecks.map((item) => `真实考生开考检查失败（${item.ref}）：${item.error ?? "产品未就绪或冻结指纹不一致"}`),
-      ...(mode === "FORMAL" ? candidateChecks.filter((item) => item.kind === "REAL_PRODUCT" && item.budget?.aligned !== true)
-        .map((item) => `正式评测预算合同未冻结或不一致（${item.ref}）：考生必须在 Trial 的 ${source.manifest.budget?.wallclock_ms ?? "未知"}ms 时间预算内自行终止`) : []),
+      ...unqualifiedNativeBudgets.map((item) => `${mode === "CAPACITY_REHEARSAL" ? "容量演练" : "正式评测"}预算合同未取得产品原生强制证明（${item.ref}）：考生必须在 Trial 的 ${source.manifest.budget?.wallclock_ms ?? "未知"}ms 时间预算内自行终止并公开真实预算维度`),
       ...(needsTwin && !twinConfigured ? ["所选 L2 Case 需要数字孪生环境，但 Twin 尚未配置"] : []),
       ...(mode === "FORMAL" && effectiveConcurrency < requestedConcurrency
         ? [`正式评测并发资格未通过：冻结配置要求 ${requestedConcurrency} 并发，当前隔离环境只能安全支持 ${effectiveConcurrency} 并发`] : []),
@@ -668,6 +670,8 @@ export function createApp({
         external_candidate_api: failedCandidateChecks.length === 0,
         candidate_budget_alignment: candidateChecks.filter((item) => item.kind === "REAL_PRODUCT")
           .every((item) => item.budget?.aligned !== false),
+        candidate_native_budget_qualification: candidateChecks.filter((item) => item.kind === "REAL_PRODUCT")
+          .every((item) => item.formal_ready === true),
         candidate_fingerprint: failedCandidateChecks.every((item) => !/drift/i.test(item.error ?? "")),
         approval_identity_separation: candidateChecks.filter((item) => item.kind === "REAL_PRODUCT")
           .every((item) => item.credentials?.identities_separated === true),
@@ -1032,12 +1036,13 @@ export function createApp({
           try {
             const check = await adapter.preflight({ contestant: frozen, requiresTwin: true,
               budget: frozenM31Manifest.budget });
-            const budgetUnknown = check.budget?.aligned == null;
+            const budgetLimited = check.formal_ready !== true;
             items.push({ ref, kind: "REAL_PRODUCT", configured: true, ready: check.ready,
               architecture: check.architecture, source_revision: check.source_revision,
-              status_label: check.ready ? (budgetUnknown ? "资格试跑可用，正式评测未放行" : "可以参加资格试运行") : "产品未就绪",
-              explanation: check.ready ? (budgetUnknown
-                ? "外部产品、身份隔离和数字孪生均已就绪，可以进行少量不计分资格试跑；但产品尚未公开最长运行时间，正式评测不能放行。"
+              formal_ready: check.formal_ready === true,
+              status_label: check.ready ? (budgetLimited ? "资格试跑可用，容量与正式评测未放行" : "可以参加资格试运行") : "产品未就绪",
+              explanation: check.ready ? (budgetLimited
+                ? "外部产品、身份隔离和数字孪生均已就绪，可以进行少量不计分资格试跑；但最长运行时间、原生预算强制或原生运行绑定仍有缺口，容量和正式评测不能放行。"
                 : "外部产品可达，版本指纹一致，评测身份相互独立，数字孪生已连接，且候选超时没有超过 Trial 时间预算。")
                 : "产品健康、数字孪生、身份隔离、最小权限、评测租户或候选超时预算未达到开考要求。",
               health: check.health, isolation: check.isolation, credentials: check.credentials,

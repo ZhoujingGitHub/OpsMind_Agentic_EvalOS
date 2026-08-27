@@ -6,6 +6,27 @@ import { createAgentHarnessProductConnectorV5, createLangGraphProductConnectorV5
 const ATTESTATION = Object.freeze({ source_revision: "abcdef1234567890",
   artifact_digest: `sha256:${"a".repeat(64)}` });
 
+const LANGGRAPH_JOB_RUNTIME_LIMITS = Object.freeze({
+  contract_version: "opsmind-job-runtime-limits:1.0", source: "product_runtime",
+  max_run_ms: 1020000, terminalization_reserve_ms: 120000, native_enforcement: true,
+  cancellation_supported: false, terminal_status: "budget_exhausted",
+  stop_semantics: "safe_stop_without_confirmed_root_cause", budget_reason: "duration_limit",
+  budget_dimensions: {
+    active_duration: { limit: 900, unit: "seconds", native_enforcement: true, observable: true,
+      enforcement_phase: "worker_deadline", measurement: "measured" },
+    model_calls: { limit: 20, unit: "calls", native_enforcement: true, observable: true,
+      enforcement_phase: "pre_call", measurement: "measured" },
+    tool_calls: { limit: 30, unit: "calls", native_enforcement: true, observable: true,
+      enforcement_phase: "pre_call", measurement: "measured" },
+    tokens: { limit: 100000, unit: "tokens", native_enforcement: true, observable: true,
+      enforcement_phase: "pre_reservation_and_post_settlement", measurement: "provider_reported" },
+    cost: { limit: 20000000, unit: "microunits", native_enforcement: true, observable: true,
+      enforcement_phase: "pre_call_and_post_settlement", measurement: "estimated" },
+    result_bytes: { limit: 8388608, unit: "bytes", native_enforcement: true, observable: true,
+      enforcement_phase: "pre_call_and_post_settlement", measurement: "measured" },
+  },
+});
+
 async function fixtureServer(routes) {
   const requests = [];
   const server = createServer(async (request, response) => {
@@ -244,7 +265,8 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
       mcp_contract_version: "observation+protocol-lab:3.2.0", knowledge_version: "knowledge:5.0.0",
       model_version: "deepseek-v4-flash+deepseek-v4-pro",
       product_e2e_contract_version: "opsmind-controlled-remediation:1.1",
-      public_event_schema_version: "opsmind-public-event:1.0" }),
+      public_event_schema_version: "opsmind-public-event:1.0",
+      job_runtime_limits: LANGGRAPH_JOB_RUNTIME_LIMITS }),
     "PUT /api/v1/automation/mode": async ({ body }) => body,
     "POST /api/v1/candidates": async ({ body }) => { runContext = body.run_context;
       return { investigation: { investigation_id: "run-lg" }, job: { job_id: "job-lg" } }; },
@@ -283,14 +305,25 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
     mcp_contract_version: "observation+protocol-lab:3.2.0", knowledge_version: "knowledge:5.0.0",
     model_version: "deepseek-v4-flash+deepseek-v4-pro",
     product_e2e_contract_version: "opsmind-controlled-remediation:1.1",
-    public_event_schema_version: "opsmind-public-event:1.0" } };
+    public_event_schema_version: "opsmind-public-event:1.0",
+    job_runtime_limits_contract_version: "opsmind-job-runtime-limits:1.0" } };
   const connector = createLangGraphProductConnectorV5({ origin: fixture.origin, token: "submitter",
     approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-lg", attestation: ATTESTATION,
-    declaredCandidateRuntime: declaredRuntime });
+    declaredRuntimeLimits: { max_run_ms: 1020000, cancellation_supported: false,
+      source: "evalos-langgraph-deployment" }, declaredCandidateRuntime: declaredRuntime });
   const discovery = await connector.discover();
   assert.deepEqual(discovery.candidate_runtime, declaredRuntime);
   assert.deepEqual(discovery.candidate_runtime.models.map((item) => item.id), ["deepseek-v4-flash", "deepseek-v4-pro"]);
   assert.equal(discovery.candidate_runtime.models[1].thinking, "enabled");
+  assert.equal(discovery.runtime.job_runtime_limits.budget_dimensions.tokens.measurement, "provider_reported");
+  const readiness = await connector.evaluationReadiness();
+  assert.equal(readiness.budget_contract.observable, true);
+  assert.equal(readiness.budget_contract.max_run_ms, 1020000);
+  assert.equal(readiness.budget_contract.native_enforcement, true);
+  assert.equal(readiness.budget_contract.deployment_declaration_matches, true);
+  assert.deepEqual(readiness.budget_contract.dimensions, { max_duration_seconds: 900,
+    max_model_calls: 20, max_tool_calls: 30, max_tokens: 100000,
+    max_cost_microunits: 20000000, max_result_bytes: 8388608 });
   const drifted = createLangGraphProductConnectorV5({ origin: fixture.origin, token: "submitter",
     approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-lg", attestation: ATTESTATION,
     declaredCandidateRuntime: { ...declaredRuntime, models: declaredRuntime.models.slice(0, 1) } });
@@ -302,6 +335,8 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
   assert.equal(Object.hasOwn(runContext, "seed"), false);
   assert.deepEqual(Object.keys(runContext.budget).sort(), ["max_cost_microunits", "max_duration_seconds",
     "max_model_calls", "max_result_bytes", "max_tokens", "max_tool_calls"]);
+  assert.deepEqual(runContext.budget, { max_duration_seconds: 900, max_tool_calls: 24, max_model_calls: 20,
+    max_tokens: 100000, max_cost_microunits: 1000000, max_result_bytes: 8388608 });
   assert.ok(Object.keys(runContext.runtime_versions).every((name) => ["graph_version", "state_schema_version",
     "mcp_contract_version", "knowledge_version", "model_version", "product_e2e_contract_version",
     "public_event_schema_version"].includes(name)));
@@ -323,6 +358,34 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
   assert.equal(finalized.cleanup_owner, "external_controller");
   assert.equal(finalized.candidate_reset, false);
   assert.equal(finalized.cleanup_handoff_verified, true);
+});
+
+test("Adapter 5 LangGraph连接器拒绝缺失、伪原生或单位错误的公开Job预算合同", async (t) => {
+  let jobRuntimeLimits = null;
+  const fixture = await fixtureServer({
+    "GET /health/ready": async () => ({ ready: true, status: "healthy", architecture_type: "LANGGRAPH_V1",
+      connectors: [{ connector_id: "open5gs-ueransim-protocol-lab", status: "healthy" }] }),
+    "GET /api/v1/automation/overview": async () => ({ graph_version: "opsmind-langgraph:5.0.0",
+      model_portfolio: [{ provider: "deepseek", id: "deepseek-v4-flash", interface: "anthropic",
+        thinking: "disabled", roles: ["reason"] }], job_runtime_limits: jobRuntimeLimits }),
+  });
+  t.after(fixture.close);
+  const connector = () => createLangGraphProductConnectorV5({ origin: fixture.origin, token: "submitter",
+    approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-lg", attestation: ATTESTATION });
+
+  await assert.rejects(connector().discover(), /native Job runtime limits are not publicly available/);
+  jobRuntimeLimits = structuredClone(LANGGRAPH_JOB_RUNTIME_LIMITS);
+  jobRuntimeLimits.native_enforcement = false;
+  await assert.rejects(connector().discover(), /invalid native_enforcement/);
+  jobRuntimeLimits = structuredClone(LANGGRAPH_JOB_RUNTIME_LIMITS);
+  jobRuntimeLimits.budget_dimensions.tokens.unit = "calls";
+  await assert.rejects(connector().discover(), /invalid tokens dimension/);
+  jobRuntimeLimits = structuredClone(LANGGRAPH_JOB_RUNTIME_LIMITS);
+  delete jobRuntimeLimits.budget_dimensions.result_bytes;
+  await assert.rejects(connector().discover(), /incomplete or unknown budget dimensions/);
+  jobRuntimeLimits = structuredClone(LANGGRAPH_JOB_RUNTIME_LIMITS);
+  jobRuntimeLimits.terminalization_reserve_ms = 121000;
+  await assert.rejects(connector().discover(), /active duration and terminalization reserve exceed max_run_ms/);
 });
 
 test("Adapter 5 LangGraph连接器以Jobs dead_letter覆盖仍显示running的调查状态", async (t) => {

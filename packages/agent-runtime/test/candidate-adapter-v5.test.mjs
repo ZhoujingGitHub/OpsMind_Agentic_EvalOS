@@ -104,6 +104,26 @@ test("Candidate Adapter 5.0在产品公开预算与部署声明漂移时阻止�
   assert.equal(check.budget.deployment_declaration_matches, false);
 });
 
+test("Candidate Adapter 5.0不把仅公开数值但未原生强制的预算当作正式就绪", async () => {
+  const base = connector("PRODUCT_NATIVE_ACK");
+  const unnativelyBounded = { ...base,
+    discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "EXTERNAL_PRODUCT",
+      production_writes_available: false, health: { status: "healthy" }, native_run_context_supported: true,
+      usage_observability: { complete: true }, ...FINGERPRINTS }),
+    evaluationReadiness: async () => ({ identities_separated: true, tenant_bound: true, least_privilege: true,
+      isolated_tenant_slots: 1, safe_parallelism: 1, external_twin_ready: true,
+      budget_contract: { observable: true, max_run_ms: 900, native_enforcement: false,
+        dimensions: { max_tool_calls: 24 }, deployment_declaration_matches: true } }),
+  };
+  const adapter = createCandidateAdapterV5({ id: "candidate", connector: unnativelyBounded });
+  const check = await adapter.preflight({ contestant: contract("PRODUCT_NATIVE_ACK").contestant,
+    requiresTwin: true, budget: { wallclock_ms: 1000 } });
+  assert.equal(check.ready, true);
+  assert.equal(check.formal_ready, false);
+  assert.equal(check.readiness_status, "READY_WITH_LIMITATIONS");
+  assert.ok(check.limitations.includes("candidate_budget_not_natively_enforced"));
+});
+
 test("Candidate Adapter 5.0按不可变source_ref去重轮询重放且拒绝证据漂移", async () => {
   let poll = 0;
   const base = connector();

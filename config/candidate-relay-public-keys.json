@@ -21,10 +21,15 @@
       "tenant_id": "tenant-ctyun-ops-demo",
       "deployment_attestation": {
         "contract_version": "evalos-deployment-attestation/1.0",
-        "source_revision": "443d9d9a1badd8c31bf21cb3f039b7ad1b86567f",
-        "artifact_digest": "sha256:f235fd222cb9544d331a3b60188a4e3ff3062e826d46762d64ebc0acc3991e20",
-        "verification_method": "evalos_trusted_read_only_git_oci",
-        "verified_evidence_ref": "langgraph-deployment:443d9d9a1badd8c31bf21cb3f039b7ad1b86567f:sha256:f235fd222cb9544d331a3b60188a4e3ff3062e826d46762d64ebc0acc3991e20"
+        "source_revision": "14e847f152c09fc3daecde4e091cbcae43067b9d",
+        "artifact_digest": "sha256:acf452d4e6c6835a951b87781aebb20cb5bd128996a2283aea8ad66cc934ae8e",
+        "verification_method": "evalos_trusted_runtime_config",
+        "verified_evidence_ref": "operator-approved-langgraph-freeze:14e847f152c09fc3daecde4e091cbcae43067b9d:sha256:acf452d4e6c6835a951b87781aebb20cb5bd128996a2283aea8ad66cc934ae8e"
+      },
+      "evaluation_limits": {
+        "max_run_ms": 1020000,
+        "cancellation_supported": false,
+        "source": "evalos-langgraph-deployment-20260827-public-runtime-contract"
       },
       "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAM8Loi2EnMWmPEW3l3TTvOWwuj9wXw1GA3jBnIyTM2Ak=\n-----END PUBLIC KEY-----\n"
     }

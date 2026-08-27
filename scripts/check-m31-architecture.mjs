@@ -72,6 +72,7 @@ for (const name of executableManifests) {
   }
 }
 const formal = JSON.parse(read("config/m3-formal-agent-capability.manifest.json"));
+const relayCandidates = JSON.parse(read("config/candidate-relay-public-keys.json")).candidates;
 assert.equal(formal.dataset_ref, "m3-l2-agentic-formal@3.0.0");
 assert.equal(formal.suite_ref, "m3-formal-80@3.0.0");
 assert.equal(formal.case_refs.every((ref) => ref.endsWith("@3.0.0")), true);
@@ -79,6 +80,15 @@ assert.equal(formal.model.sdk, "@anthropic-ai/claude-agent-sdk");
 assert.equal(formal.model.id, "deepseek-v4-flash");
 assert.deepEqual(formal.contestants.find((item) => item.ref === "langgraph-v1")
   .candidate_runtime.models.map((item) => item.id), ["deepseek-v4-flash", "deepseek-v4-pro"]);
+assert.equal(formal.contestants.find((item) => item.ref === "langgraph-v1")
+  .candidate_runtime.versions.job_runtime_limits_contract_version, "opsmind-job-runtime-limits:1.0");
+for (const contestant of formal.contestants) {
+  const attestation = relayCandidates[contestant.ref]?.deployment_attestation;
+  assert.equal(attestation?.source_revision, contestant.source_revision,
+    `${contestant.ref} 的可信部署 revision 必须与 Manifest 冻结身份一致`);
+  assert.equal(attestation?.artifact_digest, contestant.artifact_digest,
+    `${contestant.ref} 的可信部署镜像摘要必须与 Manifest 冻结身份一致`);
+}
 assert.equal(formal.budget.output_tokens, 65536,
   "双模型考生的统一冻结输出预算必须覆盖已验证的公开终态用量，同时对两名考生保持相同上限");
 

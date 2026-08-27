@@ -239,11 +239,11 @@
       "architecture": "LANGGRAPH_PRODUCT",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "443d9d9a1badd8c31bf21cb3f039b7ad1b86567f",
-      "artifact_digest": "sha256:f235fd222cb9544d331a3b60188a4e3ff3062e826d46762d64ebc0acc3991e20",
-      "runtime_digest": "sha256:c354d6a28ef528769dc8526191eaca731db1c2b6df624cd9a9ed01f6d8579819",
-      "runtime_manifest_digest": "sha256:55767561e2e3aec7010cc03e6994672fa72d196651174e6166ad0b29dfe33bc9",
-      "capability_contract_digest": "sha256:9f9960b82fca4bb111fb083e8e2cb1993d473cbe04b858983d32c9525a3335ea",
+      "source_revision": "14e847f152c09fc3daecde4e091cbcae43067b9d",
+      "artifact_digest": "sha256:acf452d4e6c6835a951b87781aebb20cb5bd128996a2283aea8ad66cc934ae8e",
+      "runtime_digest": "sha256:642affa7c46d6cca7b09e05835338b3be51d8ad9cb8d789846dcf84bffc58503",
+      "runtime_manifest_digest": "sha256:2f1fd5c3298d88f6cac9baf3b1b106e8393e9033ad1ebbd57f19d79f19eebd6b",
+      "capability_contract_digest": "sha256:c6d1bcb0e01d9d69787f1623304441998d5369396003013f6ef6216fdd368f24",
       "binding_requirement": "PRODUCT_NATIVE_ACK",
       "candidate_runtime": {
         "contract_version": "1.0",
@@ -270,7 +270,8 @@
           "knowledge_version": "[\"general-investigation@2.0.0\"]",
           "model_version": "deepseek-v4-flash+deepseek-v4-pro",
           "product_e2e_contract_version": "opsmind-controlled-remediation:1.1",
-          "public_event_schema_version": "opsmind-public-event:1.0"
+          "public_event_schema_version": "opsmind-public-event:1.0",
+          "job_runtime_limits_contract_version": "opsmind-job-runtime-limits:1.0"
         }
       }
     }

@@ -107,6 +107,82 @@ function deploymentLimits(value) {
 const NATIVE_BUDGET_KEYS = Object.freeze(["max_duration_seconds", "max_tool_calls", "max_model_calls",
   "max_tokens", "max_cost_microunits", "max_result_bytes"]);
 
+const LANGGRAPH_JOB_RUNTIME_CONTRACT = "opsmind-job-runtime-limits:1.0";
+const LANGGRAPH_BUDGET_DIMENSIONS = Object.freeze({
+  active_duration: Object.freeze({ budget_key: "max_duration_seconds", unit: "seconds" }),
+  model_calls: Object.freeze({ budget_key: "max_model_calls", unit: "calls" }),
+  tool_calls: Object.freeze({ budget_key: "max_tool_calls", unit: "calls" }),
+  tokens: Object.freeze({ budget_key: "max_tokens", unit: "tokens" }),
+  cost: Object.freeze({ budget_key: "max_cost_microunits", unit: "microunits" }),
+  result_bytes: Object.freeze({ budget_key: "max_result_bytes", unit: "bytes" }),
+});
+
+function strictInteger(value, name, { allowZero = false } = {}) {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < (allowZero ? 0 : 1)) {
+    throw new Error(`LangGraph public Job runtime contract has invalid ${name}`);
+  }
+  return number;
+}
+
+function langGraphNativeContract(automation) {
+  const contract = automation?.job_runtime_limits;
+  if (!contract || typeof contract !== "object" || Array.isArray(contract)) {
+    throw new Error("LangGraph native Job runtime limits are not publicly available");
+  }
+  const fixedFields = {
+    contract_version: LANGGRAPH_JOB_RUNTIME_CONTRACT,
+    source: "product_runtime",
+    native_enforcement: true,
+    cancellation_supported: false,
+    terminal_status: "budget_exhausted",
+    stop_semantics: "safe_stop_without_confirmed_root_cause",
+    budget_reason: "duration_limit",
+  };
+  for (const [name, expected] of Object.entries(fixedFields)) {
+    if (contract[name] !== expected) {
+      throw new Error(`LangGraph public Job runtime contract has invalid ${name}`);
+    }
+  }
+  const maxRunMs = strictInteger(contract.max_run_ms, "max_run_ms");
+  const terminalizationReserveMs = strictInteger(contract.terminalization_reserve_ms,
+    "terminalization_reserve_ms", { allowZero: true });
+  if (terminalizationReserveMs >= maxRunMs) {
+    throw new Error("LangGraph public Job runtime contract has invalid terminalization reserve");
+  }
+  const publicDimensions = contract.budget_dimensions;
+  if (!publicDimensions || typeof publicDimensions !== "object" || Array.isArray(publicDimensions)) {
+    throw new Error("LangGraph public Job runtime contract has no budget_dimensions");
+  }
+  const expectedNames = Object.keys(LANGGRAPH_BUDGET_DIMENSIONS);
+  if (!sameValue(Object.keys(publicDimensions).sort(), [...expectedNames].sort())) {
+    throw new Error("LangGraph public Job runtime contract has incomplete or unknown budget dimensions");
+  }
+  const budgetLimits = {};
+  const normalizedDimensions = {};
+  for (const [name, expected] of Object.entries(LANGGRAPH_BUDGET_DIMENSIONS)) {
+    const dimension = publicDimensions[name];
+    if (!dimension || typeof dimension !== "object" || Array.isArray(dimension) ||
+        dimension.unit !== expected.unit || dimension.native_enforcement !== true || dimension.observable !== true ||
+        typeof dimension.enforcement_phase !== "string" || !dimension.enforcement_phase ||
+        typeof dimension.measurement !== "string" || !dimension.measurement) {
+      throw new Error(`LangGraph public Job runtime contract has invalid ${name} dimension`);
+    }
+    const limit = strictInteger(dimension.limit, `${name}.limit`);
+    budgetLimits[expected.budget_key] = limit;
+    normalizedDimensions[name] = { limit, unit: expected.unit, native_enforcement: true, observable: true,
+      enforcement_phase: dimension.enforcement_phase, measurement: dimension.measurement };
+  }
+  if (budgetLimits.max_duration_seconds * 1000 + terminalizationReserveMs > maxRunMs) {
+    throw new Error("LangGraph active duration and terminalization reserve exceed max_run_ms");
+  }
+  return Object.freeze({ supported: true, contract_version: LANGGRAPH_JOB_RUNTIME_CONTRACT,
+    source: contract.source, max_run_ms: maxRunMs, terminalization_reserve_ms: terminalizationReserveMs,
+    native_enforcement: true, cancellation_supported: false, terminal_status: contract.terminal_status,
+    stop_semantics: contract.stop_semantics, budget_reason: contract.budget_reason,
+    budget_limits: Object.freeze(budgetLimits), budget_dimensions: Object.freeze(normalizedDimensions) });
+}
+
 function agentHarnessNativeContract(capability, runtime) {
   const limits = runtime?.product_budget_limits;
   const budgetLimits = limits && typeof limits === "object" && !Array.isArray(limits) &&
@@ -543,17 +619,24 @@ function agentHarnessSubmission(executionContract, nativeContract) {
       environment_ref: context.environment_ref, runtime_version: runtimeVersion, budget } };
 }
 
-function langGraphSubmission(executionContract) {
+function langGraphSubmission(executionContract, nativeContract = null) {
   const context = frozenEvaluationContext(executionContract);
   const scope = executionContract.case.visible.scope ?? {};
-  const budget = { max_duration_seconds: Math.max(1, Math.min(86400,
-    Math.floor(Number(executionContract.budget.wallclock_ms) / 1000))),
-  max_tool_calls: Math.max(1, Math.min(1000, Math.floor(Number(executionContract.budget.tool_calls)))),
-  max_model_calls: Math.max(1, Math.min(1000, Math.floor(Number(executionContract.budget.model_calls)))),
-  max_tokens: Math.max(1, Math.min(10_000_000, Math.floor(Number(executionContract.budget.input_tokens) +
-    Number(executionContract.budget.output_tokens)))),
-  max_cost_microunits: Math.max(1, Math.floor(Number(executionContract.budget.cost_usd) * 1_000_000)),
-  max_result_bytes: Math.max(1, Math.floor(Number(executionContract.budget.storage_bytes))) };
+  const productLimits = nativeContract?.supported === true ? nativeContract.budget_limits : {
+    max_duration_seconds: 86400, max_tool_calls: 1000, max_model_calls: 1000,
+    max_tokens: 10_000_000, max_cost_microunits: Number.MAX_SAFE_INTEGER,
+    max_result_bytes: Number.MAX_SAFE_INTEGER };
+  const bounded = (requested, maximum) => Math.max(1,
+    Math.min(Math.floor(Number(requested)), Math.floor(Number(maximum))));
+  const budget = { max_duration_seconds: bounded(Number(executionContract.budget.wallclock_ms) / 1000,
+    productLimits.max_duration_seconds),
+  max_tool_calls: bounded(executionContract.budget.tool_calls, productLimits.max_tool_calls),
+  max_model_calls: bounded(executionContract.budget.model_calls, productLimits.max_model_calls),
+  max_tokens: bounded(Number(executionContract.budget.input_tokens) + Number(executionContract.budget.output_tokens),
+    productLimits.max_tokens),
+  max_cost_microunits: bounded(Number(executionContract.budget.cost_usd) * 1_000_000,
+    productLimits.max_cost_microunits),
+  max_result_bytes: bounded(executionContract.budget.storage_bytes, productLimits.max_result_bytes) };
   const allowedVersionNames = new Set(["graph_version", "state_schema_version", "mcp_contract_version",
     "knowledge_version", "model_version", "product_e2e_contract_version", "public_event_schema_version"]);
   const runtimeVersions = Object.fromEntries(Object.entries(executionContract.contestant.candidate_runtime?.versions ?? {})
@@ -851,14 +934,16 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
   const adminApi = client(origin, adminToken, requestTimeoutMs, tenantHeaders, requestTransport, "mode_administrator");
   const frozen = assertAttestation(attestation);
   const runtimeLimits = deploymentLimits(declaredRuntimeLimits);
+  let latestNativeContract = null;
   const runs = new Map();
   const runStates = new Map();
   return Object.freeze({
     kind: "langgraph-product-api-v5",
     async evaluationReadiness() {
-      const [submitter, approver, administrator, ready] = await Promise.all([
+      const [submitter, approver, administrator, ready, automation] = await Promise.all([
         api.request("/api/v1/me"), approvalApi.request("/api/v1/me"), adminApi.request("/api/v1/me"),
-        api.request("/health/ready")]);
+        api.request("/health/ready"), api.request("/api/v1/automation/overview")]);
+      latestNativeContract = langGraphNativeContract(automation);
       const submitterRoles = roleSet(submitter);
       const approverRoles = roleSet(approver);
       const administratorRoles = roleSet(administrator);
@@ -873,6 +958,8 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         /(?:open5gs|ueransim|protocol-lab)/i.test(String(item.connector_id ?? item.name ?? "")));
       const externalTwinReady = Boolean(twinConnector) && ["healthy", "ready", "ok"]
         .includes(String(twinConnector.status ?? "").toLowerCase());
+      const deploymentDeclarationMatches = !runtimeLimits.observable ||
+        runtimeLimits.max_run_ms === latestNativeContract.max_run_ms;
       return { credential_roles: ["candidate_submitter", "approval_oracle", "mode_administrator"],
         identities_separated: identitiesSeparated, least_privilege: submitterScoped && approverScoped && administratorScoped,
         tenant_bound: tenantBound, isolated_tenant_slots: 1, safe_parallelism: 1,
@@ -882,17 +969,28 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         twin: { configured: Boolean(twinConnector), connected: externalTwinReady,
           connector_id: twinConnector?.connector_id ?? twinConnector?.name ?? null,
           status: twinConnector?.status ?? null, summary: twinConnector?.public_message ?? null },
-        budget_contract: runtimeLimits, production_writes_available: false };
+        budget_contract: { observable: true, max_run_ms: latestNativeContract.max_run_ms,
+          native_enforcement: true, cancellation_supported: latestNativeContract.cancellation_supported,
+          deployment_declaration_matches: deploymentDeclarationMatches,
+          dimensions: latestNativeContract.budget_limits,
+          dimension_metadata: latestNativeContract.budget_dimensions,
+          terminalization_reserve_ms: latestNativeContract.terminalization_reserve_ms,
+          terminal_status: latestNativeContract.terminal_status,
+          stop_semantics: latestNativeContract.stop_semantics,
+          budget_reason: latestNativeContract.budget_reason,
+          source: "candidate_public_automation_overview" }, production_writes_available: false };
     },
     async discover() {
       const [ready, automation] = await Promise.all([api.request("/health/ready"), api.request("/api/v1/automation/overview")]);
+      latestNativeContract = langGraphNativeContract(automation);
       const observedVersions = { graph_version: automation.graph_version ?? ready.graph_version,
         state_schema_version: automation.state_schema_version ?? ready.state_schema_version,
         mcp_contract_version: automation.mcp_contract_version ?? ready.mcp_contract_version,
         knowledge_version: automation.knowledge_version ?? automation.knowledge_contract_version ?? ready.knowledge_version,
         model_version: automation.model_version ?? ready.model_version,
         product_e2e_contract_version: automation.product_e2e_contract_version ?? ready.product_e2e_contract_version,
-        public_event_schema_version: automation.public_event_schema_version ?? ready.public_event_schema_version };
+        public_event_schema_version: automation.public_event_schema_version ?? ready.public_event_schema_version,
+        job_runtime_limits_contract_version: latestNativeContract.contract_version };
       const versions = Object.fromEntries(Object.entries(observedVersions)
         .filter(([, value]) => value !== undefined && value !== null).map(([name, value]) => [name, String(value)]));
       const publicModels = automation.model_portfolio ?? ready.model_portfolio ?? automation.models ?? ready.models ?? [];
@@ -910,12 +1008,23 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
       const capability = { architecture_type: ready.architecture_type,
         operating_modes: automation.operating_modes ?? ["diagnosis_only", "human_collaboration", "controlled_auto"],
         execution_modes: automation.execution_modes ?? ["controlled_simulation", "replay_read_only"],
-        external_run_context: true, production_writes_available: false };
+        external_run_context: true, native_budget_enforcement: true,
+        job_runtime_limits_contract_version: latestNativeContract.contract_version,
+        production_writes_available: false };
       const stableRuntime = { architecture_type: ready.architecture_type,
         connector_manifest: (ready.connectors ?? []).map((item) => ({ name: item.name ?? item.connector_id,
           kind: item.kind ?? item.connector_type, required: item.required ?? null })),
         safety_framework_version: automation.safety_framework_version,
         versions: candidateRuntime.versions, model_portfolio: candidateRuntime.models,
+        job_runtime_limits: { contract_version: latestNativeContract.contract_version,
+          source: latestNativeContract.source, max_run_ms: latestNativeContract.max_run_ms,
+          terminalization_reserve_ms: latestNativeContract.terminalization_reserve_ms,
+          native_enforcement: latestNativeContract.native_enforcement,
+          cancellation_supported: latestNativeContract.cancellation_supported,
+          terminal_status: latestNativeContract.terminal_status,
+          stop_semantics: latestNativeContract.stop_semantics,
+          budget_reason: latestNativeContract.budget_reason,
+          budget_dimensions: latestNativeContract.budget_dimensions },
         external_cleanup_owner: "external_controller",
         production_writes_available: false };
       return discovery(frozen, "LANGGRAPH_PRODUCT", capability, stableRuntime,
@@ -932,7 +1041,10 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         execution_mode: executionContract.execution_mode, production_writes_available: false };
     },
     async start({ executionContract }) {
-      const requestBody = langGraphSubmission(executionContract);
+      if (latestNativeContract?.supported !== true) {
+        throw new Error("LangGraph native Job runtime limits must be discovered before starting a Trial");
+      }
+      const requestBody = langGraphSubmission(executionContract, latestNativeContract);
       const result = await api.request("/api/v1/candidates", { method: "POST", body: requestBody });
       const runRef = result.investigation?.investigation_id ?? result.investigation_id;
       if (!runRef) throw new Error("LangGraph product did not create a real investigation");
@@ -950,7 +1062,7 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         api.request(`/api/v1/investigations/${encodeURIComponent(runRef)}/product-e2e`),
         api.request("/api/v1/jobs?limit=200")]);
       const run = runs.get(runRef) ?? { expected: frozenEvaluationContext(executionContract),
-        requestBody: langGraphSubmission(executionContract), job_id: null };
+        requestBody: langGraphSubmission(executionContract, latestNativeContract), job_id: null };
       const jobs = listItems(jobsPage);
       const job = jobs.find((item) => item.job_id === run.job_id || item.investigation_id === runRef ||
         item.run_id === projection.run_id) ?? null;

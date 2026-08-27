@@ -120,15 +120,17 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         Number.isFinite(candidateMaxRunMs) && candidateMaxRunMs > 0;
       const budgetAligned = Number.isFinite(trialWallclockMs) && trialWallclockMs > 0 && budgetObservable
         ? candidateMaxRunMs <= trialWallclockMs : null;
+      const budgetNative = connectorReadiness.budget_contract?.native_enforcement === true;
       const budgetContractConsistent = connectorReadiness.budget_contract?.deployment_declaration_matches !== false;
       const limitations = [];
       if (!budgetObservable) limitations.push("candidate_max_run_time_not_public");
+      if (!budgetNative) limitations.push("candidate_budget_not_natively_enforced");
       if (!budgetContractConsistent) limitations.push("candidate_budget_declaration_drift");
       if (discovery.usage_observability?.complete !== true) limitations.push("candidate_usage_partially_observable");
       const hardReady = healthy && connectorReadiness.identities_separated === true &&
         connectorReadiness.tenant_bound === true && connectorReadiness.least_privilege === true &&
         (!requiresTwin || twinReady) && budgetAligned !== false && budgetContractConsistent;
-      const formalReady = hardReady && budgetAligned === true &&
+      const formalReady = hardReady && budgetAligned === true && budgetNative &&
         (contestant.binding_requirement !== "PRODUCT_NATIVE_ACK" || discovery.native_run_context_supported === true);
       return {
         ready: hardReady,
@@ -154,7 +156,7 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         budget: { trial_wallclock_ms: Number.isFinite(trialWallclockMs) ? trialWallclockMs : null,
           candidate_max_run_ms: budgetObservable ? candidateMaxRunMs : null,
           observable: budgetObservable, aligned: budgetAligned,
-          native_enforcement: connectorReadiness.budget_contract?.native_enforcement === true,
+          native_enforcement: budgetNative,
           enforced_dimensions: connectorReadiness.budget_contract?.dimensions ?? null,
           deployment_declaration_matches: budgetContractConsistent,
           cancellation_supported: connectorReadiness.budget_contract?.cancellation_supported === true,
