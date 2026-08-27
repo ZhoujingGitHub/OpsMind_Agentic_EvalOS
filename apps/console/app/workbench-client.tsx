@@ -11,7 +11,7 @@ type View = "dashboard" | "datasets" | "experiments" | "experiment" | "trial" | 
 
 const DIMENSION_LABELS: Record<string, string> = {
   task_success: "任务终态", rca_quality: "根因质量", evidence_quality: "证据质量", trajectory_quality: "轨迹质量",
-  open_world: "开放环境", proactive_capability: "主动发现", resource_cost: "资源成本", engineering_agility: "工程敏捷",
+  open_world: "开放环境", proactive_capability: "主动发现", resource_cost: "资源用量（新合同仅记录）", engineering_agility: "工程敏捷",
 };
 const STATUS_LABELS: Record<string, string> = { COMPLETED: "已完成", RUNNING: "运行中", QUEUED: "排队中", FAILED: "失败",
   PASSED: "通过", IN_PROGRESS: "进行中", CANCELLED: "已取消", FROZEN: "设计已冻结" };
@@ -110,7 +110,7 @@ function Dashboard() {
         <span className={`level ${item.ready ? "level-l1" : "level-l2"}`}>{item.ready ? "就绪" : "阻塞"}</span><strong>{contestantDisplayName(item.ref)}</strong><small>{item.architecture ?? "外部真实产品"}</small>
         <div><b>{item.status_label}</b></div><p>{item.explanation}</p>
         <small>数字孪生（Twin）：{item.twin?.ready ? "已连接" : item.twin?.required ? "未就绪" : "本次不需要"}</small>
-        <small>候选最长运行：{item.budget?.candidate_max_run_ms ? formatDuration(item.budget.candidate_max_run_ms) : "产品接口暂未公开"} · Trial 预算：{item.budget?.trial_wallclock_ms ? formatDuration(item.budget.trial_wallclock_ms) : "未冻结"}</small>
+        <small>产品安全熔断：{item.budget?.candidate_max_run_ms ? formatDuration(item.budget.candidate_max_run_ms) : "产品接口暂未公开"} · 正常调查不设固定完成时限</small>
         <code>{item.source_revision ? shortHash(item.source_revision) : "未配置凭据"}</code></div>)}</div>
       <p className="diagnostic-note">480 次正式 Trial 仍未放行；这里显示“就绪”只代表可以进入少量、不计分的资格试运行。</p></section>
     <div className="metric-row">
@@ -122,7 +122,7 @@ function Dashboard() {
     <div className="split-grid dashboard-grid"><section className="surface"><SectionHead title="最近实验" sub="真实数据，不再是静态演示卡片" action={<a href="/experiments">查看全部 →</a>} />
       <ExperimentTable items={data?.experiments ?? []} compact /></section>
       <aside className="surface method-panel"><SectionHead title="三层判定" sub="谁能决定什么，一眼看清" />
-        <Authority n="01" title="Code Grader" badge="正式" text="按终态、证据、轨迹、预算和安全硬门禁确定官方成绩。" />
+        <Authority n="01" title="Code Grader" badge="正式" text="按终态、证据、轨迹和安全硬门禁确定官方成绩；新合同的时间、Token、调用量和费用只记录不评分。" />
         <Authority n="02" title="Agent Judge" badge="辅助" text="发现评分分歧和可疑样本，不覆盖代码评分。" />
         <Authority n="03" title="AI 调查员" badge="诊断" text="查轨迹、读冻结源码、对照权威方法论，提出可验证优化。" />
       </aside></div>
@@ -181,7 +181,7 @@ function Datasets() {
 function Experiments() {
   const { data, error } = useRemote("/api/workbench/experiments");
   const items = data?.items ?? [];
-  return <section className="page-content"><PageTitle eyebrow="REPRODUCIBLE EVAL RUNS" title="实验运行" text="一份冻结 Manifest 对应一次实验；数据、代码、预算、种子、身份状态和结果哈希都可审计。" />
+  return <section className="page-content"><PageTitle eyebrow="REPRODUCIBLE EVAL RUNS" title="实验运行" text="一份冻结 Manifest 对应一次实验；数据、代码、开放资源、种子、身份状态和结果哈希都可审计。" />
     {error && <ErrorBox text={error} />}<div className="metric-row three"><Metric label="实验总数" value={items.length} foot="含单系统验收与双架构资格" href="#experiment-list" />
       <Metric label="已收口" value={items.filter((item: Json) => ["COMPLETED","FAILED","CANCELLED"].includes(item.status)).length} foot="成功、失败或取消都已有明确终态" href="#experiment-list" />
       <Metric label="AI 调查运行" value={items.reduce((sum: number, item: Json) => sum + Number(item.analyses ?? 0), 0)} foot="成功和失败都保留审计，不影响官方成绩" accent href="/analyses" /></div>
@@ -210,7 +210,7 @@ function ExperimentDetail({ id }: { id: string }) {
   const caseGroups = Object.entries(Object.groupBy(data.trials as Json[], (trial: Json) => trial.case_ref));
   const toggleCase = (caseRef: string) => setSelectedCases((current) => { const next = new Set(current); if (next.has(caseRef)) next.delete(caseRef); else next.add(caseRef); return next; });
   return <section className="page-content"><div className="detail-head"><div><a className="back-link" href="/experiments">← 返回实验</a><span className="kicker">EXPERIMENT</span><h2>{exp.name}</h2><div className="detail-meta"><Status status={exp.status} /><RunClassBadge value={exp.run_class} /><code>{exp.id}</code><span>{exp.design === "paired_comparison" ? "双系统公平对比" : "单系统回归"}</span></div></div>
-    <div className="hash-card"><span>Manifest Hash</span><code>{exp.manifest_hash}</code><small>数据、种子、预算、参评版本均已冻结</small></div></div>
+    <div className="hash-card"><span>Manifest Hash</span><code>{exp.manifest_hash}</code><small>数据、种子、资源合同、参评版本均已冻结</small></div></div>
     <div className="metric-row"><Metric label={frozenDesign ? "计划单次评测（Trials）" : "单次评测（Trial）"} value={frozenDesign ? exp.planned_trial_count : exp.progress.total}
         foot={frozenDesign ? `${exp.planned_case_count} 个 Case × ${exp.planned_contestant_count} 名考生 × ${(data.manifest.environment_seeds ?? []).length} 个 Seed` : `${exp.progress.succeeded} 成功 · ${exp.progress.failed} 失败 · ${exp.progress.cancelled} 未执行`} />
       <Metric label={frozenDesign ? "开考状态" : "执行收口率"} value={frozenDesign ? "尚未开考" : `${Math.round((exp.progress.rate ?? 0) * 100)}%`}
@@ -232,7 +232,7 @@ function ExperimentDetail({ id }: { id: string }) {
       <KeyValue label="数据集（Dataset）" value={data.manifest.dataset_ref} /><KeyValue label="套件（Suite）" value={data.manifest.suite_ref} />
       <KeyValue label="运行类别（Run class）" value={runClassLabel(data.manifest.run_class)} /><KeyValue label="评测通道（Lane）" value={laneLabel(data.manifest.evaluation_lane)} />
       <KeyValue label="工作模式（Operating modes）" value={(data.manifest.operating_modes ?? []).map(operationModeLabel).join("、")} /><KeyValue label="执行环境（Execution mode）" value={data.manifest.execution_mode === "controlled_simulation" ? "受控数字孪生（Controlled simulation）" : "历史只读回放（Read-only replay）"} /><KeyValue label="环境种子（Seeds）" value={(data.manifest.environment_seeds ?? []).join("、")} />
-      <KeyValue label="每个 Seed 重复次数（Replicates）" value={data.manifest.replicates_per_seed} /><KeyValue label="工具预算（Tool calls）" value={data.manifest.budget?.tool_calls} /><KeyValue label="时间预算（Wallclock）" value={formatDuration(data.manifest.budget?.wallclock_ms)} />
+      <KeyValue label="每个 Seed 重复次数（Replicates）" value={data.manifest.replicates_per_seed} /><KeyValue label="历史工具保险丝（Tool calls）" value={data.manifest.budget?.tool_calls ?? "按产品公开最大资源"} /><KeyValue label="历史时间保险丝（Wallclock）" value={data.manifest.budget?.wallclock_ms ? formatDuration(data.manifest.budget.wallclock_ms) : "按产品公开最大资源"} />
       <div className="contestants">{(data.manifest.contestants ?? []).map((item: Json) => <div key={item.ref}><strong>{item.ref}</strong><code>{shortHash(item.artifact_digest)}</code></div>)}</div>
     </aside></div>{composerOpen && <RunComposer intent="rerun" caseRefs={[...selectedCases]} defaultExperimentId={id} datasetRef={exp.dataset_ref} onClose={() => setComposerOpen(false)} />}</section>;
 }
@@ -258,7 +258,7 @@ function TrialCenter({ mode }: { mode: "traces" | "graders" | "analyses" }) {
           <td><a className="row-title" href={`/trials/${item.id}#trace`}>{item.case_ref}</a><code>{item.id}</code><RunClassBadge value={item.run_class} /></td><td><strong>{contestantDisplayName(item.contestant)}</strong><small>{item.experiment_name}</small></td>
           <td><strong className="score-number">{item.trace_records}</strong></td><td>{item.tool_results}</td><td>{(item.trace_actors ?? []).join(" · ")}</td><td><Status status={item.status} /></td></tr>)}
       </tbody></table></div></section></section>;
-  if (mode === "graders") return <section className="page-content"><PageTitle eyebrow="DETERMINISTIC CODE GRADER" title="评分器中心" text="这里展示确定性 Code Grader 的全部结果，并严格区分正式成绩、资格试跑和工程自测。评分只看真实终态、证据、轨迹、预算和安全门禁，不看固定工具名称或求解顺序。" />
+  if (mode === "graders") return <section className="page-content"><PageTitle eyebrow="DETERMINISTIC CODE GRADER" title="评分器中心" text="这里展示确定性 Code Grader 的全部结果，并严格区分正式成绩、资格试跑和工程自测。新合同评分只看真实终态、证据、轨迹和安全门禁；时间、Token、调用量和费用只记录，不看固定工具名称或求解顺序。" />
     {error && <ErrorBox text={error} />}<div className="metric-row three"><Metric label="全部已评分" value={items.filter((item: Json) => item.grade).length} foot={`${officialItems.length} 条正式 · ${nonOfficialItems.length} 条不计正式成绩`} href="#grader-list" />
       <Metric label="正式成绩 Trial" value={officialItems.filter((item: Json) => item.grade).length} foot="只统计正式冻结套件" href="#grader-list" />
       <Metric label="正式均分" value={officialItems.length ? formatScore(average(officialItems.map((item: Json) => item.grade?.total))) : "尚未产生"} foot="资格与工程结果不混入；AI 调查不能改写" href="#grader-list" accent /></div>
@@ -357,7 +357,7 @@ function TrialOverview({ data, onChanged }: { data: Json; onChanged: () => Promi
       <div className="evidence-chips">{(trial.outcome?.evidence_refs ?? []).map((ref: string) => <Tag key={ref}>{ref}</Tag>)}</div></div>
   </section><aside className="surface"><SectionHead title="环境终态与证据" sub="由评测执行层（Harness）独立采集，不采信 Agent 自报" />
     <div className="evidence-stats"><Mini label="工具完成" value={data.evidence.tools} /><Mini label="轨迹记录" value={data.evidence.trace_records} /><Mini label="证据制品" value={data.evidence.artifacts.length} /></div>
-    <JsonBlock value={trial.final_state} /><SectionHead title="预算实际使用" sub="超限会被评测执行层（Harness）安全停止；考生没有公开的数据明确显示“未提供”，绝不按 0 计算" /><div className="kv-grid">
+    <JsonBlock value={trial.final_state} /><SectionHead title="资源实际使用" sub="仅在程序失控或安全风险时触发熔断；资源用量不直接评分。考生没有公开的数据明确显示“未提供”，绝不按 0 计算" /><div className="kv-grid">
       <KeyValue label="工具调用（Tool calls）" value={usageValue(trial.usage, "tool_calls")} />
       <KeyValue label="输入 Token（Input tokens）" value={usageValue(trial.usage, "input_tokens")} />
       <KeyValue label="输出 Token（Output tokens）" value={usageValue(trial.usage, "output_tokens")} />
@@ -409,7 +409,7 @@ function GraderPanel({ graders, official }: { graders: Json[]; official: boolean
       <span>工作模式：{operationModeLabel(grade.controlled_closure_evidence.operating_mode)}</span>
       <span>环境变更：{grade.controlled_closure_evidence.changes} 次；策略自动放行：{yesNo(grade.controlled_closure_evidence.policy_auto_allowed)}；独立人工批准：{yesNo(grade.controlled_closure_evidence.oracle_approved)}</span>
       <span>一次性票据：{yesNo(grade.controlled_closure_evidence.ticket_issued)}；动作留痕：{yesNo(grade.controlled_closure_evidence.action_execution_observed)}；独立验证：{yesNo(grade.controlled_closure_evidence.independent_verification_observed)}</span></div>}
-    <div className="rule-note"><strong>为什么不按工具名评分？</strong><p>Agent 可以用不同路径解决同一问题。评分器只看真实终态、证据是否可追溯、动作是否最小安全、预算是否合规。</p></div>
+    <div className="rule-note"><strong>为什么不按工具名和资源多少评分？</strong><p>Agent 可以用不同路径解决同一问题。评分器只看真实终态、证据是否可追溯、动作是否最小安全；时间、Token、工具次数和费用只用于复盘。</p></div>
   </aside></div>;
 }
 
@@ -529,13 +529,13 @@ function RunComposer({ intent, caseRefs, defaultExperimentId, datasetRef, onClos
       <button className={mode === "TARGETED_REGRESSION" ? "selected" : ""} onClick={() => { setMode("TARGETED_REGRESSION"); setPreflight(null); }}><strong>定向回归</strong><small>Targeted regression</small><span>保存一组重点 Case，反复验证改进</span></button>
       <button className={mode === "CAPACITY_REHEARSAL" ? "selected" : ""} onClick={() => { setMode("CAPACITY_REHEARSAL"); setPreflight(null); }}><strong>容量演练</strong><small>Capacity rehearsal</small><span>不计分；请求并发与安全降并发分别留痕</span></button></div>
     {intent === "new" && <section className="purpose-picker" aria-labelledby="purpose-title"><div className="purpose-head"><div><strong id="purpose-title">评测目的（Evaluation purpose）</strong><small>选择为什么评，不需要手工拼装考生</small></div><Tag>{purposeLabel}</Tag></div><div className="purpose-grid">
-      {frozenContestants.length > 1 && <button className={effectivePurpose === "PAIRED_COMPARISON" ? "selected" : ""} onClick={() => { setEvaluationPurpose("PAIRED_COMPARISON"); setPreflight(null); }}><strong>双系统公平对比</strong><small>Paired comparison</small><span>同一批 Case、预算与环境分别运行 {frozenContestants.map((item: Json) => contestantDisplayName(item.ref)).join(" 和 ")}</span></button>}
+      {frozenContestants.length > 1 && <button className={effectivePurpose === "PAIRED_COMPARISON" ? "selected" : ""} onClick={() => { setEvaluationPurpose("PAIRED_COMPARISON"); setPreflight(null); }}><strong>双系统公平对比</strong><small>Paired comparison</small><span>同一批 Case 与环境分别运行；各架构使用自己的最大资源 {frozenContestants.map((item: Json) => contestantDisplayName(item.ref)).join(" 和 ")}</span></button>}
       {frozenContestants.map((item: Json) => <button key={item.ref} className={effectivePurpose === `SINGLE:${item.ref}` ? "selected" : ""} onClick={() => { setEvaluationPurpose(`SINGLE:${item.ref}`); setPreflight(null); }}><strong>{contestantDisplayName(item.ref)} 单系统回归</strong><small>Single-system regression</small><span>只验证这一套系统，不生成双系统胜负结论</span></button>)}
     </div></section>}
     <div className="run-form">{intent === "new" ? <label>冻结参评配置 <small>Source experiment</small><select value={effectiveSourceExperimentId} onChange={(event) => { const nextId = event.target.value; const nextContestants = availableTemplates.find((item: Json) => item.id === nextId)?.contestants ?? []; setSourceExperimentId(nextId); setEvaluationPurpose(nextContestants.length > 1 ? "PAIRED_COMPARISON" : nextContestants[0] ? `SINGLE:${nextContestants[0].ref}` : "PAIRED_COMPARISON"); setPreflight(null); }}><option value="">请选择</option>{availableTemplates.map((item: Json) => <option key={item.id} value={item.id}>{item.name} · {item.suite_ref}</option>)}</select></label>
       : <div className="frozen-config"><span>沿用冻结参评配置 <small>Frozen source experiment</small></span>
         <strong>{templates.loading ? "正在读取…" : incompatibleFrozenSource ? "该实验不符合当前可执行评测合同，不能按原配置重新评测" : selectedTemplate?.name ?? "没有可用的冻结配置"}</strong>
-        <code>{effectiveSourceExperimentId || defaultExperimentId}</code><small>{incompatibleFrozenSource ? "当前真实产品复评使用 Manifest 7.0 与 Candidate Adapter 5.0；旧实验继续保留查看，但不能冒充本轮冻结版本。" : "重新评测不可更换考生；需要更换时请从数据集页面新建评测。"}</small>
+        <code>{effectiveSourceExperimentId || defaultExperimentId}</code><small>{incompatibleFrozenSource ? "当前真实产品复评必须使用 Manifest 8.0 开放资源合同与 Candidate Adapter 5.0；旧实验继续保留查看，但不能冒充本轮冻结版本。" : "重新评测不可更换考生；需要更换时请从数据集页面新建评测。"}</small>
         {incompatibleFrozenSource && <a className="text-link" href="/datasets">前往数据集与 Case →</a>}</div>}
       <label>每个 Seed 的重复次数 <small>Replicates per Seed</small><select value={repetitions} onChange={(event) => { setRepetitions(Number(event.target.value)); setPreflight(null); }}>{[1,2,3,4,5].map((value) => <option value={value} key={value}>{value} 次</option>)}</select></label>
       {mode === "CAPACITY_REHEARSAL" && <label>请求并发 <small>Requested concurrency</small><select value={capacityConcurrency} onChange={(event) => { setCapacityConcurrency(Number(event.target.value)); setPreflight(null); }}><option value={4}>4 路</option><option value={8}>8 路</option></select></label>}
@@ -552,11 +552,11 @@ function RunComposer({ intent, caseRefs, defaultExperimentId, datasetRef, onClos
 
 function PreflightCard({ data }: { data: Json }) {
   return <section className={`preflight-card ${data.ready ? "ready" : "blocked"}`}><div className="preflight-head"><div><strong>{data.ready ? "✓ 可以开始" : "× 暂不能开始"}</strong><small>执行前检查（Preflight）</small></div><Tag>{data.mode_label}</Tag></div>
-    <div className="preflight-grid"><KeyValue label="评测题目（Cases）" value={data.case_refs.length} /><KeyValue label="参评考生（Contestants）" value={data.contestant_refs.map(contestantDisplayName).join("、")} /><KeyValue label="环境种子（Seeds）" value={(data.environment_seeds ?? []).join("、")} /><KeyValue label="单次评测（Trials）" value={data.total_trials} /><KeyValue label="预计耗时" value={formatDuration(data.estimated_duration_ms)} />
-      <KeyValue label="最大工具调用" value={data.budget.maximum_tool_calls} /><KeyValue label="申请并发（Requested）" value={data.budget.requested_concurrency} /><KeyValue label="安全并发（Effective）" value={data.budget.effective_concurrency} /></div>
+    <div className="preflight-grid"><KeyValue label="评测题目（Cases）" value={data.case_refs.length} /><KeyValue label="参评考生（Contestants）" value={data.contestant_refs.map(contestantDisplayName).join("、")} /><KeyValue label="环境种子（Seeds）" value={(data.environment_seeds ?? []).join("、")} /><KeyValue label="单次评测（Trials）" value={data.total_trials} /><KeyValue label="调查时长" value="不设常规完成上限" />
+      <KeyValue label="资源策略" value="产品最大资源；仅安全熔断" /><KeyValue label="申请并发（Requested）" value={data.budget.requested_concurrency} /><KeyValue label="安全并发（Effective）" value={data.budget.effective_concurrency} /></div>
     <div className="selected-summary"><strong>真实考生开考检查（Candidate readiness）</strong>
       {(data.candidate_checks ?? []).map((item: Json) => <span key={item.ref}>{item.ready ? "✓" : "×"} {contestantDisplayName(item.ref)}：{item.kind === "TEST_DOUBLE" ? "工程测试替身，仅用于平台自测" : item.ready ? `外部产品可达，版本指纹一致，${item.isolation?.safe_parallelism ?? 1} 个安全隔离槽位` : item.error ?? "未就绪"}</span>)}
-      <span>{data.budget.isolation_note}</span></div>
+      <span>{data.duration_note}</span><span>{data.budget.resource_note}</span><span>{data.budget.isolation_note}</span></div>
     <p className={data.affects_official_score ? "official-warning" : "diagnostic-note"}>{data.score_notice}</p>
     <div className="readiness-list">{Object.entries(data.readiness ?? {}).map(([name, ready]) => <span key={name} className={ready ? "yes" : "no"}>{ready ? "✓" : "×"} {readinessLabel(name)}</span>)}</div>
     {data.blockers?.map((item: string) => <ErrorBox key={item} text={item} />)}<small className="cost-note">费用说明：{data.cost_note}</small></section>;
@@ -652,7 +652,7 @@ function runClassLabel(value: any) { return value === "REAL_CANDIDATE" ? "真实
 function RunClassBadge({ value }: { value: any }) { return <Tag>{runClassLabel(value)}</Tag>; }
 function operationModeLabel(value: any) { return ({ diagnosis_only: "只诊断（Diagnosis only）", human_collaboration: "人工审批（Human approval）", controlled_auto: "受控自动修复（Controlled auto）" } as Record<string,string>)[value] ?? value ?? "未标注（Not specified）"; }
 function failureCategoryLabel(value: string) { return ({
-  OPERATOR_CANCELLED: "操作员主动取消（Operator cancelled）", BUDGET_EXCEEDED: "预算超限（Budget exceeded）",
+  OPERATOR_CANCELLED: "操作员主动取消（Operator cancelled）", BUDGET_EXCEEDED: "资源安全熔断（Safety fuse）",
   CANDIDATE_SAFETY_FAILURE: "考生安全失败（Candidate safety）", CANDIDATE_CAPABILITY_FAILURE: "考生能力失败（Candidate capability）",
   PRODUCT_RELIABILITY_FAILURE: "考生产品可靠性失败（Product reliability）", PLATFORM_CLEANUP_FAILURE: "EvalOS 考场清理失败（Platform cleanup）",
   RATE_LIMIT: "外部服务限流（Rate limit）", TRANSPORT_RESET: "连接临时中断（Transport reset）",
@@ -706,7 +706,7 @@ function stableToken(value: unknown) { const text = JSON.stringify(value); let h
 }
 function analysisMode(value: string) { return ({ optimization_research: "优化深研", case_diagnosis: "Case 诊断", score_explanation: "评分解释" } as Record<string, string>)[value] ?? humanize(value); }
 function modeLabel(value: string) { return ({ QUICK_VALIDATION: "快速验证（Quick validation）", TARGETED_REGRESSION: "定向回归（Targeted regression）", CAPACITY_REHEARSAL: "容量演练（Capacity rehearsal）", FORMAL: "正式评测（Formal evaluation）" } as Record<string,string>)[value] ?? value; }
-function readinessLabel(value: string) { return ({ model_and_adapter: "模型与适配器（Model & adapter）", twin: "EvalOS 与两名考生都已连接数字孪生（Twin）", run_class_separation: "真实考生与测试替身隔离（Run class）", external_candidate_api: "真实产品公开接口（Product API）", candidate_budget_alignment: "考生最长运行不超过 Trial 时间预算（Budget alignment）", candidate_fingerprint: "考生版本指纹一致（Fingerprint）", approval_identity_separation: "提交、审批、管理账号分离（Separation of duties）", candidate_least_privilege: "三个评测账号均为最小权限（Least privilege）", candidate_tenant_isolation: "考生评测租户隔离（Tenant isolation）", formal_release_gate: "正式开考放行（Formal gate）", isolated_namespace: "Trial 隔离运行空间（Namespace）", environment_reset: "环境复位（Reset）", deterministic_grader: "确定性评分器（Code grader）" } as Record<string,string>)[value] ?? humanize(value); }
+function readinessLabel(value: string) { return ({ model_and_adapter: "模型与适配器（Model & adapter）", twin: "EvalOS 与两名考生都已连接数字孪生（Twin）", run_class_separation: "真实考生与测试替身隔离（Run class）", external_candidate_api: "真实产品公开接口（Product API）", candidate_open_resource_alignment: "已给满产品公开最大资源（Open resources）", candidate_open_resource_qualification: "资源上限仅作安全熔断且用量不评分（Safety fuse）", candidate_fingerprint: "考生版本指纹一致（Fingerprint）", approval_identity_separation: "提交、审批、管理账号分离（Separation of duties）", candidate_least_privilege: "三个评测账号均为最小权限（Least privilege）", candidate_tenant_isolation: "考生评测租户隔离（Tenant isolation）", formal_release_gate: "正式开考放行（Formal gate）", isolated_namespace: "Trial 隔离运行空间（Namespace）", environment_reset: "环境复位（Reset）", deterministic_grader: "确定性评分器（Code grader）" } as Record<string,string>)[value] ?? humanize(value); }
 function comparePassed(before: any, after: any) { if (after === null || after === undefined) return "等待结果"; if (before === null || before === undefined) return after ? "— → 通过" : "— → 未通过"; return `${before ? "通过" : "未通过"} → ${after ? "通过" : "未通过"}`; }
 function compareMetric(before: any, after: any, formatter: (value: any) => string) { if (after === null || after === undefined) return "等待结果"; return `${before === null || before === undefined ? "—" : formatter(before)} → ${formatter(after)}`; }
 function costChange(before: Json | null, after: Json | null) { if (!after) return "等待结果"; if (after.cost_usd === null || after.cost_usd === undefined) return "未提供（Not reported）"; return `${before?.cost_usd === null || before?.cost_usd === undefined ? "—" : formatCost(before.cost_usd)} → ${formatCost(after.cost_usd)}`; }

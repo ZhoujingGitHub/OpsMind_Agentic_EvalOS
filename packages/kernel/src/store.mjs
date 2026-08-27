@@ -4,7 +4,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { entityId, isoNow, parseJson, seedFromString, seededShuffle, sha256, stableStringify } from "./utils.mjs";
 import { redact } from "./redaction.mjs";
-import { LEGACY_BUDGET_DIMENSIONS, trialSettlementBudget, validateCandidateBudgetContract } from "./budget-profile.mjs";
+import { LEGACY_BUDGET_DIMENSIONS, trialSettlementBudget, validateCandidateResourceContract } from "./budget-profile.mjs";
 
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/;
 
@@ -131,7 +131,7 @@ function manifestRefs(manifest) {
     throw new Error("REAL_CANDIDATE accepts only frozen external REAL_PRODUCT contestants");
   }
   if (!manifest.model || !manifest.frozen_dependencies ||
-      (manifestVersion === "8.0" ? !manifest.candidate_budget_contract : !manifest.budget) || !manifest.policy ||
+      (manifestVersion === "8.0" ? !manifest.candidate_resource_contract : !manifest.budget) || !manifest.policy ||
       !manifest.retry_policy || !manifest.capacity_policy || !manifest.statistics_policy) {
     throw new Error(`Manifest ${manifestVersion} must freeze model, dependencies, candidate budget, policy, retry, capacity, and statistics`);
   }
@@ -180,7 +180,7 @@ function manifestRefs(manifest) {
     }
   }
 
-  if (manifestVersion === "8.0") validateCandidateBudgetContract(manifest);
+  if (manifestVersion === "8.0") validateCandidateResourceContract(manifest);
 
   const dependencyKeys = ["mcp_catalog", "agent_harness_skill_pack", "langgraph_knowledge_pack", "scope_policy", "grader", "twin", "trace_schema", "product_adapter_contract"];
   assertExactKeys(manifest.frozen_dependencies, dependencyKeys, "frozen_dependencies");
@@ -220,12 +220,15 @@ function manifestRefs(manifest) {
   }
   if (manifestVersion === "8.0") {
     assertExactKeys(manifest.statistics_policy,
-      ["comparison_design", "confidence_level", "cluster_by_case", "report_failures", "per_architecture_calibration"],
+      ["comparison_design", "confidence_level", "cluster_by_case", "report_failures",
+        "per_architecture_usage_reporting", "resource_usage_affects_score"],
       "statistics_policy");
     if (!["independent_stratified", "paired_case_control"].includes(manifest.statistics_policy.comparison_design) ||
         manifest.statistics_policy.confidence_level !== 0.95 || manifest.statistics_policy.cluster_by_case !== true ||
-        manifest.statistics_policy.report_failures !== true || manifest.statistics_policy.per_architecture_calibration !== true) {
-      throw new Error("Manifest 8.0 statistics_policy must preserve per-architecture calibration and failure reporting");
+        manifest.statistics_policy.report_failures !== true ||
+        manifest.statistics_policy.per_architecture_usage_reporting !== true ||
+        manifest.statistics_policy.resource_usage_affects_score !== false) {
+      throw new Error("Manifest 8.0 statistics_policy must keep resource usage descriptive and separate by architecture");
     }
   } else {
     assertExactKeys(manifest.statistics_policy, ["paired_by_case_seed", "confidence_level", "cluster_by_case", "report_failures"], "statistics_policy");

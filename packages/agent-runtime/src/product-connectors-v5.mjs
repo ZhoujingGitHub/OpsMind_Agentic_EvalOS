@@ -108,6 +108,7 @@ const NATIVE_BUDGET_KEYS = Object.freeze(["max_duration_seconds", "max_tool_call
   "max_tokens", "max_cost_microunits", "max_result_bytes"]);
 
 const LANGGRAPH_JOB_RUNTIME_CONTRACT = "opsmind-job-runtime-limits:1.0";
+const OPEN_RESOURCE_POLICY_CONTRACT = "opsmind-open-resource/1.0";
 const LANGGRAPH_BUDGET_DIMENSIONS = Object.freeze({
   active_duration: Object.freeze({ budget_key: "max_duration_seconds", unit: "seconds" }),
   model_calls: Object.freeze({ budget_key: "max_model_calls", unit: "calls" }),
@@ -116,6 +117,27 @@ const LANGGRAPH_BUDGET_DIMENSIONS = Object.freeze({
   cost: Object.freeze({ budget_key: "max_cost_microunits", unit: "microunits" }),
   result_bytes: Object.freeze({ budget_key: "max_result_bytes", unit: "bytes" }),
 });
+
+function publicOpenResourcePolicy(...values) {
+  const available = values.filter((value) => value && typeof value === "object" && !Array.isArray(value));
+  if (!available.length) return Object.freeze({ supported: false, contract_version: null });
+  if (available.some((value) => !sameValue(value, available[0]))) {
+    throw new Error("candidate public open-resource policy declarations disagree");
+  }
+  const policy = available[0];
+  const expected = {
+    contract_version: OPEN_RESOURCE_POLICY_CONTRACT,
+    mode: "open_with_safety_fuses",
+    limits_are_safety_fuses_only: true,
+    usage_affects_score: false,
+    efficiency_reporting_only: true,
+    case_specific_limits: false,
+  };
+  for (const [name, value] of Object.entries(expected)) {
+    if (policy[name] !== value) throw new Error(`candidate public open-resource policy has invalid ${name}`);
+  }
+  return Object.freeze({ supported: true, ...expected });
+}
 
 function strictInteger(value, name, { allowZero = false } = {}) {
   const number = Number(value);
@@ -724,6 +746,7 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         ? latestNativeContract.budget_limits.max_duration_seconds * 1000 : null;
       const deploymentDeclarationMatches = !runtimeLimits.observable ||
         runtimeLimits.max_run_ms === publicMaxRunMs;
+      const openResourcePolicy = publicOpenResourcePolicy(capability.open_resource_policy, runtime.open_resource_policy);
       return { credential_roles: ["candidate_submitter", "approval_oracle", "mode_administrator"],
         identities_separated: identitiesSeparated, least_privilege: submitterScoped && approverScoped && administratorScoped,
         tenant_bound: tenantBound, isolated_tenant_slots: 1, safe_parallelism: 1,
@@ -736,6 +759,7 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
           max_run_ms: publicMaxRunMs, native_enforcement: latestNativeContract.supported,
           deployment_declaration_matches: deploymentDeclarationMatches,
           dimensions: latestNativeContract.budget_limits,
+          open_resource_policy: openResourcePolicy,
           source: latestNativeContract.supported ? "candidate_public_investigation_runtime" : runtimeLimits.source },
         production_writes_available: false };
     },
@@ -971,6 +995,7 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         .includes(String(twinConnector.status ?? "").toLowerCase());
       const deploymentDeclarationMatches = !runtimeLimits.observable ||
         runtimeLimits.max_run_ms === latestNativeContract.max_run_ms;
+      const openResourcePolicy = publicOpenResourcePolicy(automation.open_resource_policy);
       return { credential_roles: ["candidate_submitter", "approval_oracle", "mode_administrator"],
         identities_separated: identitiesSeparated, least_privilege: submitterScoped && approverScoped && administratorScoped,
         tenant_bound: tenantBound, isolated_tenant_slots: 1, safe_parallelism: 1,
@@ -985,6 +1010,7 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
           deployment_declaration_matches: deploymentDeclarationMatches,
           dimensions: latestNativeContract.budget_limits,
           dimension_metadata: latestNativeContract.budget_dimensions,
+          open_resource_policy: openResourcePolicy,
           terminalization_reserve_ms: latestNativeContract.terminalization_reserve_ms,
           terminal_status: latestNativeContract.terminal_status,
           stop_semantics: latestNativeContract.stop_semantics,

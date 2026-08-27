@@ -4,7 +4,7 @@
   "title": "OpsMind EvalOS Trial Efficiency Audit 1.0",
   "description": "基于公开事件的描述性运行效率审计。只保存计数、时间和脱敏输入指纹，不自动判定无效循环，不替代确定性 Grader。",
   "type": "object",
-  "required": ["contract", "authority", "privacy", "public_event_count", "milestones", "tool_execution", "loop_review", "model_timing", "public_event_gaps", "usage", "calibration_sample_eligibility"],
+  "required": ["contract", "authority", "privacy", "public_event_count", "milestones", "tool_execution", "loop_review", "model_timing", "public_event_gaps", "usage", "review_state"],
   "properties": {
     "contract": { "const": "evalos-trial-efficiency-audit/1.0" },
     "authority": { "const": "descriptive_post_hoc_review_not_official_grader" },
@@ -16,7 +16,7 @@
     "model_timing": { "type": "object" },
     "public_event_gaps": { "type": "object" },
     "usage": { "type": "object" },
-    "calibration_sample_eligibility": { "enum": ["PENDING_HUMAN_REVIEW", "ELIGIBLE_ON_EFFICIENCY_SIGNALS_ONLY"] }
+    "review_state": { "enum": ["HUMAN_REVIEW_SUGGESTED", "NO_REPEAT_SIGNAL_DETECTED"] }
   },
   "additionalProperties": false
 }

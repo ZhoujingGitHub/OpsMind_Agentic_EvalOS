@@ -38,12 +38,14 @@ export class DeterministicGradingService {
     this.graderRef = graderRef;
   }
 
-  grade({ trialId = null, caseRef, outcome, trace, usage, budget, stability = null, environmentState = null, environmentReset = null }) {
+  grade({ trialId = null, caseRef, outcome, trace, usage, budget, stability = null,
+    resourceUsageAffectsScore = true, environmentState = null, environmentReset = null }) {
     const execution = this.executionCaseResolver(caseRef);
     const label = this.labelStore.getLabel(caseRef);
     if (!execution || !label) throw new Error(`grading material unavailable for ${caseRef}`);
     const result = gradeTrial({ ...execution, ground_truth: label.ground_truth }, outcome, trace, usage,
-      { trialId, budget, stability, graderRef: this.graderRef, environmentState, environmentReset });
+      { trialId, budget, stability, resourceUsageAffectsScore,
+        graderRef: this.graderRef, environmentState, environmentReset });
     return { grader_ref: this.graderRef, result, label_hash: label.label_hash };
   }
 }

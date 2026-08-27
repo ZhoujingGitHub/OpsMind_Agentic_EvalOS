@@ -6,6 +6,10 @@ import { createAgentHarnessProductConnectorV5, createLangGraphProductConnectorV5
 const ATTESTATION = Object.freeze({ source_revision: "abcdef1234567890",
   artifact_digest: `sha256:${"a".repeat(64)}` });
 
+const OPEN_RESOURCE_POLICY = Object.freeze({ contract_version: "opsmind-open-resource/1.0",
+  mode: "open_with_safety_fuses", limits_are_safety_fuses_only: true, usage_affects_score: false,
+  efficiency_reporting_only: true, case_specific_limits: false });
+
 const LANGGRAPH_JOB_RUNTIME_LIMITS = Object.freeze({
   contract_version: "opsmind-job-runtime-limits:1.0", source: "product_runtime",
   max_run_ms: 1020000, terminalization_reserve_ms: 120000, native_enforcement: true,
@@ -88,11 +92,12 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
       protocol_lab_binding_contract_version: "2.0", native_run_context_supported: true,
       run_context_contract_version: "opsmind-run-context/1.0",
       run_budget_contract_version: "opsmind-run-budget/1.0",
-      run_usage_contract_version: "opsmind-run-usage/1.0" }),
+      run_usage_contract_version: "opsmind-run-usage/1.0", open_resource_policy: OPEN_RESOURCE_POLICY }),
     "GET /v2/investigation-runtime": async () => ({ sdk_execution_api: "claude-agent-sdk-query",
       execution_mode: "agent-loop", model: "deepseek-v4-flash", thinking_mode: "high", reasoning_effort: "max",
       native_run_context_supported: true, run_context_contract_version: "opsmind-run-context/1.0",
       run_budget_contract_version: "opsmind-run-budget/1.0", run_usage_contract_version: "opsmind-run-usage/1.0",
+      open_resource_policy: OPEN_RESOURCE_POLICY,
       product_budget_limits: { max_duration_seconds: 2700, max_tool_calls: 128, max_model_calls: 32,
         max_tokens: 1000000, max_cost_microunits: 1000000, max_result_bytes: 8388608 } }),
     "GET /v2/model-profile": async () => ({ provider: "deepseek", model: "deepseek-v4-flash",
@@ -156,6 +161,8 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   assert.equal(readiness.budget_contract.max_run_ms, 2700000);
   assert.equal(readiness.budget_contract.dimensions.max_result_bytes, 8388608);
   assert.equal(readiness.budget_contract.deployment_declaration_matches, true);
+  assert.equal(readiness.budget_contract.open_resource_policy.supported, true);
+  assert.equal(readiness.budget_contract.open_resource_policy.usage_affects_score, false);
   const oversized = executionContract("evalos-ah-oversized", discovery.candidate_runtime);
   await assert.rejects(connector.start({ executionContract: oversized }),
     /requested native budget exceeds the public product limit: max_duration_seconds/);
@@ -271,7 +278,7 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
       model_version: "deepseek-v4-flash+deepseek-v4-pro",
       product_e2e_contract_version: "opsmind-controlled-remediation:1.1",
       public_event_schema_version: "opsmind-public-event:1.0",
-      job_runtime_limits: LANGGRAPH_JOB_RUNTIME_LIMITS }),
+      job_runtime_limits: LANGGRAPH_JOB_RUNTIME_LIMITS, open_resource_policy: OPEN_RESOURCE_POLICY }),
     "PUT /api/v1/automation/mode": async ({ body }) => body,
     "POST /api/v1/candidates": async ({ body }) => { runContext = body.run_context;
       return { investigation: { investigation_id: "run-lg" }, job: { job_id: "job-lg" } }; },
@@ -326,6 +333,7 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
   assert.equal(readiness.budget_contract.max_run_ms, 1020000);
   assert.equal(readiness.budget_contract.native_enforcement, true);
   assert.equal(readiness.budget_contract.deployment_declaration_matches, true);
+  assert.equal(readiness.budget_contract.open_resource_policy.supported, true);
   assert.deepEqual(readiness.budget_contract.dimensions, { max_duration_seconds: 900,
     max_model_calls: 20, max_tool_calls: 30, max_tokens: 100000,
     max_cost_microunits: 20000000, max_result_bytes: 8388608 });

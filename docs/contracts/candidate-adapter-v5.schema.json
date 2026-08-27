@@ -42,7 +42,7 @@
     "model": { "type": "object" }, "frozen_dependencies": { "type": "object" },
     "budget": { "type": "object" },
     "settlement_budget": { "type": "object" },
-    "candidate_budget_contract": { "type": "object" },
+    "candidate_resource_contract": { "type": "object" },
     "policy": { "type": "object" },
     "approval_oracle": { "type": "object" }, "retry_policy": { "type": "object" },
     "suite_ref": { "type": "string", "minLength": 1 }, "dataset_ref": { "type": "string", "minLength": 1 },

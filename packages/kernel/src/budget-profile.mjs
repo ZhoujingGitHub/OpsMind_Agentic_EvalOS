@@ -8,11 +8,9 @@ export const CANDIDATE_NATIVE_BUDGET_DIMENSIONS = Object.freeze([
   "max_tokens", "max_cost_microunits", "max_result_bytes",
 ]);
 
-export const CANDIDATE_BUDGET_PROFILE_CONTRACT = "evalos-candidate-budget-profile/1.0";
+export const CANDIDATE_OPEN_RESOURCE_CONTRACT = "evalos-candidate-open-resource/1.0";
 
-const PROFILE_PHASES = new Set(["CALIBRATION", "QUALIFICATION", "CAPACITY", "FORMAL"]);
 const ENFORCEMENT_MODES = new Set(["enforced", "observed_only", "not_observable"]);
-const PROVENANCE_STATES = new Set(["product_native_baseline", "empirical_calibrated"]);
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/;
 
 function exactKeys(value, keys, label) {
@@ -42,100 +40,82 @@ function settlementCoversCandidate(candidate, settlement, contestantRef) {
   };
   const missing = Object.entries(checks).filter(([, covered]) => !covered).map(([name]) => name);
   if (missing.length) {
-    throw new Error(`settlement budget cannot be lower than candidate native budget: ${contestantRef}.${missing.join(",")}`);
+    throw new Error(`settlement reserve cannot be lower than candidate public maximum: ${contestantRef}.${missing.join(",")}`);
   }
 }
 
 function profileFor(manifest, contestantRef) {
   if (manifest?.manifest_version !== "8.0") return null;
-  return manifest.candidate_budget_contract?.profiles?.find((item) => item.contestant_ref === contestantRef) ?? null;
+  return manifest.candidate_resource_contract?.profiles?.find((item) => item.contestant_ref === contestantRef) ?? null;
 }
 
-export function validateCandidateBudgetContract(manifest) {
-  const contract = manifest?.candidate_budget_contract;
-  exactKeys(contract, ["contract_version", "phase", "joint_envelope_policy", "profiles"], "candidate_budget_contract");
-  if (contract.contract_version !== CANDIDATE_BUDGET_PROFILE_CONTRACT) {
-    throw new Error(`candidate_budget_contract must use ${CANDIDATE_BUDGET_PROFILE_CONTRACT}`);
+export function validateCandidateResourceContract(manifest) {
+  const contract = manifest?.candidate_resource_contract;
+  exactKeys(contract, ["contract_version", "mode", "policy", "profiles"], "candidate_resource_contract");
+  if (contract.contract_version !== CANDIDATE_OPEN_RESOURCE_CONTRACT) {
+    throw new Error(`candidate_resource_contract must use ${CANDIDATE_OPEN_RESOURCE_CONTRACT}`);
   }
-  if (!PROFILE_PHASES.has(contract.phase)) throw new Error("candidate_budget_contract phase is invalid");
-  const expectedPhase = manifest.evaluation_mode === "CAPACITY_REHEARSAL" ? "CAPACITY"
-    : manifest.evaluation_mode === "FORMAL" ? "FORMAL" : null;
-  if (expectedPhase && contract.phase !== expectedPhase) {
-    throw new Error(`candidate_budget_contract phase must be ${expectedPhase} for ${manifest.evaluation_mode}`);
-  }
-  if (manifest.evaluation_mode === "QUALIFICATION" && !["CALIBRATION", "QUALIFICATION"].includes(contract.phase)) {
-    throw new Error("qualification manifests may use only CALIBRATION or QUALIFICATION budget phases");
-  }
-  exactKeys(contract.joint_envelope_policy,
-    ["method", "target_coverage", "holdout_required", "case_specific_limits_forbidden"],
-    "candidate_budget_contract.joint_envelope_policy");
-  if (contract.joint_envelope_policy.method !== "whole_trial_multidimensional_envelope" ||
-      !Number.isFinite(contract.joint_envelope_policy.target_coverage) ||
-      contract.joint_envelope_policy.target_coverage <= 0 || contract.joint_envelope_policy.target_coverage >= 1 ||
-      contract.joint_envelope_policy.holdout_required !== true ||
-      contract.joint_envelope_policy.case_specific_limits_forbidden !== true) {
-    throw new Error("candidate budget joint envelope policy is invalid");
+  if (contract.mode !== "OPEN") throw new Error("candidate_resource_contract mode must be OPEN");
+  exactKeys(contract.policy, ["candidate_limit_source", "limits_are_safety_fuses_only", "usage_affects_score",
+    "efficiency_reporting_only", "case_specific_limits_forbidden", "cross_architecture_equal_limits_required"],
+  "candidate_resource_contract.policy");
+  if (contract.policy.candidate_limit_source !== "product_public_maximum" ||
+      contract.policy.limits_are_safety_fuses_only !== true || contract.policy.usage_affects_score !== false ||
+      contract.policy.efficiency_reporting_only !== true || contract.policy.case_specific_limits_forbidden !== true ||
+      contract.policy.cross_architecture_equal_limits_required !== false) {
+    throw new Error("candidate open-resource policy is invalid");
   }
   if (!Array.isArray(contract.profiles) || contract.profiles.length !== manifest.contestants.length) {
-    throw new Error("candidate budget profiles must match the frozen contestants one-for-one");
+    throw new Error("candidate resource profiles must match the frozen contestants one-for-one");
   }
   const refs = contract.profiles.map((item) => item?.contestant_ref);
   const expectedRefs = manifest.contestants.map((item) => item.ref);
   if (new Set(refs).size !== refs.length || [...refs].sort().join("\n") !== [...expectedRefs].sort().join("\n")) {
-    throw new Error("candidate budget profiles must cover each frozen contestant exactly once");
+    throw new Error("candidate resource profiles must cover each frozen contestant exactly once");
   }
   for (const profile of contract.profiles) {
-    exactKeys(profile, ["contestant_ref", "candidate_limits", "settlement_limits", "enforcement", "provenance"],
-      `candidate_budget_contract.profiles.${profile.contestant_ref}`);
-    positiveBudget(profile.candidate_limits, CANDIDATE_NATIVE_BUDGET_DIMENSIONS,
-      `candidate budget ${profile.contestant_ref}`, { integers: true });
-    positiveBudget(profile.settlement_limits, LEGACY_BUDGET_DIMENSIONS,
-      `settlement budget ${profile.contestant_ref}`);
-    settlementCoversCandidate(profile.candidate_limits, profile.settlement_limits, profile.contestant_ref);
+    exactKeys(profile, ["contestant_ref", "candidate_resources", "settlement_reserve", "enforcement", "provenance"],
+      `candidate_resource_contract.profiles.${profile.contestant_ref}`);
+    positiveBudget(profile.candidate_resources, CANDIDATE_NATIVE_BUDGET_DIMENSIONS,
+      `candidate resources ${profile.contestant_ref}`, { integers: true });
+    positiveBudget(profile.settlement_reserve, LEGACY_BUDGET_DIMENSIONS,
+      `settlement reserve ${profile.contestant_ref}`);
+    settlementCoversCandidate(profile.candidate_resources, profile.settlement_reserve, profile.contestant_ref);
     exactKeys(profile.enforcement, CANDIDATE_NATIVE_BUDGET_DIMENSIONS,
-      `budget enforcement ${profile.contestant_ref}`);
+      `resource enforcement ${profile.contestant_ref}`);
     for (const dimension of CANDIDATE_NATIVE_BUDGET_DIMENSIONS) {
       if (!ENFORCEMENT_MODES.has(profile.enforcement[dimension])) {
-        throw new Error(`budget enforcement mode is invalid: ${profile.contestant_ref}.${dimension}`);
+        throw new Error(`resource enforcement mode is invalid: ${profile.contestant_ref}.${dimension}`);
       }
     }
-    exactKeys(profile.provenance,
-      ["status", "method", "source_revision", "artifact_digest", "sample_trial_ids", "evidence_ref"],
-      `budget provenance ${profile.contestant_ref}`);
-    if (!PROVENANCE_STATES.has(profile.provenance.status) || !profile.provenance.method ||
-        !profile.provenance.evidence_ref || !Array.isArray(profile.provenance.sample_trial_ids) ||
-        new Set(profile.provenance.sample_trial_ids).size !== profile.provenance.sample_trial_ids.length ||
-        profile.provenance.sample_trial_ids.some((item) => typeof item !== "string" || !item)) {
-      throw new Error(`budget provenance is invalid: ${profile.contestant_ref}`);
+    exactKeys(profile.provenance, ["status", "method", "source_revision", "artifact_digest", "evidence_ref"],
+      `resource provenance ${profile.contestant_ref}`);
+    if (profile.provenance.status !== "product_public_maximum" ||
+        profile.provenance.method !== "candidate_public_runtime_contract" || !profile.provenance.evidence_ref) {
+      throw new Error(`resource provenance is invalid: ${profile.contestant_ref}`);
     }
     const contestant = manifest.contestants.find((item) => item.ref === profile.contestant_ref);
     if (profile.provenance.source_revision !== contestant.source_revision ||
         profile.provenance.artifact_digest !== contestant.artifact_digest ||
         !SHA256_DIGEST.test(profile.provenance.artifact_digest)) {
-      throw new Error(`budget provenance must bind the frozen contestant: ${profile.contestant_ref}`);
-    }
-    const empiricalRequired = ["QUALIFICATION", "CAPACITY", "FORMAL"].includes(contract.phase);
-    if (empiricalRequired && (profile.provenance.status !== "empirical_calibrated" ||
-        profile.provenance.sample_trial_ids.length === 0 ||
-        Object.values(profile.enforcement).some((value) => value !== "enforced"))) {
-      throw new Error(`non-calibration budget requires empirical samples and full enforcement: ${profile.contestant_ref}`);
+      throw new Error(`resource provenance must bind the frozen contestant: ${profile.contestant_ref}`);
     }
   }
   return contract;
 }
 
-export function candidateBudgetProfile(manifest, contestantRef) {
+export function candidateResourceProfile(manifest, contestantRef) {
   if (manifest?.manifest_version !== "8.0") return null;
-  validateCandidateBudgetContract(manifest);
+  validateCandidateResourceContract(manifest);
   const profile = profileFor(manifest, contestantRef);
-  if (!profile) throw new Error(`candidate budget profile is missing: ${contestantRef}`);
+  if (!profile) throw new Error(`candidate resource profile is missing: ${contestantRef}`);
   return profile;
 }
 
 export function candidateExecutionBudget(manifest, contestantRef) {
-  return candidateBudgetProfile(manifest, contestantRef)?.candidate_limits ?? manifest?.budget ?? null;
+  return candidateResourceProfile(manifest, contestantRef)?.candidate_resources ?? manifest?.budget ?? null;
 }
 
 export function trialSettlementBudget(manifest, contestantRef) {
-  return candidateBudgetProfile(manifest, contestantRef)?.settlement_limits ?? manifest?.budget ?? null;
+  return candidateResourceProfile(manifest, contestantRef)?.settlement_reserve ?? manifest?.budget ?? null;
 }

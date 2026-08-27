@@ -203,20 +203,21 @@ function gapAudit(events) {
     interpretation: "descriptive_only_no_fixed_stall_threshold" };
 }
 
-function usageAudit(usage, budget) {
+function usageAudit(usage, safetyFuses) {
   const measurement = usage?.measurement ?? {};
   const values = {};
-  const ratios = {};
+  const safetyFuseUtilization = {};
   for (const dimension of USAGE_DIMENSIONS) {
     const value = Number(usage?.[dimension]);
-    const limit = Number(budget?.[dimension]);
+    const limit = Number(safetyFuses?.[dimension]);
     values[dimension] = Number.isFinite(value) && value >= 0 ? value : null;
-    ratios[dimension] = values[dimension] !== null && Number.isFinite(limit) && limit > 0
+    safetyFuseUtilization[dimension] = values[dimension] !== null && Number.isFinite(limit) && limit > 0
       ? values[dimension] / limit : null;
   }
   const unavailable = [...new Set([...(measurement.unavailable_dimensions ?? []),
     ...USAGE_DIMENSIONS.filter((name) => values[name] === null)])];
-  return { values, ratios, complete: measurement.complete === true && unavailable.length === 0,
+  return { values, safety_fuse_utilization: safetyFuseUtilization,
+    usage_affects_score: false, complete: measurement.complete === true && unavailable.length === 0,
     observed_dimensions: measurement.observed_dimensions ?? USAGE_DIMENSIONS.filter((name) => values[name] !== null),
     unavailable_dimensions: unavailable,
     interpretation: unavailable.length ? "usage_contains_explicit_unknown_dimensions" : "usage_dimensions_complete" };
@@ -236,7 +237,7 @@ function milestoneAudit(trace, events) {
   return entries.sort((left, right) => left.seq - right.seq);
 }
 
-export function auditTrialEfficiency(trace = [], { usage = {}, budget = {} } = {}) {
+export function auditTrialEfficiency(trace = [], { usage = {}, budget: safetyFuses = {} } = {}) {
   const records = Array.isArray(trace) ? trace : [];
   const events = records.map(publicEvent).filter(Boolean);
   const signals = evidenceSignals(events);
@@ -267,12 +268,12 @@ export function auditTrialEfficiency(trace = [], { usage = {}, budget = {} } = {
       requires_human_review: requiresHumanReview,
       automatic_invalid_loop_decision: false,
       interpretation: requiresHumanReview
-        ? "review_required_before_using_trial_for_budget_calibration"
+        ? "human_review_suggested_for_possible_repetition"
         : "no_exact_repeat_without_public_evidence_detected",
     },
     model_timing: modelTiming(events),
     public_event_gaps: gapAudit(events),
-    usage: usageAudit(usage, budget),
-    calibration_sample_eligibility: requiresHumanReview ? "PENDING_HUMAN_REVIEW" : "ELIGIBLE_ON_EFFICIENCY_SIGNALS_ONLY",
+    usage: usageAudit(usage, safetyFuses),
+    review_state: requiresHumanReview ? "HUMAN_REVIEW_SUGGESTED" : "NO_REPEAT_SIGNAL_DETECTED",
   };
 }

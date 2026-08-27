@@ -25,7 +25,8 @@ test("相同工具和参数在没有新公开证据时只进入人工复核，�
   assert.equal(audit.loop_review.review_candidates.length, 1);
   assert.equal(audit.loop_review.requires_human_review, true);
   assert.equal(audit.loop_review.automatic_invalid_loop_decision, false);
-  assert.equal(audit.calibration_sample_eligibility, "PENDING_HUMAN_REVIEW");
+  assert.equal(audit.review_state, "HUMAN_REVIEW_SUGGESTED");
+  assert.equal(audit.usage.usage_affects_score, false);
   assert.equal(JSON.stringify(audit).includes("secret-a"), false);
   assert.equal(JSON.stringify(audit).includes("secret-b"), false);
 });

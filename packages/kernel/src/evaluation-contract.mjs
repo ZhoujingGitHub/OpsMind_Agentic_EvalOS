@@ -1,5 +1,5 @@
 import { sha256 } from "./utils.mjs";
-import { candidateBudgetProfile, candidateExecutionBudget } from "./budget-profile.mjs";
+import { candidateExecutionBudget, candidateResourceProfile } from "./budget-profile.mjs";
 
 export const EVALUATION_ADAPTER_CONTRACT_VERSION = "4.0";
 export const EVALUATION_ADAPTER_CONTRACT_VERSIONS = Object.freeze({
@@ -91,11 +91,11 @@ export function buildEvaluationContract({ experiment, trial, caseSpec, adapter }
     budget: candidateExecutionBudget(experiment.manifest, contestant.ref),
     ...(manifestVersion === "8.0" ? {
       settlement_budget: trial.budget,
-      candidate_budget_contract: {
-        contract_version: experiment.manifest.candidate_budget_contract.contract_version,
-        phase: experiment.manifest.candidate_budget_contract.phase,
-        joint_envelope_policy: experiment.manifest.candidate_budget_contract.joint_envelope_policy,
-        profile: candidateBudgetProfile(experiment.manifest, contestant.ref),
+      candidate_resource_contract: {
+        contract_version: experiment.manifest.candidate_resource_contract.contract_version,
+        mode: experiment.manifest.candidate_resource_contract.mode,
+        policy: experiment.manifest.candidate_resource_contract.policy,
+        profile: candidateResourceProfile(experiment.manifest, contestant.ref),
       },
     } : {}),
     policy: experiment.manifest.policy,

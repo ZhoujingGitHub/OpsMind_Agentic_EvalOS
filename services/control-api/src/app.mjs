@@ -580,13 +580,6 @@ export function createApp({
         throw new Error("formal evaluation must retain all frozen contestants");
       }
     }
-    const selectedHistory = store.listTrials(source.id, { includeReplays: false }).filter((trial) => caseRefs.includes(trial.case_ref));
-    const durations = selectedHistory.map((trial) => trial.started_at && trial.completed_at
-      ? new Date(trial.completed_at).getTime() - new Date(trial.started_at).getTime() : NaN).filter(Number.isFinite);
-    const frozenSettlementDurations = contestants.map((item) =>
-      Number(trialSettlementBudget(source.manifest, item.ref)?.wallclock_ms ?? 0)).filter((value) => value > 0);
-    const perTrialDuration = durations.length ? durations.reduce((sum, value) => sum + value, 0) / durations.length
-      : Math.max(...frozenSettlementDurations, 30000);
     const totalTrials = caseRefs.length * contestants.length * environmentSeeds.length * repetitions;
     const needsTwin = caseRefs.some((caseRef) => store.getExecutionCase(caseRef)?.source?.level === "L2");
     const missingAdapters = contestants.filter((item) => !adapterFor(item.ref, source.manifest.evaluation_lane,
@@ -620,7 +613,8 @@ export function createApp({
       try {
         return { ref: contestant.ref, kind: contestant.kind,
           ...(await adapter.preflight({ contestant, requiresTwin: needsTwin,
-            budget: candidateExecutionBudget(source.manifest, contestant.ref) })) };
+            budget: candidateExecutionBudget(source.manifest, contestant.ref),
+            resourcePolicy: source.manifest.candidate_resource_contract?.policy ?? null })) };
       } catch (error) {
         return { ref: contestant.ref, kind: contestant.kind, ready: false,
           error: String(error?.message ?? error) };
@@ -629,10 +623,6 @@ export function createApp({
     const failedCandidateChecks = candidateChecks.filter((item) => !item.ready);
     const historicalBudgetContract = source.manifest.run_class === "REAL_CANDIDATE" &&
       source.manifest.manifest_version !== "8.0";
-    const empiricalBudgetRequired = ["CAPACITY_REHEARSAL", "FORMAL"].includes(mode);
-    const empiricalBudgetMissing = source.manifest.manifest_version === "8.0" && empiricalBudgetRequired &&
-      source.manifest.candidate_budget_contract?.profiles?.some((profile) =>
-        profile.provenance?.status !== "empirical_calibrated" || !profile.provenance?.sample_trial_ids?.length);
     const requiresNativeBudgetQualification = ["CAPACITY_REHEARSAL", "FORMAL"].includes(mode);
     const unqualifiedNativeBudgets = requiresNativeBudgetQualification
       ? candidateChecks.filter((item) => item.kind === "REAL_PRODUCT" && item.formal_ready !== true) : [];
@@ -648,11 +638,10 @@ export function createApp({
     const effectiveConcurrency = Math.max(1, Math.min(requestedConcurrency, candidateParallelism, twinParallelism));
     const blockers = [
       ...(missingAdapters.length ? [`参评适配器未就绪：${missingAdapters.join("、")}`] : []),
-      ...(historicalBudgetContract ? ["Manifest 7.0 及更早真实产品预算合同仅保留历史读取；新的校准、资格、容量和正式运行必须使用 Manifest 8.0 分架构预算合同"] : []),
-      ...(empiricalBudgetMissing ? ["容量或正式运行缺少与当前候选源码和镜像绑定的分架构经验校准样本"] : []),
+      ...(historicalBudgetContract ? ["Manifest 7.0 及更早真实产品预算合同仅保留历史读取；新的资格、容量和正式运行必须使用 Manifest 8.0 开放资源合同"] : []),
       ...runClassViolations,
       ...failedCandidateChecks.map((item) => `真实考生开考检查失败（${item.ref}）：${item.error ?? "产品未就绪或冻结指纹不一致"}`),
-      ...unqualifiedNativeBudgets.map((item) => `${mode === "CAPACITY_REHEARSAL" ? "容量演练" : "正式评测"}预算合同未取得产品原生强制证明（${item.ref}）：考生必须在自己的冻结预算内自行终止并公开真实预算维度`),
+      ...unqualifiedNativeBudgets.map((item) => `${mode === "CAPACITY_REHEARSAL" ? "容量演练" : "正式评测"}开放资源合同未取得产品原生证明（${item.ref}）：考生必须公开最大可用资源、只把上限用于安全熔断，并公开真实用量`),
       ...(needsTwin && !twinConfigured ? ["所选 L2 Case 需要数字孪生环境，但 Twin 尚未配置"] : []),
       ...(mode === "FORMAL" && effectiveConcurrency < requestedConcurrency
         ? [`正式评测并发资格未通过：冻结配置要求 ${requestedConcurrency} 并发，当前隔离环境只能安全支持 ${effectiveConcurrency} 并发`] : []),
@@ -668,17 +657,16 @@ export function createApp({
       contestants: contestants.map(({ ref, adapter_version, source_revision, artifact_digest }) =>
         ({ ref, adapter_version, source_revision, artifact_digest })), repetitions, total_trials: totalTrials,
       candidate_checks: candidateChecks,
-      estimated_duration_ms: Math.round(perTrialDuration * totalTrials), estimated_cost_usd: null,
-      cost_note: "模型单价未写入冻结合同，平台展示预算与真实用量，不伪造费用估算。",
+      estimated_duration_ms: null,
+      duration_note: "不设置正常调查完成时限；2 至 15 分钟或更长均按真实任务和架构表现记录。",
+      estimated_cost_usd: null,
+      cost_note: "模型费用和资源用量仅作事实记录，不设及格金额，不参与成绩，也不跨架构强行拉齐。",
       budget: { per_contestant: Object.fromEntries(contestants.map((item) => [item.ref, {
-          candidate: candidateExecutionBudget(source.manifest, item.ref),
-          settlement: trialSettlementBudget(source.manifest, item.ref),
+          candidate_public_maximum: candidateExecutionBudget(source.manifest, item.ref),
+          platform_settlement_reserve: trialSettlementBudget(source.manifest, item.ref),
         }])),
-        maximum_tool_calls: contestants.reduce((sum, item) => sum +
-          caseRefs.length * environmentSeeds.length * repetitions *
-          Number(candidateExecutionBudget(source.manifest, item.ref)?.max_tool_calls ??
-            candidateExecutionBudget(source.manifest, item.ref)?.tool_calls ?? 0), 0),
         requested_concurrency: requestedConcurrency, effective_concurrency: effectiveConcurrency,
+        resource_note: "Candidate 获得各自产品公开的最大资源包；数值仅是防失控保险丝，不是能力及格线。",
         isolation_note: effectiveConcurrency < requestedConcurrency
           ? "当前按安全隔离槽位降为串行/低并发执行；不会让不同工作模式共享同一租户并发切换。"
           : "每个并发任务均有冻结的隔离边界。" },
@@ -687,9 +675,9 @@ export function createApp({
           .every((item) => item.twin?.ready === true)),
         run_class_separation: runClassViolations.length === 0,
         external_candidate_api: failedCandidateChecks.length === 0,
-        candidate_budget_alignment: candidateChecks.filter((item) => item.kind === "REAL_PRODUCT")
+        candidate_open_resource_alignment: candidateChecks.filter((item) => item.kind === "REAL_PRODUCT")
           .every((item) => item.budget?.aligned !== false),
-        candidate_native_budget_qualification: candidateChecks.filter((item) => item.kind === "REAL_PRODUCT")
+        candidate_open_resource_qualification: candidateChecks.filter((item) => item.kind === "REAL_PRODUCT")
           .every((item) => item.formal_ready === true),
         candidate_fingerprint: failedCandidateChecks.every((item) => !/drift/i.test(item.error ?? "")),
         approval_identity_separation: candidateChecks.filter((item) => item.kind === "REAL_PRODUCT")
@@ -815,12 +803,9 @@ export function createApp({
           environment_seeds: request.selection.environment_seeds, replicates_per_seed: request.selection.repetitions,
           evaluation_mode: request.mode === "FORMAL" ? "FORMAL"
             : request.mode === "CAPACITY_REHEARSAL" ? "CAPACITY_REHEARSAL" : "QUALIFICATION",
-          ...(source.manifest.manifest_version === "8.0" ? { candidate_budget_contract: {
-            ...source.manifest.candidate_budget_contract,
-            phase: request.mode === "FORMAL" ? "FORMAL"
-              : request.mode === "CAPACITY_REHEARSAL" ? "CAPACITY"
-                : source.manifest.candidate_budget_contract.phase,
-            profiles: source.manifest.candidate_budget_contract.profiles
+          ...(source.manifest.manifest_version === "8.0" ? { candidate_resource_contract: {
+            ...source.manifest.candidate_resource_contract,
+            profiles: source.manifest.candidate_resource_contract.profiles
               .filter((profile) => request.selection.contestant_refs.includes(profile.contestant_ref)),
           } } : {}),
           capacity_policy: { ...source.manifest.capacity_policy,

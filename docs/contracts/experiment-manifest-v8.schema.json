@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://opsmind.local/contracts/experiment-manifest-v8.schema.json",
   "title": "OpsMind EvalOS Experiment Manifest 8.0",
-  "description": "为每套外部架构分别冻结多维 Candidate 预算、最终结算保留量、执行口径与证据来源；禁止按 Case 或 Seed 定预算。",
+  "description": "为每套外部架构冻结产品公开最大资源、平台收尾保留量与安全熔断口径；资源用量只作描述，不参与评分。",
   "type": "object",
-  "required": ["manifest_version", "milestone", "run_class", "evaluation_mode", "evaluation_lane", "operating_modes", "execution_mode", "approval_oracle", "design", "name", "suite_ref", "dataset_ref", "case_refs", "case_partitions", "environment_seeds", "replicates_per_seed", "contestants", "model", "candidate_runtime_policy", "candidate_budget_contract", "frozen_dependencies", "policy", "retry_policy", "capacity_policy", "statistics_policy"],
+  "required": ["manifest_version", "milestone", "run_class", "evaluation_mode", "evaluation_lane", "operating_modes", "execution_mode", "approval_oracle", "design", "name", "suite_ref", "dataset_ref", "case_refs", "case_partitions", "environment_seeds", "replicates_per_seed", "contestants", "model", "candidate_runtime_policy", "candidate_resource_contract", "frozen_dependencies", "policy", "retry_policy", "capacity_policy", "statistics_policy"],
   "properties": {
     "manifest_version": { "const": "8.0" },
     "milestone": { "const": "M3.2" },
@@ -25,20 +25,21 @@
     "contestants": { "type": "array", "minItems": 1, "maxItems": 2, "items": { "$ref": "#/$defs/contestant" } },
     "model": { "type": "object" },
     "candidate_runtime_policy": { "type": "object" },
-    "candidate_budget_contract": { "$ref": "#/$defs/candidateBudgetContract" },
+    "candidate_resource_contract": { "$ref": "#/$defs/candidateResourceContract" },
     "frozen_dependencies": { "type": "object" },
     "policy": { "type": "object" },
     "retry_policy": { "type": "object" },
     "capacity_policy": { "type": "object" },
     "statistics_policy": {
       "type": "object",
-      "required": ["comparison_design", "confidence_level", "cluster_by_case", "report_failures", "per_architecture_calibration"],
+      "required": ["comparison_design", "confidence_level", "cluster_by_case", "report_failures", "per_architecture_usage_reporting", "resource_usage_affects_score"],
       "properties": {
         "comparison_design": { "enum": ["independent_stratified", "paired_case_control"] },
         "confidence_level": { "const": 0.95 },
         "cluster_by_case": { "const": true },
         "report_failures": { "const": true },
-        "per_architecture_calibration": { "const": true }
+        "per_architecture_usage_reporting": { "const": true },
+        "resource_usage_affects_score": { "const": false }
       },
       "additionalProperties": false
     },
@@ -94,47 +95,48 @@
     "enforcementMode": { "enum": ["enforced", "observed_only", "not_observable"] },
     "provenance": {
       "type": "object",
-      "required": ["status", "method", "source_revision", "artifact_digest", "sample_trial_ids", "evidence_ref"],
+      "required": ["status", "method", "source_revision", "artifact_digest", "evidence_ref"],
       "properties": {
-        "status": { "enum": ["product_native_baseline", "empirical_calibrated"] },
-        "method": { "type": "string", "minLength": 1 },
+        "status": { "const": "product_public_maximum" },
+        "method": { "const": "candidate_public_runtime_contract" },
         "source_revision": { "type": "string", "minLength": 7 },
         "artifact_digest": { "$ref": "#/$defs/digest" },
-        "sample_trial_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
         "evidence_ref": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false
     },
-    "budgetProfile": {
+    "resourceProfile": {
       "type": "object",
-      "required": ["contestant_ref", "candidate_limits", "settlement_limits", "enforcement", "provenance"],
+      "required": ["contestant_ref", "candidate_resources", "settlement_reserve", "enforcement", "provenance"],
       "properties": {
         "contestant_ref": { "type": "string", "minLength": 1 },
-        "candidate_limits": { "$ref": "#/$defs/candidateNativeBudget" },
-        "settlement_limits": { "$ref": "#/$defs/budget" },
+        "candidate_resources": { "$ref": "#/$defs/candidateNativeBudget" },
+        "settlement_reserve": { "$ref": "#/$defs/budget" },
         "enforcement": { "$ref": "#/$defs/enforcement" },
         "provenance": { "$ref": "#/$defs/provenance" }
       },
       "additionalProperties": false
     },
-    "candidateBudgetContract": {
+    "candidateResourceContract": {
       "type": "object",
-      "required": ["contract_version", "phase", "joint_envelope_policy", "profiles"],
+      "required": ["contract_version", "mode", "policy", "profiles"],
       "properties": {
-        "contract_version": { "const": "evalos-candidate-budget-profile/1.0" },
-        "phase": { "enum": ["CALIBRATION", "QUALIFICATION", "CAPACITY", "FORMAL"] },
-        "joint_envelope_policy": {
+        "contract_version": { "const": "evalos-candidate-open-resource/1.0" },
+        "mode": { "const": "OPEN" },
+        "policy": {
           "type": "object",
-          "required": ["method", "target_coverage", "holdout_required", "case_specific_limits_forbidden"],
+          "required": ["candidate_limit_source", "limits_are_safety_fuses_only", "usage_affects_score", "efficiency_reporting_only", "case_specific_limits_forbidden", "cross_architecture_equal_limits_required"],
           "properties": {
-            "method": { "const": "whole_trial_multidimensional_envelope" },
-            "target_coverage": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
-            "holdout_required": { "const": true },
-            "case_specific_limits_forbidden": { "const": true }
+            "candidate_limit_source": { "const": "product_public_maximum" },
+            "limits_are_safety_fuses_only": { "const": true },
+            "usage_affects_score": { "const": false },
+            "efficiency_reporting_only": { "const": true },
+            "case_specific_limits_forbidden": { "const": true },
+            "cross_architecture_equal_limits_required": { "const": false }
           },
           "additionalProperties": false
         },
-        "profiles": { "type": "array", "minItems": 1, "maxItems": 2, "items": { "$ref": "#/$defs/budgetProfile" } }
+        "profiles": { "type": "array", "minItems": 1, "maxItems": 2, "items": { "$ref": "#/$defs/resourceProfile" } }
       },
       "additionalProperties": false
     },

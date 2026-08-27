@@ -84,7 +84,7 @@ function assertBinding(binding, requiredStrength) {
   }
 }
 
-function nativeBudgetAlignment(budget, dimensions) {
+function nativeBudgetAlignment(budget, dimensions, { requireFullEnvelope = false } = {}) {
   if (!budget || !dimensions || typeof dimensions !== "object") return { aligned: null, checks: {} };
   const requested = Object.hasOwn(budget, "max_duration_seconds") ? {
     max_duration_seconds: Number(budget.max_duration_seconds),
@@ -106,7 +106,9 @@ function nativeBudgetAlignment(budget, dimensions) {
     const observable = Number.isFinite(productLimit) && productLimit > 0;
     return [name, { requested: Number.isFinite(value) ? value : null,
       product_limit: observable ? productLimit : null,
-      aligned: observable && Number.isFinite(value) ? value <= productLimit : null }];
+      aligned: observable && Number.isFinite(value)
+        ? requireFullEnvelope ? value === productLimit : value <= productLimit
+        : null }];
   }));
   const known = Object.values(checks).filter((item) => item.aligned !== null);
   return { aligned: known.length === Object.keys(requested).length ? known.every((item) => item.aligned) : null, checks };
@@ -135,14 +137,15 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
       if (result?.ok !== true) throw new Error("candidate product did not prove terminal cleanup handoff");
       return { required: true, ...result };
     },
-    async preflight({ contestant, requiresTwin = false, budget = null }) {
+    async preflight({ contestant, requiresTwin = false, budget = null, resourcePolicy = null }) {
       const discovery = await connector.discover();
       assertDiscovery(discovery, contestant);
       const connectorReadiness = typeof connector.evaluationReadiness === "function"
         ? await connector.evaluationReadiness() : { isolated_tenant_slots: 1, safe_parallelism: 1 };
       const healthy = new Set(["reachable", "ready", "healthy", "ok"]).has(String(discovery.health?.status ?? "").toLowerCase());
       const twinReady = connectorReadiness.external_twin_ready === true;
-      const trialWallclockMs = Number(budget?.wallclock_ms);
+      const trialWallclockMs = Object.hasOwn(budget ?? {}, "max_duration_seconds")
+        ? Number(budget.max_duration_seconds) * 1000 : Number(budget?.wallclock_ms);
       const candidateMaxRunMs = Number(connectorReadiness.budget_contract?.max_run_ms);
       const budgetObservable = connectorReadiness.budget_contract?.observable === true &&
         Number.isFinite(candidateMaxRunMs) && candidateMaxRunMs > 0;
@@ -150,17 +153,26 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         ? candidateMaxRunMs <= trialWallclockMs : null;
       const budgetNative = connectorReadiness.budget_contract?.native_enforcement === true;
       const budgetContractConsistent = connectorReadiness.budget_contract?.deployment_declaration_matches !== false;
-      const dimensionAlignment = nativeBudgetAlignment(budget, connectorReadiness.budget_contract?.dimensions);
+      const openResourceRequired = resourcePolicy?.candidate_limit_source === "product_public_maximum";
+      const publicOpenResource = connectorReadiness.budget_contract?.open_resource_policy ?? {};
+      const openResourceDeclared = publicOpenResource.supported === true &&
+        publicOpenResource.limits_are_safety_fuses_only === true && publicOpenResource.usage_affects_score === false &&
+        publicOpenResource.efficiency_reporting_only === true && publicOpenResource.case_specific_limits === false;
+      const dimensionAlignment = nativeBudgetAlignment(budget, connectorReadiness.budget_contract?.dimensions,
+        { requireFullEnvelope: openResourceRequired });
       const limitations = [];
       if (!budgetObservable) limitations.push("candidate_max_run_time_not_public");
       if (!budgetNative) limitations.push("candidate_budget_not_natively_enforced");
       if (!budgetContractConsistent) limitations.push("candidate_budget_declaration_drift");
-      if (dimensionAlignment.aligned === false) limitations.push("candidate_budget_would_be_clamped_by_product");
+      if (dimensionAlignment.aligned === false) limitations.push(openResourceRequired
+        ? "candidate_resource_not_full_product_envelope" : "candidate_budget_would_be_clamped_by_product");
       if (dimensionAlignment.aligned === null) limitations.push("candidate_budget_dimension_alignment_unknown");
+      if (openResourceRequired && !openResourceDeclared) limitations.push("candidate_open_resource_declaration_missing");
       if (discovery.usage_observability?.complete !== true) limitations.push("candidate_usage_partially_observable");
       const hardReady = healthy && connectorReadiness.identities_separated === true &&
         connectorReadiness.tenant_bound === true && connectorReadiness.least_privilege === true &&
-        (!requiresTwin || twinReady) && budgetAligned !== false && dimensionAlignment.aligned !== false && budgetContractConsistent;
+        (!requiresTwin || twinReady) && budgetAligned !== false && dimensionAlignment.aligned !== false && budgetContractConsistent &&
+        (!openResourceRequired || openResourceDeclared);
       const formalReady = hardReady && budgetAligned === true && dimensionAlignment.aligned === true && budgetNative &&
         (contestant.binding_requirement !== "PRODUCT_NATIVE_ACK" || discovery.native_run_context_supported === true);
       return {
@@ -190,6 +202,8 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
           native_enforcement: budgetNative,
           enforced_dimensions: connectorReadiness.budget_contract?.dimensions ?? null,
           dimension_alignment: dimensionAlignment,
+          open_resource_required: openResourceRequired,
+          open_resource_policy: publicOpenResource,
           deployment_declaration_matches: budgetContractConsistent,
           cancellation_supported: connectorReadiness.budget_contract?.cancellation_supported === true,
           source: connectorReadiness.budget_contract?.source ?? "not-declared" },

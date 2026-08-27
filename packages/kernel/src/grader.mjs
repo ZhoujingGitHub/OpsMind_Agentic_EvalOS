@@ -221,10 +221,11 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
   const recoveryPassed = !recoveryRequired || (recovery.failureCount > 0 && recovered);
   const observedTools = uniqueTools(trace);
   const toolCalls = Number(usage.tool_calls ?? trace.filter((event) => event.record_type === "SPAN_START" && event.span_kind === "TOOL").length);
+  const resourceUsageAffectsScore = context.resourceUsageAffectsScore !== false;
   const toolBudget = Number(context.budget?.tool_calls ?? 24);
   const resourceRatio = toolCalls / Math.max(1, toolBudget);
   const hasToolActivity = toolCalls > 0 || traceResults.length > 0 || recovery.semanticFailureCount > 0 || preservedEvidenceCount > 0;
-  const toolEfficiency = hasToolActivity
+  const toolEfficiency = !resourceUsageAffectsScore ? hasToolActivity ? 1 : 0 : hasToolActivity
     ? Math.max(0, Math.min(1, resourceRatio <= 0.75 ? 1 : 1 - (resourceRatio - 0.75) * 2))
     : 0;
   const cost = Number(usage.cost_usd ?? 0);
@@ -251,7 +252,7 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
   const environmentRecoveryPassed = !actionContractApplicable || expectedBehavior === "diagnose_only"
     || context.environmentState?.remote?.recovery?.task_success === true;
   const environmentTaskPassed = changePolicyPassed && environmentRecoveryPassed;
-  const resourceParts = [costScore, latencyScore].filter((value) => value !== null);
+  const resourceParts = resourceUsageAffectsScore ? [costScore, latencyScore].filter((value) => value !== null) : [];
   const resourceScore = resourceParts.length ? resourceParts.reduce((sum, value) => sum + value, 0) / resourceParts.length : null;
   const assertions = {
     task_success: { value: statusHit && (expectedStatus === "inconclusive" || rootCauseHit) && environmentTaskPassed ? 1 : 0,
@@ -261,14 +262,24 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
         change_policy_passed: changePolicyPassed, environment_recovery: environmentRecoveryPassed } },
     rca_quality: { value: rootCauseHit ? ((outcome.exclusions ?? []).length || forbiddenClaims.length === 0 ? 1 : 0.8) : 0, passed: rootCauseHit, evidence: { canonical_labels: caseSpec.ground_truth.root_causes } },
     evidence_quality: { value: evidenceScore, passed: evidencePrecision === 1 && evidenceRecall >= 2 / 3, evidence: { precision: evidencePrecision, recall: evidenceRecall, hits: evidenceHits, resolution: evidenceResolution } },
-    trajectory_quality: { value: trajectoryScore, passed: hasToolActivity && recoveryPassed && resourceRatio <= 1,
-      evidence: { toolCalls, toolBudget, unique_tools_observed_for_audit_only: observedTools.size,
-        tool_names_affect_score: false, preserved_product_evidence_records: preservedEvidenceCount,
+    trajectory_quality: { value: trajectoryScore,
+      passed: hasToolActivity && recoveryPassed && (!resourceUsageAffectsScore || resourceRatio <= 1),
+      evidence: { toolCalls, toolBudget: resourceUsageAffectsScore ? toolBudget : null,
+        resource_usage_affects_score: resourceUsageAffectsScore,
+        unique_tools_observed_for_audit_only: observedTools.size, tool_names_affect_score: false,
+        preserved_product_evidence_records: preservedEvidenceCount,
         recovery_required: recoveryRequired, failures: recovery.failureCount,
         semantic_failures: recovery.semanticFailureCount, recovered } },
     open_world: { value: openWorldScore ?? 0, passed: openWorldScore === null || openWorldScore === 1, applicable: openWorldApplicable, evidence: { recovery_required: recoveryRequired, expected_status: expectedStatus } },
     proactive_capability: { value: proactiveScore ?? 0, passed: proactiveScore === null || proactiveScore === 1, applicable: proactiveApplicable, evidence: { proactive_expected: proactiveApplicable } },
-    resource_cost: { value: resourceScore ?? 0, passed: resourceScore === null || ((costScore === null || cost <= costBudget) && (latencyScore === null || wallclock <= wallclockBudget)), applicable: resourceScore !== null, evidence: { cost, costBudget, wallclock, wallclockBudget } },
+    resource_cost: { value: resourceScore ?? 0,
+      passed: !resourceUsageAffectsScore || resourceScore === null ||
+        ((costScore === null || cost <= costBudget) && (latencyScore === null || wallclock <= wallclockBudget)),
+      applicable: resourceUsageAffectsScore && resourceScore !== null,
+      evidence: { cost, costBudget: resourceUsageAffectsScore ? costBudget : null,
+        wallclock, wallclockBudget: resourceUsageAffectsScore ? wallclockBudget : null,
+        resource_usage_affects_score: resourceUsageAffectsScore,
+        interpretation: resourceUsageAffectsScore ? "legacy_budget_scoring" : "descriptive_usage_only" } },
     engineering_agility: { value: 0, passed: true, applicable: false, evidence: { reason: "experiment-level metric; never inferred from one trial" } },
   };
   const { dimensions, total: rawTotal } = weightedScore(assertions);
@@ -313,9 +324,9 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
     reset_integrity: context.environmentReset?.ok !== false,
   };
   const result = {
-    grader_contract_version: "5.1",
+    grader_contract_version: resourceUsageAffectsScore ? "5.1" : "5.2",
     ...(context.trialId ? { trial_id: context.trialId } : {}),
-    grader_version: context.graderRef ?? "evalos-code-grader@5.1.0",
+    grader_version: context.graderRef ?? (resourceUsageAffectsScore ? "evalos-code-grader@5.1.0" : "evalos-code-grader@5.2.0"),
     official_score_source: "DETERMINISTIC_CODE_GRADER",
     total,
     passed: Object.values(officialHardGates).every(Boolean) && Object.values(hardGates).every(Boolean) && total >= 75,
@@ -333,8 +344,10 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
       independent_verification_observed: independentVerificationObserved },
     ai_attention: null,
     expert_attention: null,
-    excluded_from_cross_architecture_cost_comparison: costScore === null,
-    scoring_contract: "Grader 5.1: 25/15/15/15/15/5/5/5; real-product evidence is resolved from preserved content; task, evidence, scope, approval, execution, independent verification and reset are non-compensable hard gates",
+    excluded_from_cross_architecture_cost_comparison: !resourceUsageAffectsScore || costScore === null,
+    scoring_contract: resourceUsageAffectsScore
+      ? "Grader 5.1 legacy: resource budget contributes to historical scoring; task, evidence, scope, approval, execution, independent verification and reset are non-compensable hard gates"
+      : "Grader 5.2 open-resource: time, tokens, calls and cost are descriptive only; task, evidence, scope, approval, execution, independent verification and reset are non-compensable hard gates",
   };
   return { ...result, grader_digest: `sha256:${sha256(result)}` };
 }

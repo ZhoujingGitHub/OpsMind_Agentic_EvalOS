@@ -15,6 +15,7 @@ const runner = read("packages/kernel/src/runner.mjs");
 const grader = read("packages/kernel/src/grader.mjs");
 const failurePolicy = read("packages/kernel/src/failure-policy.mjs");
 const statistics = read("packages/kernel/src/statistics.mjs");
+const resourceProfile = read("packages/kernel/src/budget-profile.mjs");
 const twinEnvironment = read("packages/twin-runtime/src/environment.mjs");
 const packageFiles = ["package.json", "packages/agent-runtime/package.json", "apps/console/package.json"]
   .map(read).join("\n");
@@ -56,7 +57,8 @@ assert.match(app, /createLangGraphProductConnector/);
 assert.match(app, /createTestDouble\("test-double-a"/);
 assert.match(app, /test-double-a:ENGINEERING_TEST/);
 assert.match(runner, /buildEvaluationContract/);
-assert.match(grader, /grader_contract_version:\s*"5\.1"/);
+assert.match(grader, /resourceUsageAffectsScore \? "5\.1" : "5\.2"/);
+assert.match(grader, /descriptive only/);
 assert.match(grader, /DETERMINISTIC_CODE_GRADER/);
 assert.match(twinEnvironment, /ExternalProductTwinEnvironment/);
 assert.match(twinEnvironment, /real candidate product must invoke its own MCP tools/i);
@@ -93,8 +95,9 @@ for (const contestant of formal.contestants) {
   assert.equal(attestation?.artifact_digest, contestant.artifact_digest,
     `${contestant.ref} 的可信部署镜像摘要必须与 Manifest 冻结身份一致`);
 }
-assert.equal(formal.budget.output_tokens, 65536,
-  "双模型考生的统一冻结输出预算必须覆盖已验证的公开终态用量，同时对两名考生保持相同上限");
+assert.match(resourceProfile, /evalos-candidate-open-resource\/1\.0/);
+assert.match(resourceProfile, /cross_architecture_equal_limits_required/);
+assert.match(resourceProfile, /usage_affects_score/);
 
 for (const removed of [
   "packages/agent-runtime/src/deepseek-claude-adapter.mjs",
@@ -118,4 +121,4 @@ assert.match(statistics, /clusteredPairedBootstrap/);
 assert.match(app, /trial.infrastructure_retry_scheduled/);
 assert.match(app, /decision_report_digest/);
 assert.match(app, /evalos-operations-health.1/);
-console.log("M3.2 架构检查通过：EvalOS 保持 Claude Agent SDK + DeepSeek V4 Flash 开放式单 Agent；Manifest 8 分架构冻结原生预算和收尾信封，Manifest 7/6 只读保留历史证据。");
+console.log("M3.2 架构检查通过：EvalOS 保持 Claude Agent SDK + DeepSeek V4 Flash 开放式单 Agent；Manifest 8 按架构开放产品最大资源且用量不评分，Manifest 7/6 只读保留历史证据。");

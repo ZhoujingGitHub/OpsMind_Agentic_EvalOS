@@ -92,8 +92,9 @@ test("工作台明确Agent自主性、确定性评分、源码快照和只读AI�
   assert.match(source, /原结果与新结果对比/);
   assert.match(source, /平台运行健康（Operations health）/);
   assert.match(source, /数字孪生（Twin）/);
-  assert.match(source, /候选最长运行/);
-  assert.match(source, /考生最长运行不超过 Trial 时间预算（Budget alignment）/);
+  assert.match(source, /产品安全熔断/);
+  assert.match(source, /已给满产品公开最大资源（Open resources）/);
+  assert.match(source, /资源上限仅作安全熔断且用量不评分（Safety fuse）/);
   assert.match(source, /这次失败算在谁头上（Failure ownership）/);
   assert.match(source, /考生没有公开的数据明确显示“未提供”，绝不按 0 计算/);
   assert.match(source, /实时调查进展（Live progress）/);

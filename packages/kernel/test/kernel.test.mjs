@@ -732,6 +732,24 @@ test("确定性评分不要求固定工具顺序且工程敏捷不从单Trial伪
   assert.match(score.scoring_contract, /approval, execution, independent verification and reset are non-compensable hard gates/);
 });
 
+test("Grader 5.2开放资源模式不因耗时、Token、工具次数或费用不同改变成绩", () => {
+  const caseSpec = CASES["PILOT-REG-001"];
+  const outcome = { status: "resolved", root_cause: "UDM subscriber provisioning fault",
+    evidence_refs: [...caseSpec.ground_truth.required_evidence], exclusions: ["gnb-radio-outage"], next_checks: [] };
+  const context = { resourceUsageAffectsScore: false,
+    budget: { tool_calls: 24, wallclock_ms: 60000, cost_usd: 1 } };
+  const low = gradeTrial(caseSpec, outcome, [],
+    { tool_calls: 4, wallclock_ms: 2000, cost_usd: 0.05 }, context);
+  const high = gradeTrial(caseSpec, outcome, [],
+    { tool_calls: 120, wallclock_ms: 900000, cost_usd: 12 }, context);
+  assert.equal(low.total, high.total);
+  assert.equal(low.grader_contract_version, "5.2");
+  assert.equal(low.assertions.resource_cost.applicable, false);
+  assert.equal(high.assertions.trajectory_quality.passed, true);
+  assert.equal(high.assertions.trajectory_quality.evidence.resource_usage_affects_score, false);
+  assert.equal(high.excluded_from_cross_architecture_cost_comparison, true);
+});
+
 test("Grader 5.1按真实考生保全的证据内容评分而不要求内部证据编号或工具名", () => {
   const caseSpec = M3_CASES["M3-PUB-001"];
   const outcome = { status: "resolved", root_cause: caseSpec.ground_truth.root_causes[0],

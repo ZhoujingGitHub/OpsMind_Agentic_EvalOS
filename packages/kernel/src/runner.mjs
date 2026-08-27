@@ -265,6 +265,7 @@ export class TrialRunner {
       const gradeSpan = this.store.startSpan(trial.id, "grader.code", "EVALUATOR", "code-grader", {}, rootSpan);
       const grading = this.gradingService.grade({
         trialId: trial.id, caseRef: trial.case_ref, outcome, trace: traceBeforeGrade, usage, budget: trial.budget,
+        resourceUsageAffectsScore: experiment.manifest.candidate_resource_contract?.policy?.usage_affects_score !== false,
         environmentState: environmentBeforeReset, environmentReset,
       });
       this.store.addGraderRun(trial.id, { graderRef: grading.grader_ref, graderType: "code", dimension: "overall", result: grading.result });

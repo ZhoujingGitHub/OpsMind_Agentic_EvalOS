@@ -124,7 +124,7 @@ test("Candidate Adapter 5.0不把仅公开数值但未原生强制的预算当�
   assert.ok(check.limitations.includes("candidate_budget_not_natively_enforced"));
 });
 
-test("Candidate Adapter 5.0逐维核对冻结预算，拒绝产品用更低原生上限静默截断校准", async () => {
+test("Candidate Adapter 5.0逐维核对冻结资源，拒绝产品用更低原生上限静默截断", async () => {
   const base = connector("PRODUCT_NATIVE_ACK");
   const bounded = { ...base,
     discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "EXTERNAL_PRODUCT",
@@ -147,6 +147,44 @@ test("Candidate Adapter 5.0逐维核对冻结预算，拒绝产品用更低原�
   assert.equal(check.budget.dimension_alignment.aligned, false);
   assert.equal(check.budget.dimension_alignment.checks.max_tool_calls.aligned, false);
   assert.ok(check.limitations.includes("candidate_budget_would_be_clamped_by_product"));
+});
+
+test("Candidate Adapter 5.0开放资源模式必须给满产品公开资源且产品声明用量不评分", async () => {
+  const base = connector("PRODUCT_NATIVE_ACK");
+  const dimensions = { max_duration_seconds: 1800, max_tool_calls: 128, max_model_calls: 64,
+    max_tokens: 1000000, max_cost_microunits: 20000000, max_result_bytes: 8388608 };
+  const openPolicy = { supported: true, contract_version: "opsmind-open-resource/1.0",
+    mode: "open_with_safety_fuses", limits_are_safety_fuses_only: true, usage_affects_score: false,
+    efficiency_reporting_only: true, case_specific_limits: false };
+  const open = { ...base,
+    discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "EXTERNAL_PRODUCT",
+      production_writes_available: false, health: { status: "healthy" }, native_run_context_supported: true,
+      usage_observability: { complete: false }, ...FINGERPRINTS }),
+    evaluationReadiness: async () => ({ identities_separated: true, tenant_bound: true, least_privilege: true,
+      isolated_tenant_slots: 1, safe_parallelism: 1, external_twin_ready: true,
+      budget_contract: { observable: true, max_run_ms: 1800000, native_enforcement: true, dimensions,
+        deployment_declaration_matches: true, open_resource_policy: openPolicy } }),
+  };
+  const adapter = createCandidateAdapterV5({ id: "candidate", connector: open });
+  const resourcePolicy = { candidate_limit_source: "product_public_maximum" };
+  const full = await adapter.preflight({ contestant: contract("PRODUCT_NATIVE_ACK").contestant,
+    requiresTwin: true, budget: dimensions, resourcePolicy });
+  assert.equal(full.ready, true);
+  assert.equal(full.formal_ready, true);
+  assert.equal(full.budget.dimension_alignment.aligned, true);
+  const reduced = await adapter.preflight({ contestant: contract("PRODUCT_NATIVE_ACK").contestant,
+    requiresTwin: true, budget: { ...dimensions, max_tool_calls: 24 }, resourcePolicy });
+  assert.equal(reduced.ready, false);
+  assert.ok(reduced.limitations.includes("candidate_resource_not_full_product_envelope"));
+  const missingDeclaration = { ...open,
+    evaluationReadiness: async () => ({ ...(await open.evaluationReadiness()),
+      budget_contract: { ...(await open.evaluationReadiness()).budget_contract,
+        open_resource_policy: { supported: false } } }) };
+  const missing = createCandidateAdapterV5({ id: "candidate", connector: missingDeclaration });
+  const blocked = await missing.preflight({ contestant: contract("PRODUCT_NATIVE_ACK").contestant,
+    requiresTwin: true, budget: dimensions, resourcePolicy });
+  assert.equal(blocked.ready, false);
+  assert.ok(blocked.limitations.includes("candidate_open_resource_declaration_missing"));
 });
 
 test("Candidate Adapter 5.0按不可变source_ref去重轮询重放且拒绝证据漂移", async () => {
