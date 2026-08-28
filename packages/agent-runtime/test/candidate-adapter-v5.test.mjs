@@ -9,6 +9,10 @@ const FINGERPRINTS = Object.freeze({
   runtime_manifest_digest: `sha256:${"3".repeat(64)}`,
   capability_contract_digest: `sha256:${"4".repeat(64)}`,
 });
+const CANDIDATE_OBSERVATION_READY = Object.freeze({ ready: true, supported: true,
+  contract_version: "opsmind-candidate-observation/1.0", binding_status: "ready" });
+const MODEL_VISIBLE_RESULT_READY = Object.freeze({ supported: true,
+  contract_version: "opsmind-model-visible-result/1.0", silent_truncation: false });
 
 function contract(bindingRequirement = "EVIDENCE_CHAIN_BOUND") {
   return { run_class: "REAL_CANDIDATE", evaluation_lane: "PRODUCT_RELIABILITY",
@@ -91,6 +95,7 @@ test("Candidate Adapter 5.0在产品公开预算与部署声明漂移时阻止�
       usage_observability: { complete: false }, ...FINGERPRINTS }),
     evaluationReadiness: async () => ({ identities_separated: true, tenant_bound: true, least_privilege: true,
       isolated_tenant_slots: 1, safe_parallelism: 1, external_twin_ready: true,
+      candidate_observation: CANDIDATE_OBSERVATION_READY, model_visible_result: MODEL_VISIBLE_RESULT_READY,
       budget_contract: { observable: true, max_run_ms: 900, native_enforcement: true,
         dimensions: { max_tool_calls: 24 }, deployment_declaration_matches: false } }),
   };
@@ -112,6 +117,7 @@ test("Candidate Adapter 5.0不把仅公开数值但未原生强制的预算当�
       usage_observability: { complete: true }, ...FINGERPRINTS }),
     evaluationReadiness: async () => ({ identities_separated: true, tenant_bound: true, least_privilege: true,
       isolated_tenant_slots: 1, safe_parallelism: 1, external_twin_ready: true,
+      candidate_observation: CANDIDATE_OBSERVATION_READY, model_visible_result: MODEL_VISIBLE_RESULT_READY,
       budget_contract: { observable: true, max_run_ms: 900, native_enforcement: false,
         dimensions: { max_tool_calls: 24 }, deployment_declaration_matches: true } }),
   };
@@ -132,6 +138,7 @@ test("Candidate Adapter 5.0逐维核对冻结资源，拒绝产品用更低原�
       usage_observability: { complete: true }, ...FINGERPRINTS }),
     evaluationReadiness: async () => ({ identities_separated: true, tenant_bound: true, least_privilege: true,
       isolated_tenant_slots: 1, safe_parallelism: 1, external_twin_ready: true,
+      candidate_observation: CANDIDATE_OBSERVATION_READY, model_visible_result: MODEL_VISIBLE_RESULT_READY,
       budget_contract: { observable: true, max_run_ms: 120000, native_enforcement: true,
         dimensions: { max_duration_seconds: 120, max_tool_calls: 20, max_model_calls: 10,
           max_tokens: 10000, max_cost_microunits: 500000, max_result_bytes: 4096 },
@@ -162,6 +169,7 @@ test("Candidate Adapter 5.0开放资源模式必须给满产品公开资源且�
       usage_observability: { complete: false }, ...FINGERPRINTS }),
     evaluationReadiness: async () => ({ identities_separated: true, tenant_bound: true, least_privilege: true,
       isolated_tenant_slots: 1, safe_parallelism: 1, external_twin_ready: true,
+      candidate_observation: CANDIDATE_OBSERVATION_READY, model_visible_result: MODEL_VISIBLE_RESULT_READY,
       budget_contract: { observable: true, max_run_ms: 2000000, native_enforcement: true, dimensions,
         deployment_declaration_matches: true, open_resource_policy: openPolicy } }),
   };

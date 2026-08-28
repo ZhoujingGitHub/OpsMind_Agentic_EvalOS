@@ -1,4 +1,5 @@
 const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const CONTEXT_REF = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/;
 const CAPABILITIES = new Set(["health", "logs", "sessions", "processes", "pcap_summary", "connectivity", "subscriber", "metrics"]);
 const ACTION_CONTRACTS = Object.freeze({
   subscriber_profile: { source: ["reference_profile"] },
@@ -19,7 +20,9 @@ const OBSERVATION_PROFILES = new Set([
   "regression-first-observation-fails",
 ]);
 const REGRESSION_FAILURE_MODES = new Set(["source_unavailable", "timeout"]);
-const MANAGER_OPERATIONS = new Set(["status", "prepare", "snapshot", "reset"]);
+const MANAGER_OPERATIONS = new Set([
+  "status", "prepare", "snapshot", "reset", "candidate_health", "candidate_observe", "candidate_authorize",
+]);
 const MANAGED_CONTESTANTS = Object.freeze({
   "agent-harness-v2": "ah-",
   "langgraph-v1": "lg-",
@@ -66,7 +69,7 @@ export function validateTwinManagerRequest(request) {
   if (!MANAGER_OPERATIONS.has(request.operation)) throw new Error(`Unsupported Twin manager operation: ${request.operation}`);
   const prefix = MANAGED_CONTESTANTS[request.contestant_ref];
   if (!prefix) throw new Error(`Unsupported managed contestant: ${request.contestant_ref}`);
-  if (request.operation !== "status") {
+  if (!["status", "candidate_health", "candidate_observe", "candidate_authorize"].includes(request.operation)) {
     if (!ID.test(String(request.trial_id ?? "")) || !String(request.trial_id).startsWith(prefix)) {
       throw new Error(`Managed Twin trial_id must start with ${prefix}`);
     }
@@ -79,6 +82,28 @@ export function validateTwinManagerRequest(request) {
     if (request.observation_profile === "regression-first-observation-fails"
       && !REGRESSION_FAILURE_MODES.has(request.regression_failure_mode)) {
       throw new Error("Invalid managed Twin regression_failure_mode");
+    }
+    if (!ID.test(String(request.evalos_trial_id ?? ""))) throw new Error("Invalid EvalOS trial_id for candidate binding");
+    if (!/^sha256:[a-f0-9]{64}$/.test(String(request.context_digest ?? ""))) {
+      throw new Error("Invalid candidate context_digest");
+    }
+    if (!CONTEXT_REF.test(String(request.environment_ref ?? ""))) throw new Error("Invalid candidate environment_ref");
+    if (!Array.isArray(request.resource_refs) || request.resource_refs.length === 0) {
+      throw new Error("Candidate resource_refs are required");
+    }
+    if (!Array.isArray(request.service_ids) || request.service_ids.length === 0 ||
+        request.service_ids.some((value) => !CONTEXT_REF.test(String(value)))) {
+      throw new Error("Candidate service_ids are required");
+    }
+  }
+  if (request.operation === "candidate_observe" &&
+      (!request.candidate_request || typeof request.candidate_request !== "object" || Array.isArray(request.candidate_request))) {
+    throw new Error("candidate_observe requires candidate_request");
+  }
+  if (request.operation === "candidate_authorize") {
+    if (request.contestant_ref !== "langgraph-v1" || typeof request.public_key !== "string" ||
+        !request.public_key.startsWith("ssh-ed25519 ") || typeof request.expires_at !== "string") {
+      throw new Error("candidate_authorize requires a LangGraph Ed25519 public key and expiry");
     }
   }
   if (request.seed !== undefined && !Number.isSafeInteger(Number(request.seed))) {

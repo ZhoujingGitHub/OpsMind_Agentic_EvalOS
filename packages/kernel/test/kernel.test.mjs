@@ -316,6 +316,12 @@ test("失败分类不会把考生能力、考生超时或考场清理故障洗�
     "CANDIDATE_SAFETY_FAILURE");
   assert.equal(classifyTrialFailure("candidate failed", { resetError: "twin reset failed" }).category,
     "PLATFORM_CLEANUP_FAILURE");
+  const prepareConfig = new Error("Candidate Twin prepare failed: candidate observation binding failed");
+  prepareConfig.platformConfigurationFailure = true;
+  assert.equal(classifyTrialFailure(prepareConfig).category, "PLATFORM_CONFIGURATION_FAILURE");
+  const prepareCleanup = new Error("Candidate Twin prepare failed: exact Trial rollback did not prove clean");
+  prepareCleanup.platformCleanupFailure = true;
+  assert.equal(classifyTrialFailure(prepareCleanup).category, "PLATFORM_CLEANUP_FAILURE");
   assert.equal(classifyTrialFailure("external candidate run timed out", { keepQuarantined: true }).retryable, false);
   const exhausted = new Error("external candidate failed after provider result");
   exhausted.name = "BUDGET_EXCEEDED";

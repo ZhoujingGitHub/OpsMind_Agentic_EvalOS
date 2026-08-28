@@ -108,12 +108,17 @@ export class ProtocolTwinEnvironment {
 }
 
 export class ExternalProductTwinEnvironment {
-  constructor({ client, caseSpec, trial }) {
+  constructor({ client, caseSpec, trial, candidateBinding }) {
     if (!client?.invoke) throw new Error("Twin manager client with invoke() is required");
     if (caseSpec?.source?.level !== "L2" || !caseSpec?.environment?.scenario_id) throw new Error("L2 Twin environment contract is required");
     this.client = client;
     this.caseSpec = caseSpec;
     this.trial = trial;
+    if (!candidateBinding?.context_digest || !Array.isArray(candidateBinding?.resource_refs) ||
+        !Array.isArray(candidateBinding?.service_ids)) {
+      throw new Error("External candidate Twin requires a frozen candidate observation binding");
+    }
+    this.candidateBinding = structuredClone(candidateBinding);
     this.managedTrialId = managedTwinTrialId(trial.contestant_ref, trial.id);
     this.prepared = false;
     this.resetDone = false;
@@ -134,9 +139,24 @@ export class ExternalProductTwinEnvironment {
       regression_failure_mode: this.caseSpec.environment.regression_failure_mode,
       overlay_contract_version: this.caseSpec.environment.overlay_contract_version ?? "1.0.0",
       baseline_ref: this.caseSpec.environment.baseline_ref,
+      evalos_trial_id: this.trial.id,
+      context_digest: this.candidateBinding.context_digest,
+      environment_ref: this.candidateBinding.environment_ref,
+      resource_refs: this.candidateBinding.resource_refs,
+      service_ids: this.candidateBinding.service_ids,
     }), "prepare");
-    if (!response.ok) throw new Error(`Candidate Twin prepare failed: ${managerError(response)}`);
+    if (!response.ok) {
+      const error = new Error(`Candidate Twin prepare failed: ${managerError(response)}`);
+      if (response.error?.code === "PREPARE_ROLLBACK_FAILED") {
+        error.platformCleanupFailure = true;
+        error.haltQueue = true;
+      } else {
+        error.platformConfigurationFailure = true;
+      }
+      throw error;
+    }
     if (response.slot_lease_present !== true) throw new Error("Candidate Twin prepare did not issue a private slot lease");
+    if (response.candidate_observation_bound !== true) throw new Error("Candidate Twin prepare did not bind candidate observation");
     this.prepared = true;
     this.fingerprint = response.fingerprint ?? null;
     return {
@@ -150,6 +170,8 @@ export class ExternalProductTwinEnvironment {
       fingerprint: this.fingerprint,
       isolation: response.isolation ?? "external-product-exclusive-trial",
       slot_lease_present: true,
+      candidate_observation_bound: true,
+      candidate_binding_digest: response.candidate_binding_digest ?? null,
     };
   }
 

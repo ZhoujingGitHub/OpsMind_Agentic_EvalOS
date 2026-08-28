@@ -139,6 +139,51 @@ function publicOpenResourcePolicy(...values) {
   return Object.freeze({ supported: true, ...expected });
 }
 
+const CANDIDATE_OBSERVATION_CAPABILITIES = Object.freeze([
+  "runtime_state", "service_health", "sandboxed_readonly_diagnostic",
+]);
+
+function publicCandidateObservation(value, { requireNamespaceScope = false } = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return Object.freeze({ supported: false, ready: false, contract_version: null,
+      limitations: ["candidate_observation_contract_missing"] });
+  }
+  const semantics = Array.isArray(value.semantic_capabilities)
+    ? value.semantic_capabilities
+    : Object.entries(value.semantic_capabilities ?? {}).map(([name, item]) => ({ name, ...item }));
+  const semanticByName = Object.fromEntries(semantics.map((item) => [item.name, item]));
+  const security = value.security_assertions ?? value;
+  const fixed = value.contract_version === "opsmind-candidate-observation/1.0" &&
+    value.mode === "open_with_safety_boundary" && value.binding === "candidate_scoped_trial" &&
+    security.read_only === true && security.trial_scope_enforced === true &&
+    security.cross_trial_access === false && security.management_identity_reused === false &&
+    security.hidden_evaluation_data_exposed === false && security.root_or_privileged_required === false &&
+    security.audited === true && security.limits_are_safety_fuses_only === true &&
+    (!requireNamespaceScope || value.namespace_scope_supported === true);
+  const complete = CANDIDATE_OBSERVATION_CAPABILITIES.every((name) => {
+    const item = semanticByName[name];
+    return item?.available === true && Array.isArray(item.interfaces) && item.interfaces.length > 0 &&
+      Array.isArray(item.resource_types) && item.resource_types.length > 0;
+  });
+  const ready = fixed && complete && ["bound", "ready"].includes(String(value.binding_status));
+  return Object.freeze({ supported: fixed, ready, contract_version: value.contract_version ?? null,
+    binding_status: value.binding_status ?? null, scope_contract_version: value.scope_contract_version ?? null,
+    namespace_scope_supported: value.namespace_scope_supported === true,
+    audit_contract_version: value.audit_contract_version ?? null,
+    semantic_capabilities: semantics, public_dependencies: value.public_dependencies ?? [],
+    external_dependency: value.external_dependency ?? null,
+    limitations: [...(!fixed ? ["candidate_observation_security_contract_invalid"] : []),
+      ...(!complete ? ["candidate_observation_semantic_capability_incomplete"] : []),
+      ...(!["bound", "ready"].includes(String(value.binding_status)) ? ["candidate_observation_binding_not_ready"] : [])] });
+}
+
+function publicModelVisibleResult(value) {
+  const supported = value?.contract_version === "opsmind-model-visible-result/1.0" &&
+    value.silent_truncation === false;
+  return Object.freeze({ supported, contract_version: value?.contract_version ?? null,
+    silent_truncation: value?.silent_truncation ?? null });
+}
+
 function strictInteger(value, name, { allowZero = false } = {}) {
   const number = Number(value);
   if (!Number.isSafeInteger(number) || number < (allowZero ? 0 : 1)) {
@@ -402,7 +447,7 @@ function timeWindow(value) {
   return valid ? { start_at, end_at, timezone: "Asia/Shanghai" } : { timezone: "Asia/Shanghai" };
 }
 
-function frozenEvaluationContext(executionContract) {
+export function candidateEvaluationContext(executionContract) {
   const visible = executionContract.case.visible;
   const privateMaterial = { contract: "evalos-candidate-context.4", trial_id: executionContract.trial.id,
     case_ref: executionContract.trial.case_ref, environment_seed: executionContract.trial.environment_seed,
@@ -414,6 +459,54 @@ function frozenEvaluationContext(executionContract) {
     frozen_dependencies_digest: digest(executionContract.frozen_dependencies ?? {}) };
   return { ...privateMaterial, context_digest: digest(privateMaterial),
     environment_ref: `evalos-twin:${executionContract.trial.id}` };
+}
+
+const TWIN_RESOURCE_TYPES = Object.freeze({
+  "twin-t1": "runtime",
+  "gnb-1": "workload",
+  "ue-1": "workload",
+  amf: "service",
+  smf: "service",
+  upf: "service",
+  nrf: "service",
+  mongodb: "service",
+  n2: "network_path",
+  n3: "network_path",
+  n4: "network_path",
+  n6: "network_path",
+  dns: "service",
+});
+
+export function candidateResourceReferences(executionContract, namespace) {
+  if (typeof namespace !== "string" || !namespace) throw new Error("candidate observation namespace is required");
+  const scope = executionContract.case.visible.scope ?? {};
+  const resourceIds = [...new Set(scope.resource_ids ?? scope.entity_ids ?? [])];
+  return resourceIds.map((resourceId) => {
+    const resourceType = TWIN_RESOURCE_TYPES[resourceId];
+    if (!resourceType) throw new Error(`candidate observation resource type is not frozen: ${resourceId}`);
+    return { identifier_domain: "opsmind-twin", namespace, resource_type: resourceType, resource_id: resourceId };
+  });
+}
+
+export function candidateServiceIdentifiers(executionContract) {
+  const scope = executionContract.case.visible.scope ?? {};
+  const values = scope.service_ids ?? (scope.service_id ? [scope.service_id] : []);
+  const serviceIds = [...new Set(values.map((value) => String(value).trim()).filter(Boolean))];
+  if (serviceIds.some((value) => !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/.test(value))) {
+    throw new Error("candidate observation service identifier is invalid");
+  }
+  return serviceIds;
+}
+
+export function candidateManagedNamespace(executionContract) {
+  const prefix = { "agent-harness-v2": "ah-", "langgraph-v1": "lg-" }[executionContract.contestant.ref];
+  if (!prefix) throw new Error(`candidate observation contestant is not managed: ${executionContract.contestant.ref}`);
+  const suffix = String(executionContract.trial.id ?? "").replace(/[^A-Za-z0-9._:-]/g, "-");
+  const namespace = `${prefix}${suffix}`.slice(0, 128);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(namespace)) {
+    throw new Error("candidate observation managed namespace is invalid");
+  }
+  return namespace;
 }
 
 function submissionReceipt({ runRef, expected, idempotencyKey, requestBody, channel }) {
@@ -612,7 +705,7 @@ function discovery(attestation, architecture, capability, runtime, health, candi
 }
 
 function agentHarnessSubmission(executionContract, nativeContract) {
-  const context = frozenEvaluationContext(executionContract);
+  const context = candidateEvaluationContext(executionContract);
   const scope = executionContract.case.visible.scope ?? {};
   const candidateRuntime = executionContract.contestant.candidate_runtime;
   const limits = nativeContract?.budget_limits;
@@ -637,17 +730,18 @@ function agentHarnessSubmission(executionContract, nativeContract) {
   }));
   const runtimeVersion = candidateRuntime?.versions?.service;
   if (!runtimeVersion) throw new Error("Agent+Harness public service version is required for native run context");
+  const resourceRefs = candidateResourceReferences(executionContract, candidateManagedNamespace(executionContract));
   return { goal: executionContract.case.goal, trigger_type: "natural_language",
     source_ref: `evalos:${executionContract.trial.id}:${context.context_digest.slice(-16)}`, priority: 70,
     scope_hint: { customer_id: scope.customer_id, service_id: scope.service_id, site_id: scope.site_id,
-      entity_ids: scope.entity_ids ?? scope.resource_ids ?? [], source_page: `/evalos/trials/${executionContract.trial.id}` },
+      resource_refs: resourceRefs, source_page: `/evalos/trials/${executionContract.trial.id}` },
     time_window: timeWindow(executionContract.case.visible.time_window), seed_evidence_refs: [], freshness: "fresh",
     run_context: { trial_id: executionContract.trial.id, context_digest: context.context_digest.replace(/^sha256:/, ""),
       environment_ref: context.environment_ref, runtime_version: runtimeVersion, budget } };
 }
 
 function langGraphSubmission(executionContract, nativeContract = null) {
-  const context = frozenEvaluationContext(executionContract);
+  const context = candidateEvaluationContext(executionContract);
   const scope = executionContract.case.visible.scope ?? {};
   const productLimits = nativeContract?.supported === true ? nativeContract.budget_limits : {
     max_duration_seconds: 86400, max_tool_calls: 1000, max_model_calls: 1000,
@@ -677,6 +771,7 @@ function langGraphSubmission(executionContract, nativeContract = null) {
   return { goal: executionContract.case.goal, trigger_type: "user", title: `EvalOS ${executionContract.trial.id}`,
     resource_ids: scope.resource_ids ?? scope.entity_ids ?? [],
     service_ids: scope.service_ids ?? (scope.service_id ? [scope.service_id] : []),
+    namespace_ids: [candidateManagedNamespace(executionContract)],
     time_window: timeWindow(executionContract.case.visible.time_window), client_request_id: executionContract.trial.id,
     run_context: { trial_id: executionContract.trial.id, source_system: "evalos",
       contract_version: "evalos-product-run-binding.3", budget,
@@ -741,7 +836,9 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
       const approverScoped = permission(approver, "approve_action") && !permission(approver, "investigate") &&
         !permission(approver, "manage_users") && !permission(approver, "manage_roles");
       const administratorScoped = permission(administrator, "manage_roles") || permission(administrator, "platform_admin");
-      const twinReady = protocolLab.configured === true && protocolLab.connected === true;
+      const candidateObservation = publicCandidateObservation(capability.candidate_observation);
+      const modelVisibleResult = publicModelVisibleResult(capability.model_visible_result_contract);
+      const twinReady = protocolLab.configured === true && protocolLab.connected === true && candidateObservation.ready;
       const publicMaxRunMs = latestNativeContract.supported
         ? latestNativeContract.budget_limits.max_duration_seconds * 1000 : null;
       const deploymentDeclarationMatches = !runtimeLimits.observable ||
@@ -754,7 +851,9 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
           approver_least_privilege: approverScoped, administrator_authorized: administratorScoped },
         external_twin_ready: twinReady, twin: { configured: protocolLab.configured === true,
           connected: protocolLab.connected === true, slot_id: protocolLab.slot_id ?? null,
-          roles: protocolLab.roles ?? [], summary: protocolLab.summary ?? null },
+          roles: protocolLab.roles ?? [], summary: protocolLab.summary ?? null,
+          candidate_observation: candidateObservation, model_visible_result: modelVisibleResult },
+        candidate_observation: candidateObservation, model_visible_result: modelVisibleResult,
         budget_contract: { ...runtimeLimits, observable: latestNativeContract.supported,
           max_run_ms: publicMaxRunMs, native_enforcement: latestNativeContract.supported,
           deployment_declaration_matches: deploymentDeclarationMatches,
@@ -786,6 +885,12 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         ...(capability.native_tool_availability?.contract_version ? {
           native_tool_availability: String(capability.native_tool_availability.contract_version),
         } : {}),
+        ...(capability.candidate_observation?.contract_version ? {
+          candidate_observation: String(capability.candidate_observation.contract_version),
+        } : {}),
+        ...(capability.model_visible_result_contract?.contract_version ? {
+          model_visible_result: String(capability.model_visible_result_contract.contract_version),
+        } : {}),
         run_context: String(capability.run_context_contract_version ?? runtime.run_context_contract_version ?? "unknown"),
         run_budget: String(capability.run_budget_contract_version ?? runtime.run_budget_contract_version ?? "unknown"),
         run_usage: String(capability.run_usage_contract_version ?? runtime.run_usage_contract_version ?? "unknown") } };
@@ -804,6 +909,8 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         run_budget_contract_version: latestNativeContract.versions.run_budget,
         run_usage_contract_version: latestNativeContract.versions.run_usage,
         product_budget_limits: latestNativeContract.budget_limits,
+        candidate_observation: publicCandidateObservation(capability.candidate_observation),
+        model_visible_result: publicModelVisibleResult(capability.model_visible_result_contract),
         capability_versions: candidateRuntime.versions, production_writes_available: false };
       return discovery(frozen, "CLAUDE_AGENT_SDK_HARNESS", capability, stableRuntime,
         { status: health.status ?? "reachable", active_count: runtime.active_count,
@@ -991,8 +1098,11 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
       const administratorScoped = administratorRoles.has("tenant_admin") || administratorRoles.has("platform_admin");
       const twinConnector = (ready.connectors ?? []).find((item) =>
         /(?:open5gs|ueransim|protocol-lab)/i.test(String(item.connector_id ?? item.name ?? "")));
+      const candidateObservation = publicCandidateObservation(automation.candidate_observation,
+        { requireNamespaceScope: true });
+      const modelVisibleResult = publicModelVisibleResult(automation.model_visible_result);
       const externalTwinReady = Boolean(twinConnector) && ["healthy", "ready", "ok"]
-        .includes(String(twinConnector.status ?? "").toLowerCase());
+        .includes(String(twinConnector.status ?? "").toLowerCase()) && candidateObservation.ready;
       const deploymentDeclarationMatches = !runtimeLimits.observable ||
         runtimeLimits.max_run_ms === latestNativeContract.max_run_ms;
       const openResourcePolicy = publicOpenResourcePolicy(automation.open_resource_policy);
@@ -1004,7 +1114,9 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         external_twin_ready: externalTwinReady,
         twin: { configured: Boolean(twinConnector), connected: externalTwinReady,
           connector_id: twinConnector?.connector_id ?? twinConnector?.name ?? null,
-          status: twinConnector?.status ?? null, summary: twinConnector?.public_message ?? null },
+          status: twinConnector?.status ?? null, summary: twinConnector?.public_message ?? null,
+          candidate_observation: candidateObservation, model_visible_result: modelVisibleResult },
+        candidate_observation: candidateObservation, model_visible_result: modelVisibleResult,
         budget_contract: { observable: true, max_run_ms: latestNativeContract.max_run_ms,
           native_enforcement: true, cancellation_supported: latestNativeContract.cancellation_supported,
           deployment_declaration_matches: deploymentDeclarationMatches,
@@ -1027,7 +1139,13 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         model_version: automation.model_version ?? ready.model_version,
         product_e2e_contract_version: automation.product_e2e_contract_version ?? ready.product_e2e_contract_version,
         public_event_schema_version: automation.public_event_schema_version ?? ready.public_event_schema_version,
-        job_runtime_limits_contract_version: latestNativeContract.contract_version };
+        job_runtime_limits_contract_version: latestNativeContract.contract_version,
+        ...(automation.candidate_observation?.contract_version ? {
+          candidate_observation: automation.candidate_observation.contract_version,
+        } : {}),
+        ...(automation.model_visible_result?.contract_version ? {
+          model_visible_result: automation.model_visible_result.contract_version,
+        } : {}) };
       const versions = Object.fromEntries(Object.entries(observedVersions)
         .filter(([, value]) => value !== undefined && value !== null).map(([name, value]) => [name, String(value)]));
       const publicModels = automation.model_portfolio ?? ready.model_portfolio ?? automation.models ?? ready.models ?? [];
@@ -1062,6 +1180,9 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
           stop_semantics: latestNativeContract.stop_semantics,
           budget_reason: latestNativeContract.budget_reason,
           budget_dimensions: latestNativeContract.budget_dimensions },
+        candidate_observation: publicCandidateObservation(automation.candidate_observation,
+          { requireNamespaceScope: true }),
+        model_visible_result: publicModelVisibleResult(automation.model_visible_result),
         external_cleanup_owner: "external_controller",
         production_writes_available: false };
       return discovery(frozen, "LANGGRAPH_PRODUCT", capability, stableRuntime,
@@ -1085,7 +1206,7 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
       const result = await api.request("/api/v1/candidates", { method: "POST", body: requestBody });
       const runRef = result.investigation?.investigation_id ?? result.investigation_id;
       if (!runRef) throw new Error("LangGraph product did not create a real investigation");
-      const expected = frozenEvaluationContext(executionContract);
+      const expected = candidateEvaluationContext(executionContract);
       runs.set(runRef, { expected, requestBody, job_id: result.job?.job_id ?? result.job_id ?? null });
       return { run_ref: runRef, status: "RUNNING", cursor: 0,
         binding_receipt: submissionReceipt({ runRef, expected, requestBody,
@@ -1098,7 +1219,7 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         api.request(`${journalPath}?after_cursor=${Number(cursor) || 0}&limit=1000`),
         api.request(`/api/v1/investigations/${encodeURIComponent(runRef)}/product-e2e`),
         api.request("/api/v1/jobs?limit=200")]);
-      const run = runs.get(runRef) ?? { expected: frozenEvaluationContext(executionContract),
+      const run = runs.get(runRef) ?? { expected: candidateEvaluationContext(executionContract),
         requestBody: langGraphSubmission(executionContract, latestNativeContract), job_id: null };
       const jobs = listItems(jobsPage);
       const job = jobs.find((item) => item.job_id === run.job_id || item.investigation_id === runRef ||

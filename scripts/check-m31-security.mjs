@@ -18,6 +18,8 @@ const controlApi = read("services/control-api/src/app.mjs");
 const statistics = read("packages/kernel/src/statistics.mjs");
 const twinGateway = read("infra/twin/ssh_gateway.sh");
 const twinManager = read("infra/twin/opsmind_eval_manager.py");
+const candidateObservationGateway = read("infra/twin/opsmind_candidate_observation_gateway.py");
+const candidateObservationSshGateway = read("infra/twin/candidate_observation_ssh_gateway.sh");
 const agentHarnessDockerfile = read("infra/candidates/agent-harness/Dockerfile");
 const agentHarnessHardeningDockerfile = read("infra/candidates/agent-harness/Dockerfile.runtime-hardening");
 const agentHarnessCompose = read("infra/candidates/agent-harness/compose.yaml");
@@ -25,6 +27,9 @@ const agentHarnessEntrypoint = read("infra/candidates/agent-harness/entrypoint.s
 const agentHarnessAppArmor = read("infra/candidates/agent-harness/apparmor-bwrap");
 const agentHarnessSeccomp = JSON.parse(read("infra/candidates/agent-harness/seccomp-bwrap.json"));
 const consoleUnit = read("infra/systemd/opsmind-evalos-console.service");
+const consoleServer = read("apps/console/serve.mjs");
+const evalosUnit = read("infra/systemd/opsmind-evalos.service");
+const nginx = read("infra/nginx/opsmind-evalos.conf");
 const deploymentSmoke = read("scripts/smoke-m31-deployment.mjs");
 
 assert.match(connectors, /tokenSource:\s*"environment-only"/);
@@ -64,6 +69,32 @@ assert.match(twinManager, /"langgraph-v1"/);
 assert.doesNotMatch(twinManager, /shell=True|os\.system|subprocess\.Popen/);
 assert.match(twinManager, /slot_lease_present/);
 assert.doesNotMatch(twinManager, /"slot_lease_id"\s*:/);
+assert.match(twinManager, /candidate_authorize/);
+assert.match(twinManager, /ssh-ed25519/);
+assert.match(twinManager, /must expire in 5 minutes to 24 hours/);
+assert.match(twinManager, /cannot rotate during an active Trial/);
+assert.match(twinManager, /opsmind-candidate-observation-ssh-gateway/);
+assert.doesNotMatch(twinManager, /PRIVATE KEY|private_key/);
+assert.match(candidateObservationGateway, /candidate_scoped_trial/);
+assert.match(candidateObservationGateway, /cross_trial_access/);
+assert.match(candidateObservationGateway, /hidden_evaluation_data_exposed/);
+assert.match(candidateObservationGateway, /opsmind-candidate-observation-audit\/1\.0/);
+assert.match(candidateObservationGateway, /os\.O_APPEND/);
+assert.doesNotMatch(candidateObservationGateway, /shell=True|os\.system|subprocess\.Popen/);
+assert.doesNotMatch(candidateObservationGateway,
+  /(?:shell_command|command_text|filesystem_path|target_host|target_address|target_port)/i);
+assert.match(candidateObservationSshGateway, /SSH_ORIGINAL_COMMAND/);
+assert.match(candidateObservationSshGateway, /candidate-observation-gateway request langgraph-v1/);
+assert.doesNotMatch(candidateObservationSshGateway, /\beval\b|sh\s+-c|bash\s+-c/);
+assert.match(controlApi, /EVALOS_CANDIDATE_OBSERVATION_IDENTITIES/);
+assert.match(controlApi, /x-opsmind-identity-role/);
+assert.match(controlApi, /timingSafeEqual/);
+assert.match(controlApi, /candidate_observer/);
+const candidateObservationRoute = controlApi.slice(
+  controlApi.indexOf("if (candidateObservationMatch"), controlApi.indexOf('if (request.method === "GET" && url.pathname === "/ready")'));
+assert.ok(candidateObservationRoute.length > 0);
+assert.doesNotMatch(candidateObservationRoute, /createExperiment|createTrial|prepare|reset|scenario_id|environment_seed/,
+  "Candidate observation HTTP identity must not gain Trial management or hidden Case authority");
 assert.match(agentHarnessDockerfile, /bubblewrap/);
 assert.match(agentHarnessDockerfile, /socat/);
 assert.match(agentHarnessHardeningDockerfile, /ARG BASE_IMAGE=opsmind-agent-harness:e40a8c4-evalos5/);
@@ -92,6 +123,14 @@ assert.doesNotMatch(consoleUnit, /^ExecStartPre=.*127\.0\.0\.1:8787\/health/m);
 assert.match(consoleUnit, /^ExecStart=\/usr\/local\/bin\/node serve\.mjs$/m);
 assert.match(consoleUnit, /^NoNewPrivileges=true$/m);
 assert.match(consoleUnit, /^ProtectSystem=strict$/m);
+assert.match(consoleServer, /candidateObservationPath/);
+assert.match(consoleServer, /x-opsmind-identity-role/);
+assert.doesNotMatch(consoleServer, /x-untrusted-extra/);
+assert.match(evalosUnit, /EVALOS_CANDIDATE_OBSERVATION_IDENTITIES=\/etc\/opsmind-evalos\/candidate-observation-identities\.json/);
+assert.match(nginx, /location \^~ \/api\/candidate-relay\//);
+assert.match(nginx, /location \^~ \/api\/candidate-observation\/agent-harness-v2\//);
+assert.match(nginx, /location \/ \{[\s\S]*allow 111\.55\.79\.0\/24;[\s\S]*deny all;/);
+assert.doesNotMatch(nginx, /location \^~ \/api\/candidate-observation\/.*(?:prepare|reset|snapshot)/);
 assert.match(deploymentSmoke, /m3-l2-agentic-formal@3\.0\.0/);
 assert.match(deploymentSmoke, /case_count, 80/);
 assert.doesNotMatch(`${app}\n${adapter}\n${connectors}\n${adapterV5}\n${connectorsV5}`,

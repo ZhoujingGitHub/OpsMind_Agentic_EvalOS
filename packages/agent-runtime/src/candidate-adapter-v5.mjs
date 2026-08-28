@@ -145,6 +145,8 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         ? await connector.evaluationReadiness() : { isolated_tenant_slots: 1, safe_parallelism: 1 };
       const healthy = new Set(["reachable", "ready", "healthy", "ok"]).has(String(discovery.health?.status ?? "").toLowerCase());
       const twinReady = connectorReadiness.external_twin_ready === true;
+      const candidateObservationReady = connectorReadiness.candidate_observation?.ready === true;
+      const modelVisibleResultReady = connectorReadiness.model_visible_result?.supported === true;
       const settlementWallclockMs = Number(settlementBudget?.wallclock_ms);
       const trialWallclockMs = Number.isFinite(settlementWallclockMs) && settlementWallclockMs > 0
         ? settlementWallclockMs
@@ -172,10 +174,13 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         ? "candidate_resource_not_full_product_envelope" : "candidate_budget_would_be_clamped_by_product");
       if (dimensionAlignment.aligned === null) limitations.push("candidate_budget_dimension_alignment_unknown");
       if (openResourceRequired && !openResourceDeclared) limitations.push("candidate_open_resource_declaration_missing");
+      if (requiresTwin && !candidateObservationReady) limitations.push("candidate_observation_binding_not_ready");
+      if (requiresTwin && !modelVisibleResultReady) limitations.push("candidate_model_visible_result_contract_missing");
       if (discovery.usage_observability?.complete !== true) limitations.push("candidate_usage_partially_observable");
       const hardReady = healthy && connectorReadiness.identities_separated === true &&
         connectorReadiness.tenant_bound === true && connectorReadiness.least_privilege === true &&
-        (!requiresTwin || twinReady) && budgetAligned !== false && dimensionAlignment.aligned !== false && budgetContractConsistent &&
+        (!requiresTwin || (twinReady && candidateObservationReady && modelVisibleResultReady)) &&
+        budgetAligned !== false && dimensionAlignment.aligned !== false && budgetContractConsistent &&
         (!openResourceRequired || openResourceDeclared);
       const formalReady = hardReady && budgetAligned === true && dimensionAlignment.aligned === true && budgetNative &&
         (contestant.binding_requirement !== "PRODUCT_NATIVE_ACK" || discovery.native_run_context_supported === true);
@@ -199,7 +204,9 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         isolation: { tenant_bound: connectorReadiness.tenant_bound === true,
           isolated_tenant_slots: Number(connectorReadiness.isolated_tenant_slots ?? 0),
           safe_parallelism: Number(connectorReadiness.safe_parallelism ?? 1) },
-        twin: { required: requiresTwin, ready: twinReady, ...(connectorReadiness.twin ?? {}) },
+        twin: { required: requiresTwin, ready: twinReady, ...(connectorReadiness.twin ?? {}),
+          candidate_observation: connectorReadiness.candidate_observation ?? null,
+          model_visible_result: connectorReadiness.model_visible_result ?? null },
         budget: { trial_wallclock_ms: Number.isFinite(trialWallclockMs) ? trialWallclockMs : null,
           candidate_max_run_ms: budgetObservable ? candidateMaxRunMs : null,
           observable: budgetObservable, aligned: budgetAligned,
@@ -232,7 +239,14 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         const preparation = await connector.prepare({ executionContract });
         await emit("candidate.evaluation_context.prepared", "candidate-adapter", preparation ?? {});
       }
-      const started = await connector.start({ executionContract });
+      let started;
+      try {
+        started = await connector.start({ executionContract });
+      } catch (error) {
+        const productError = error instanceof Error ? error : new Error(String(error));
+        productError.candidateProductFailure = true;
+        throw productError;
+      }
       const runRef = requiredString(started?.run_ref, "external candidate run_ref");
       await emit("candidate.run.submitted", "candidate-adapter", {
         run_ref: runRef, status: started.status ?? "QUEUED", binding_receipt: started.binding_receipt ?? null,
@@ -373,6 +387,7 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         candidateError.candidateUsage = finalObservation?.candidate_usage ?? null;
         candidateError.runRef = runRef;
         candidateError.candidateTerminal = true;
+        candidateError.candidateProductFailure = true;
         throw candidateError;
       }
       if (!finalObservation?.outcome || typeof finalObservation.outcome !== "object") {

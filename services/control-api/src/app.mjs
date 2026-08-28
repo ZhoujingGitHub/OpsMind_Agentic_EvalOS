@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createHash, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -12,6 +13,7 @@ import {
   BLIND_JUDGE_VERSION, CASE_INVESTIGATOR_RUNTIME, createAgentHarnessProductConnector, createAgentHarnessProductConnectorV5,
   createCandidateAdapterV4, createCandidateAdapterV5, createCaseInvestigator,
   createLangGraphProductConnector, createLangGraphProductConnectorV5, judgeRecordAndSummarize,
+  candidateEvaluationContext, candidateManagedNamespace, candidateResourceReferences, candidateServiceIdentifiers,
 } from "../../../packages/agent-runtime/src/index.mjs";
 import { ExternalProductTwinEnvironment, ProtocolTwinEnvironment, SshTwinClient,
   SshTwinManagerClient, managedTwinTrialId } from "../../../packages/twin-runtime/src/index.mjs";
@@ -182,6 +184,7 @@ export function createApp({
   cleanupConnectorOverrides = {},
   discoveryConnectorOverrides = {},
   twinManagerClientOverride = null,
+  candidateObservationIdentityConfig = null,
 } = {}) {
   const registry = createEvalRegistry({ m15Cases: CASES, m2Cases: M2_CASES, m3Cases: M3_CASES });
   const store = new EvalStore({ databasePath, runtimeRoot,
@@ -315,11 +318,38 @@ export function createApp({
   const twinConfigured = Boolean(twinManagerClientOverride || twinEnvironmentConfigured);
   const twinClient = twinEnvironmentConfigured ? new SshTwinClient() : null;
   const twinManagerClient = twinManagerClientOverride ?? (twinConfigured ? new SshTwinManagerClient() : null);
+  const loadCandidateObservationIdentities = () => {
+    if (candidateObservationIdentityConfig) return candidateObservationIdentityConfig;
+    const configPath = process.env.EVALOS_CANDIDATE_OBSERVATION_IDENTITIES;
+    if (!configPath) return { candidates: {} };
+    try { return JSON.parse(readFileSync(configPath, "utf8")); }
+    catch { return { candidates: {} }; }
+  };
+  const authenticateCandidateObserver = (request, contestantRef) => {
+    // Reload the atomic short-session file for every request so rotation takes
+    // effect without restarting the trusted control plane.
+    const candidateObservationIdentities = loadCandidateObservationIdentities();
+    const configured = candidateObservationIdentities.candidates?.[contestantRef];
+    const authorization = request.headers.get("authorization") ?? "";
+    const identityRole = request.headers.get("x-opsmind-identity-role") ?? "";
+    if (!configured || identityRole !== "candidate_observer" || !authorization.startsWith("Bearer ")) return false;
+    const expiresAt = Date.parse(String(configured.expires_at ?? ""));
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now() || expiresAt - Date.now() > 86400000) return false;
+    const actual = createHash("sha256").update(authorization.slice(7).trim()).digest();
+    const expectedHex = String(configured.token_sha256 ?? "").replace(/^sha256:/, "");
+    if (!/^[a-f0-9]{64}$/.test(expectedHex)) return false;
+    return timingSafeEqual(actual, Buffer.from(expectedHex, "hex"));
+  };
   const runner = new TrialRunner({ store, ledger, adapters, gradingService, approvalOracle,
-    environmentFactory: ({ caseSpec, trial }) => {
+    environmentFactory: ({ caseSpec, trial, executionContract }) => {
       if (caseSpec.source?.level !== "L2") return createCaseEnvironment(caseSpec);
+      const context = candidateEvaluationContext(executionContract);
+      const namespace = candidateManagedNamespace(executionContract);
       return realCandidateConnectors[trial.contestant_ref]
-        ? new ExternalProductTwinEnvironment({ client: twinManagerClient, caseSpec, trial })
+        ? new ExternalProductTwinEnvironment({ client: twinManagerClient, caseSpec, trial,
+          candidateBinding: { context_digest: context.context_digest, environment_ref: context.environment_ref,
+            resource_refs: candidateResourceReferences(executionContract, namespace),
+            service_ids: candidateServiceIdentifiers(executionContract) } })
         : new ProtocolTwinEnvironment({ client: twinClient, caseSpec, trial });
     } });
   store.recoverInterruptedAnalyses();
@@ -1002,16 +1032,18 @@ export function createApp({
     const cors = {
       "access-control-allow-origin": origin === allowedOrigin ? origin : allowedOrigin,
       vary: "origin",
-      "access-control-allow-headers": "content-type,idempotency-key,authorization,x-reviewer-id,x-reviewer-credential",
+      "access-control-allow-headers": "content-type,idempotency-key,authorization,x-opsmind-identity-role,x-reviewer-id,x-reviewer-credential",
       "access-control-allow-methods": "GET,POST,OPTIONS",
     };
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
     const reviewerDecision = request.method === "POST" && /^\/api\/reviews\/[^/]+\/decisions$/.test(url.pathname);
     const relayMutation = request.method === "POST" && /^\/api\/candidate-relay\/[^/]+\/(?:claim|requests\/[^/]+\/complete)$/.test(url.pathname);
-    if (request.method === "POST" && !reviewerDecision && !relayMutation && !apiToken) {
+    const candidateObservationMatch = url.pathname.match(/^\/api\/candidate-observation\/([^/]+)\/(health|observe)$/);
+    const candidateObservationMutation = request.method === "POST" && candidateObservationMatch?.[2] === "observe";
+    if (request.method === "POST" && !reviewerDecision && !relayMutation && !candidateObservationMutation && !apiToken) {
       return json({ error: "EVALOS_API_TOKEN must be configured before control-plane mutations" }, 503, cors);
     }
-    if (request.method === "POST" && !reviewerDecision && !relayMutation && !isAdmin(request)) {
+    if (request.method === "POST" && !reviewerDecision && !relayMutation && !candidateObservationMutation && !isAdmin(request)) {
       return json({ error: "authenticated control-plane token required" }, 401, cors);
     }
     try {
@@ -1025,6 +1057,44 @@ export function createApp({
         const body = rawBody ? JSON.parse(rawBody) : {};
         if (relayClaimMatch) return json({ request: candidateRelay.claim(candidateRef, body) }, 200, cors);
         return json(candidateRelay.complete(candidateRef, decodeURIComponent(relayCompleteMatch[2]), body), 200, cors);
+      }
+      if (candidateObservationMatch && ["GET", "POST"].includes(request.method)) {
+        const contestantRef = decodeURIComponent(candidateObservationMatch[1]);
+        const operation = candidateObservationMatch[2];
+        if (contestantRef !== "agent-harness-v2") {
+          return json({ error: { code: "CANDIDATE_OBSERVATION_TRANSPORT_MISMATCH",
+            message: "this candidate uses its independent SSH observation identity" } }, 404, cors);
+        }
+        if (!authenticateCandidateObserver(request, contestantRef)) {
+          return json({ error: { code: "CANDIDATE_OBSERVER_AUTHENTICATION_FAILED",
+            message: "candidate observer short session is missing, expired, or invalid" } }, 401, cors);
+        }
+        if (!twinConfigured) return json({ error: { code: "TWIN_NOT_CONFIGURED",
+          message: "candidate observation Twin backend is unavailable" } }, 503, cors);
+        if (operation === "health" && request.method === "GET") {
+          const response = await twinManagerClient.invoke({ operation: "candidate_health", contestant_ref: contestantRef });
+          return json(response, response.ok === true ? 200 : 503, cors);
+        }
+        if (operation === "observe" && request.method === "POST") {
+          const candidatePayload = await request.text();
+          if (Buffer.byteLength(candidatePayload, "utf8") > 2 * 1024 * 1024) {
+            return json({ error: { code: "CANDIDATE_OBSERVATION_REQUEST_TOO_LARGE",
+              message: "candidate observation request exceeds the gateway limit" } }, 413, cors);
+          }
+          let candidateRequest;
+          try { candidateRequest = JSON.parse(candidatePayload); }
+          catch { return json({ error: { code: "CANDIDATE_OBSERVATION_REQUEST_INVALID",
+            message: "candidate observation request must be valid JSON" } }, 400, cors); }
+          const response = await twinManagerClient.invoke({ operation: "candidate_observe", contestant_ref: contestantRef,
+            candidate_request: candidateRequest });
+          const code = String(response.error?.code ?? "");
+          const status = response.ok === true ? 200
+            : code === "CANDIDATE_OBSERVATION_SCOPE_DENIED" ? 403
+              : code === "CANDIDATE_OBSERVATION_REQUEST_INVALID" ? 400
+                : code === "CANDIDATE_OBSERVATION_BACKEND_FAILURE" ? 503 : 502;
+          return json(response, status, cors);
+        }
+        return json({ error: { code: "METHOD_NOT_ALLOWED", message: "candidate observation method is not allowed" } }, 405, cors);
       }
       if (request.method === "GET" && url.pathname === "/ready") {
         return json({ status: "ok", ready: true, service: "opsmind-evalos-control-api",

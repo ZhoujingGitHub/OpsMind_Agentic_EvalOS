@@ -140,7 +140,7 @@ export class TrialRunner {
     leaseTimer.unref?.();
 
     try {
-      environment = await this.environmentFactory({ caseSpec, trial, experiment,
+      environment = await this.environmentFactory({ caseSpec, trial, experiment, executionContract,
         emit: async (name, payload = {}) => event(name, "environment", payload) });
       if (!environment || typeof environment.call !== "function") throw new Error("environment factory returned an invalid environment");
       const prepared = typeof environment.prepare === "function" ? await environment.prepare() : null;

@@ -10,7 +10,9 @@ install -d -m 0750 -o root -g root "${DATA_ROOT}/config/baseline" "${DATA_ROOT}/
 install -d -m 0750 -o root -g root "${DATA_ROOT}/trials" "${DATA_ROOT}/pcap" "${DATA_ROOT}/artifacts"
 install -m 0750 -o root -g root "${SOURCE_ROOT}/opsmind_twinctl.py" /usr/local/sbin/opsmind-twinctl
 install -m 0750 -o root -g root "${SOURCE_ROOT}/opsmind_eval_manager.py" /usr/local/sbin/opsmind-eval-manager
+install -m 0750 -o root -g root "${SOURCE_ROOT}/opsmind_candidate_observation_gateway.py" /usr/local/sbin/opsmind-candidate-observation-gateway
 install -m 0755 -o root -g root "${SOURCE_ROOT}/ssh_gateway.sh" /usr/local/sbin/opsmind-twin-ssh-gateway
+install -m 0755 -o root -g root "${SOURCE_ROOT}/candidate_observation_ssh_gateway.sh" /usr/local/sbin/opsmind-candidate-observation-ssh-gateway
 install -m 0750 -o root -g root "${SOURCE_ROOT}/dns_responder.py" /usr/local/libexec/opsmind-twin-dns.py
 install -m 0750 -o root -g root "${SOURCE_ROOT}/dns_probe.py" /usr/local/libexec/opsmind-twin-dns-probe.py
 install -m 0640 -o root -g root "${SOURCE_ROOT}/stack.manifest.json" /etc/opsmind-twin/stack.manifest.json
@@ -20,9 +22,13 @@ install -m 0640 -o root -g root "${SOURCE_ROOT}/config/ue.yaml" "${DATA_ROOT}/co
 if ! id -u evalos-twin >/dev/null 2>&1; then
   useradd --system --create-home --shell /bin/bash evalos-twin
 fi
+if ! id -u opsmind_lg_candidate_observer >/dev/null 2>&1; then
+  useradd --system --create-home --shell /bin/bash opsmind_lg_candidate_observer
+fi
 cat >/etc/sudoers.d/opsmind-twinctl <<'EOF'
 evalos-twin ALL=(root) NOPASSWD: /usr/local/sbin/opsmind-twinctl
 evalos-twin ALL=(root) NOPASSWD: /usr/local/sbin/opsmind-eval-manager
+opsmind_lg_candidate_observer ALL=(root) NOPASSWD: /usr/local/sbin/opsmind-candidate-observation-gateway request langgraph-v1 *
 EOF
 chmod 0440 /etc/sudoers.d/opsmind-twinctl
 visudo -cf /etc/sudoers.d/opsmind-twinctl >/dev/null

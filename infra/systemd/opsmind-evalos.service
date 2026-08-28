@@ -26,6 +26,7 @@ Environment=EVALOS_TWIN_USER=evalos-twin
 Environment=EVALOS_TWIN_SSH_KEY=/etc/opsmind-evalos/keys/m2-twin-ed25519
 Environment=EVALOS_TWIN_KNOWN_HOSTS=/etc/opsmind-evalos/keys/m2-twin-known_hosts
 Environment=EVALOS_TWIN_USE_SUDO=1
+Environment=EVALOS_CANDIDATE_OBSERVATION_IDENTITIES=/etc/opsmind-evalos/candidate-observation-identities.json
 ExecStart=/usr/local/bin/node services/control-api/src/server.mjs
 Restart=on-failure
 RestartSec=3

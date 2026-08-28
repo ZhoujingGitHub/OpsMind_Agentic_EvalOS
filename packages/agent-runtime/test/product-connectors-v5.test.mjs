@@ -9,6 +9,32 @@ const ATTESTATION = Object.freeze({ source_revision: "abcdef1234567890",
 const OPEN_RESOURCE_POLICY = Object.freeze({ contract_version: "opsmind-open-resource/1.0",
   mode: "open_with_safety_fuses", limits_are_safety_fuses_only: true, usage_affects_score: false,
   efficiency_reporting_only: true, case_specific_limits: false });
+const OBSERVATION_SEMANTICS = Object.freeze(["runtime_state", "service_health", "sandboxed_readonly_diagnostic"]);
+const AGENT_HARNESS_CANDIDATE_OBSERVATION = Object.freeze({
+  contract_version: "opsmind-candidate-observation/1.0", mode: "open_with_safety_boundary",
+  binding: "candidate_scoped_trial", binding_status: "bound",
+  semantic_capabilities: Object.fromEntries(OBSERVATION_SEMANTICS.map((name) => [name,
+    { available: true, interfaces: ["structured_mcp"], resource_types: ["service"] }])),
+  security_assertions: { read_only: true, trial_scope_enforced: true, cross_trial_access: false,
+    management_identity_reused: false, hidden_evaluation_data_exposed: false,
+    root_or_privileged_required: false, audited: true, limits_are_safety_fuses_only: true },
+  scope_contract_version: "opsmind-resource-scope/1.0",
+  audit_contract_version: "opsmind-candidate-observation-audit/1.0",
+});
+const LANGGRAPH_CANDIDATE_OBSERVATION = Object.freeze({
+  contract_version: "opsmind-candidate-observation/1.0", mode: "open_with_safety_boundary",
+  binding: "candidate_scoped_trial", binding_status: "ready",
+  semantic_capabilities: OBSERVATION_SEMANTICS.map((name) => ({ name, available: true,
+    interfaces: ["structured_mcp"], resource_types: ["service"] })),
+  read_only: true, trial_scope_enforced: true, cross_trial_access: false,
+  management_identity_reused: false, hidden_evaluation_data_exposed: false,
+  root_or_privileged_required: false, audited: true, limits_are_safety_fuses_only: true,
+  namespace_scope_supported: true,
+  scope_contract_version: "candidate-trial-scope:1.0",
+  audit_contract_version: "candidate-observation-audit:1.0", safety_fuses: { timeout_ms: 15000 },
+});
+const MODEL_VISIBLE_RESULT = Object.freeze({ contract_version: "opsmind-model-visible-result/1.0",
+  silent_truncation: false });
 
 const LANGGRAPH_JOB_RUNTIME_LIMITS = Object.freeze({
   contract_version: "opsmind-job-runtime-limits:1.0", source: "product_runtime",
@@ -57,9 +83,10 @@ function executionContract(id, candidateRuntime) {
       wallclock_ms: 3000000, compute_ms: 3000000, storage_bytes: 10485760, cost_usd: 1 },
     tools: [], policy: {}, frozen_dependencies: {}, dataset_ref: "dataset@1", suite_ref: "suite@1",
     trial: { id, case_ref: "HIDDEN-CASE@1", environment_seed: 918273, replicate_id: 1 },
-    contestant: { candidate_runtime: candidateRuntime },
+    contestant: { ref: id.includes("-ah-") ? "agent-harness-v2" : "langgraph-v1",
+      candidate_runtime: candidateRuntime },
     case: { goal: "普通运维用户看到业务访问失败，请调查", visible: { operating_mode: "diagnosis_only",
-      time_window: "trial-relative", scope: { resource_ids: ["ue-public-1"], service_ids: ["mec-public-1"] } } } };
+      time_window: "trial-relative", scope: { resource_ids: ["ue-1"], service_ids: ["mec-public-1"] } } } };
 }
 
 test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与显式未知用量", async (t) => {
@@ -89,6 +116,8 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
         available: ["Read", "Glob", "Grep", "Write", "Edit", "WebSearch", "WebFetch", "Skill", "ToolSearch"],
         unavailable: { Bash: { status: "unavailable", reason_code: "SDK_SANDBOX_PROC_MOUNT_NOT_PERMITTED",
           sandbox_required: true, unsafe_fallback_allowed: false } } },
+      candidate_observation: AGENT_HARNESS_CANDIDATE_OBSERVATION,
+      model_visible_result_contract: MODEL_VISIBLE_RESULT,
       protocol_lab_binding_contract_version: "2.0", native_run_context_supported: true,
       run_context_contract_version: "opsmind-run-context/1.0",
       run_budget_contract_version: "opsmind-run-budget/1.0",
@@ -155,6 +184,10 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
     "opsmind-identifier-scope/1.0");
   assert.equal(discovery.candidate_runtime.versions.native_tool_availability,
     "opsmind-native-tool-availability/1.0");
+  assert.equal(discovery.candidate_runtime.versions.candidate_observation,
+    "opsmind-candidate-observation/1.0");
+  assert.equal(discovery.candidate_runtime.versions.model_visible_result,
+    "opsmind-model-visible-result/1.0");
   assert.equal(discovery.native_run_context_supported, true);
   const readiness = await connector.evaluationReadiness();
   assert.equal(readiness.budget_contract.native_enforcement, true);
@@ -163,6 +196,8 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   assert.equal(readiness.budget_contract.deployment_declaration_matches, true);
   assert.equal(readiness.budget_contract.open_resource_policy.supported, true);
   assert.equal(readiness.budget_contract.open_resource_policy.usage_affects_score, false);
+  assert.equal(readiness.candidate_observation.ready, true);
+  assert.equal(readiness.model_visible_result.supported, true);
   const oversized = executionContract("evalos-ah-oversized", discovery.candidate_runtime);
   await assert.rejects(connector.start({ executionContract: oversized }),
     /requested native budget exceeds the public product limit: max_duration_seconds/);
@@ -171,6 +206,11 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
     max_tokens: 152768, max_cost_microunits: 1000000, max_result_bytes: 8388608 } };
   await connector.prepare({ executionContract: contract });
   const started = await connector.start({ executionContract: contract });
+  const submitted = fixture.requests.find((item) => item.method === "POST" &&
+    item.url === "/v2/investigation-candidates").body;
+  assert.deepEqual(submitted.scope_hint.resource_refs, [{ identifier_domain: "opsmind-twin",
+    namespace: "ah-evalos-ah-1", resource_type: "workload", resource_id: "ue-1" }]);
+  assert.equal(Object.hasOwn(submitted.scope_hint, "entity_ids"), false);
   assert.match(runContext.context_digest, /^[a-f0-9]{64}$/);
   assert.equal(runContext.runtime_version, "5.0");
   assert.deepEqual(runContext.budget, { max_duration_seconds: 2700, max_tool_calls: 24, max_model_calls: 32,
@@ -278,7 +318,9 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
       model_version: "deepseek-v4-flash+deepseek-v4-pro",
       product_e2e_contract_version: "opsmind-controlled-remediation:1.1",
       public_event_schema_version: "opsmind-public-event:1.0",
-      job_runtime_limits: LANGGRAPH_JOB_RUNTIME_LIMITS, open_resource_policy: OPEN_RESOURCE_POLICY }),
+      job_runtime_limits: LANGGRAPH_JOB_RUNTIME_LIMITS, open_resource_policy: OPEN_RESOURCE_POLICY,
+      candidate_observation: LANGGRAPH_CANDIDATE_OBSERVATION,
+      model_visible_result: MODEL_VISIBLE_RESULT }),
     "PUT /api/v1/automation/mode": async ({ body }) => body,
     "POST /api/v1/candidates": async ({ body }) => { runContext = body.run_context;
       return { investigation: { investigation_id: "run-lg" }, job: { job_id: "job-lg" } }; },
@@ -318,7 +360,9 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
     model_version: "deepseek-v4-flash+deepseek-v4-pro",
     product_e2e_contract_version: "opsmind-controlled-remediation:1.1",
     public_event_schema_version: "opsmind-public-event:1.0",
-    job_runtime_limits_contract_version: "opsmind-job-runtime-limits:1.0" } };
+    job_runtime_limits_contract_version: "opsmind-job-runtime-limits:1.0",
+    candidate_observation: "opsmind-candidate-observation/1.0",
+    model_visible_result: "opsmind-model-visible-result/1.0" } };
   const connector = createLangGraphProductConnectorV5({ origin: fixture.origin, token: "submitter",
     approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-lg", attestation: ATTESTATION,
     declaredRuntimeLimits: { max_run_ms: 1020000, cancellation_supported: false,
@@ -334,6 +378,8 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
   assert.equal(readiness.budget_contract.native_enforcement, true);
   assert.equal(readiness.budget_contract.deployment_declaration_matches, true);
   assert.equal(readiness.budget_contract.open_resource_policy.supported, true);
+  assert.equal(readiness.candidate_observation.ready, true);
+  assert.equal(readiness.model_visible_result.supported, true);
   assert.deepEqual(readiness.budget_contract.dimensions, { max_duration_seconds: 900,
     max_model_calls: 20, max_tool_calls: 30, max_tokens: 100000,
     max_cost_microunits: 20000000, max_result_bytes: 8388608 });
@@ -350,6 +396,9 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
   await connector.prepare({ executionContract: contract });
   const started = await connector.start({ executionContract: contract });
   assert.equal(Object.hasOwn(runContext, "case_id"), false);
+  const submittedCandidate = fixture.requests.find((item) => item.method === "POST" &&
+    item.url === "/api/v1/candidates").body;
+  assert.deepEqual(submittedCandidate.namespace_ids, ["lg-evalos-lg-1"]);
   assert.equal(Object.hasOwn(runContext, "seed"), false);
   assert.deepEqual(Object.keys(runContext.budget).sort(), ["max_cost_microunits", "max_duration_seconds",
     "max_model_calls", "max_result_bytes", "max_tokens", "max_tool_calls"]);

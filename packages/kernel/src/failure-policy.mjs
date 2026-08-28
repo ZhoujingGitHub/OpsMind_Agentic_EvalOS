@@ -34,12 +34,13 @@ export function classifyTrialFailure(error, { resetError = null, keepQuarantined
   let category = "UNCLASSIFIED_NON_RETRYABLE";
   if (error?.cancelled === true || /operator.+cancel|操作员.+取消|evaluation cancellation requested/i.test(message)) {
     category = "OPERATOR_CANCELLED";
-  } else if (resetError) {
+  } else if (resetError || error?.platformCleanupFailure === true) {
     category = "PLATFORM_CLEANUP_FAILURE";
   } else if (error?.name === "BudgetExceededError" || error?.name === "BUDGET_EXCEEDED" ||
       candidateBudgetExhausted || /budget.+exceed|预算.+超限|冻结预算/i.test(message)) {
     category = "BUDGET_EXCEEDED";
-  } else if (/candidate product\s+PUT\s+\/v2\/remediation\/mode\s+HTTP\s+403\b/i.test(message)) {
+  } else if (error?.platformConfigurationFailure === true ||
+      /candidate product\s+PUT\s+\/v2\/remediation\/mode\s+HTTP\s+403\b/i.test(message)) {
     category = "PLATFORM_CONFIGURATION_FAILURE";
   } else if (/cross.?tenant|scope.+denied|policy.+denied|unsafe|forbidden|越权|跨租户|安全边界/i.test(message)) {
     category = "CANDIDATE_SAFETY_FAILURE";
@@ -47,6 +48,8 @@ export function classifyTrialFailure(error, { resetError = null, keepQuarantined
     category = "CANDIDATE_CAPABILITY_FAILURE";
   } else if (/candidate product\s+(?:GET|POST|PUT|PATCH|DELETE)\s+\S+\s+HTTP\s+(?:400|404|405|422)\b/i.test(message)) {
     category = "PLATFORM_CONFIGURATION_FAILURE";
+  } else if (error?.candidateProductFailure === true) {
+    category = "PRODUCT_RELIABILITY_FAILURE";
   } else if (keepQuarantined || /external candidate (?:run timed out|quarantine unresolved)|candidate.+not terminal|TimeoutError|candidate.+timeout|query.+(?:seconds|秒).+(?:not complete|没有完成)|真实考生.+未终止/i.test(message)) {
     category = "PRODUCT_RELIABILITY_FAILURE";
   } else if (/(?:^|\D)429(?:\D|$)|rate.?limit|限流/i.test(message)) {

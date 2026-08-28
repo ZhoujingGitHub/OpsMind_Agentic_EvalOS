@@ -92,6 +92,7 @@ test("外部真实考生由 EvalOS 考务控制器准备独立前缀 Trial，考
       active = request.trial_id;
       return { ok: true, operation: "prepare", fingerprint: "candidate-twin-fingerprint",
         isolation: "exclusive_trial", slot_lease_present: true,
+        candidate_observation_bound: true, candidate_binding_digest: `sha256:${"b".repeat(64)}`,
         observation_profile: request.observation_profile, scenario_clock: "2026-08-23T00:00:00Z",
         profile_digest: "sha256:frozen-profile" };
     }
@@ -104,12 +105,20 @@ test("外部真实考生由 EvalOS 考务控制器准备独立前缀 Trial，考
   } };
   const caseSpec = M3_CASES["M3-PUB-003"];
   const externalTrial = { id: "trial_external_1", contestant_ref: "agent-harness-v2", environment_seed: 2026081601 };
-  const environment = new ExternalProductTwinEnvironment({ client: manager, caseSpec, trial: externalTrial });
+  const candidateBinding = { context_digest: `sha256:${"a".repeat(64)}`,
+    environment_ref: "evalos-twin:trial_external_1", service_ids: ["amf"], resource_refs: [{
+      identifier_domain: "opsmind-twin", namespace: "ah-trial_external_1",
+      resource_type: "network_function", resource_id: "amf",
+    }] };
+  const environment = new ExternalProductTwinEnvironment({ client: manager, caseSpec, trial: externalTrial,
+    candidateBinding });
   const prepared = await environment.prepare();
   assert.equal(prepared.managed_trial_id, "ah-trial_external_1");
   assert.equal(prepared.slot_lease_present, true);
   assert.equal(prepared.observation_profile, "public-baseline");
   assert.equal(prepared.profile_digest, "sha256:frozen-profile");
+  assert.deepEqual(calls[0].service_ids, ["amf"]);
+  assert.deepEqual(calls[0].resource_refs, candidateBinding.resource_refs);
   assert.deepEqual({
     observation_profile: calls[0].observation_profile,
     overlay_contract_version: calls[0].overlay_contract_version,
@@ -138,11 +147,52 @@ test("考务合同拒绝串用考生命名空间且绝不返回私有租约", ()
     observation_profile: "regression-first-observation-fails" }), /regression_failure_mode/);
   assert.equal(validateTwinManagerRequest({ operation: "prepare", contestant_ref: "langgraph-v1",
     trial_id: "lg-trial_1", scenario_id: "amf-service-down", seed: 1,
-    observation_profile: "regression-first-observation-fails", regression_failure_mode: "timeout" }).regression_failure_mode, "timeout");
+    observation_profile: "regression-first-observation-fails", regression_failure_mode: "timeout",
+    evalos_trial_id: "trial_1", context_digest: `sha256:${"a".repeat(64)}`,
+    environment_ref: "evalos-twin:trial_1", service_ids: ["amf"], resource_refs: [{
+      identifier_domain: "opsmind-twin", namespace: "lg-trial_1",
+      resource_type: "network_function", resource_id: "amf",
+    }] }).regression_failure_mode, "timeout");
   assert.throws(() => validateTwinManagerRequest({ operation: "prepare", contestant_ref: "unknown",
     trial_id: "xx-trial_1", scenario_id: "amf-service-down", seed: 1 }), /Unsupported managed contestant/);
   assert.throws(() => validateTwinManagerResponse({ ok: true, operation: "prepare", slot_lease_id: "secret" }, "prepare"),
     /leaked a private lease/);
+});
+
+test("候选观察SSH公钥轮换只能用于LangGraph独立身份且不携带私钥", () => {
+  const request = validateTwinManagerRequest({ operation: "candidate_authorize", contestant_ref: "langgraph-v1",
+    public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestPublicKeyOnly",
+    expires_at: "2026-08-29T00:00:00Z" });
+  assert.equal(request.operation, "candidate_authorize");
+  assert.throws(() => validateTwinManagerRequest({ ...request, contestant_ref: "agent-harness-v2" }),
+    /candidate_authorize/);
+  assert.throws(() => validateTwinManagerRequest({ ...request, public_key: "PRIVATE KEY" }),
+    /candidate_authorize/);
+});
+
+test("候选观察绑定失败归入平台配置，回滚不干净则停队并归入清场故障", async () => {
+  const caseSpec = M3_CASES["M3-PUB-003"];
+  const externalTrial = { id: "trial_binding_failure", contestant_ref: "agent-harness-v2",
+    environment_seed: 2026081601 };
+  const candidateBinding = { context_digest: `sha256:${"a".repeat(64)}`,
+    environment_ref: "evalos-twin:trial_binding_failure", service_ids: ["amf"], resource_refs: [{
+      identifier_domain: "opsmind-twin", namespace: "ah-trial_binding_failure",
+      resource_type: "service", resource_id: "amf",
+    }] };
+  const failed = (code) => new ExternalProductTwinEnvironment({
+    client: { invoke: async () => ({ ok: false, operation: "prepare", error: { code, message: code } }) },
+    caseSpec, trial: externalTrial, candidateBinding,
+  });
+  await assert.rejects(failed("CANDIDATE_BINDING_FAILED").prepare(), (error) => {
+    assert.equal(error.platformConfigurationFailure, true);
+    assert.equal(error.haltQueue, undefined);
+    return true;
+  });
+  await assert.rejects(failed("PREPARE_ROLLBACK_FAILED").prepare(), (error) => {
+    assert.equal(error.platformCleanupFailure, true);
+    assert.equal(error.haltQueue, true);
+    return true;
+  });
 });
 
 test("M3 冻结 80 个真实观测条件 Case，四个分区各 20 且互不重叠", () => {
