@@ -90,6 +90,7 @@ function executionContract(id, candidateRuntime) {
 }
 
 test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与显式未知用量", async (t) => {
+  let candidateObservationState = AGENT_HARNESS_CANDIDATE_OBSERVATION;
   let sourceRef = null;
   let runContext = null;
   let budgetAckOverride = null;
@@ -116,7 +117,7 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
         available: ["Read", "Glob", "Grep", "Write", "Edit", "WebSearch", "WebFetch", "Skill", "ToolSearch"],
         unavailable: { Bash: { status: "unavailable", reason_code: "SDK_SANDBOX_PROC_MOUNT_NOT_PERMITTED",
           sandbox_required: true, unsafe_fallback_allowed: false } } },
-      candidate_observation: AGENT_HARNESS_CANDIDATE_OBSERVATION,
+      candidate_observation: candidateObservationState,
       model_visible_result_contract: MODEL_VISIBLE_RESULT,
       protocol_lab_binding_contract_version: "2.0", native_run_context_supported: true,
       run_context_contract_version: "opsmind-run-context/1.0",
@@ -177,6 +178,23 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   const connector = createAgentHarnessProductConnectorV5({ origin: fixture.origin, token: "submitter",
     approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-ah", attestation: ATTESTATION });
   const discovery = await connector.discover();
+  candidateObservationState = { ...AGENT_HARNESS_CANDIDATE_OBSERVATION,
+    binding_status: "blocked", external_dependency: "short_session_expired",
+    public_dependencies: ["candidate observer short session is unavailable"],
+    semantic_capabilities: Object.fromEntries(OBSERVATION_SEMANTICS.map((name) => [name,
+      { ...AGENT_HARNESS_CANDIDATE_OBSERVATION.semantic_capabilities[name], available: false }])) };
+  const transientlyBlocked = await connector.discover();
+  assert.equal(transientlyBlocked.runtime_digest, discovery.runtime_digest);
+  assert.equal(transientlyBlocked.runtime_manifest_digest, discovery.runtime_manifest_digest);
+  assert.equal(transientlyBlocked.capability_contract_digest, discovery.capability_contract_digest);
+  assert.equal(transientlyBlocked.runtime.candidate_observation.ready, false);
+  candidateObservationState = { ...AGENT_HARNESS_CANDIDATE_OBSERVATION,
+    audit_contract_version: "opsmind-candidate-observation-audit/2.0" };
+  const staticallyChanged = await connector.discover();
+  assert.notEqual(staticallyChanged.runtime_digest, discovery.runtime_digest);
+  assert.notEqual(staticallyChanged.runtime_manifest_digest, discovery.runtime_manifest_digest);
+  assert.notEqual(staticallyChanged.capability_contract_digest, discovery.capability_contract_digest);
+  candidateObservationState = AGENT_HARNESS_CANDIDATE_OBSERVATION;
   assert.equal(discovery.candidate_runtime.models[0].thinking, "enabled");
   assert.equal(discovery.candidate_runtime.versions.protocol_tool_loading,
     "opsmind-protocol-tool-loading/1.0");

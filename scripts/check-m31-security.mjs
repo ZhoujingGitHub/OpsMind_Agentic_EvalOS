@@ -31,6 +31,7 @@ const consoleServer = read("apps/console/serve.mjs");
 const evalosUnit = read("infra/systemd/opsmind-evalos.service");
 const nginx = read("infra/nginx/opsmind-evalos.conf");
 const deploymentSmoke = read("scripts/smoke-m31-deployment.mjs");
+const deploymentInstaller = read("infra/deploy/install-m31-release.sh");
 
 assert.match(connectors, /tokenSource:\s*"environment-only"/);
 assert.match(connectors, /real candidate product APIs require HTTPS/);
@@ -127,6 +128,9 @@ assert.match(consoleServer, /candidateObservationPath/);
 assert.match(consoleServer, /x-opsmind-identity-role/);
 assert.doesNotMatch(consoleServer, /x-untrusted-extra/);
 assert.match(evalosUnit, /EVALOS_CANDIDATE_OBSERVATION_IDENTITIES=\/etc\/opsmind-evalos\/candidate-observation-identities\.json/);
+assert.match(deploymentInstaller, /install -d -o root -g opsmind-secret -m 0750 \/etc\/opsmind-evalos/);
+assert.match(deploymentInstaller, /chmod 0440 "\$candidate_identity_file"/);
+assert.match(deploymentInstaller, /runuser -u opsmindeval -- test -r "\$candidate_identity_file"/);
 assert.match(nginx, /location \^~ \/api\/candidate-relay\//);
 assert.match(nginx, /location \^~ \/api\/candidate-observation\/agent-harness-v2\//);
 assert.match(nginx, /location \/ \{[\s\S]*allow 111\.55\.79\.0\/24;[\s\S]*deny all;/);

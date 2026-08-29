@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const USAGE_DIMENSIONS = Object.freeze(["input_tokens", "output_tokens", "model_calls", "tool_calls", "storage_bytes", "cost_usd"]);
+const CANDIDATE_FINGERPRINT_CONTRACT = "opsmind-candidate-fingerprint/2.0";
 
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -142,6 +143,11 @@ function publicOpenResourcePolicy(...values) {
 const CANDIDATE_OBSERVATION_CAPABILITIES = Object.freeze([
   "runtime_state", "service_health", "sandboxed_readonly_diagnostic",
 ]);
+const CANDIDATE_OBSERVATION_SECURITY_FIELDS = Object.freeze([
+  "read_only", "trial_scope_enforced", "cross_trial_access", "management_identity_reused",
+  "hidden_evaluation_data_exposed", "root_or_privileged_required", "audited",
+  "limits_are_safety_fuses_only",
+]);
 
 function publicCandidateObservation(value, { requireNamespaceScope = false } = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -167,14 +173,58 @@ function publicCandidateObservation(value, { requireNamespaceScope = false } = {
   });
   const ready = fixed && complete && ["bound", "ready"].includes(String(value.binding_status));
   return Object.freeze({ supported: fixed, ready, contract_version: value.contract_version ?? null,
+    mode: value.mode ?? null, binding: value.binding ?? null,
     binding_status: value.binding_status ?? null, scope_contract_version: value.scope_contract_version ?? null,
     namespace_scope_supported: value.namespace_scope_supported === true,
     audit_contract_version: value.audit_contract_version ?? null,
+    security_assertions: Object.fromEntries(CANDIDATE_OBSERVATION_SECURITY_FIELDS
+      .map((name) => [name, security[name] === true])),
+    safety_fuses: value.safety_fuses ?? null,
     semantic_capabilities: semantics, public_dependencies: value.public_dependencies ?? [],
     external_dependency: value.external_dependency ?? null,
     limitations: [...(!fixed ? ["candidate_observation_security_contract_invalid"] : []),
       ...(!complete ? ["candidate_observation_semantic_capability_incomplete"] : []),
       ...(!["bound", "ready"].includes(String(value.binding_status)) ? ["candidate_observation_binding_not_ready"] : [])] });
+}
+
+// A short-lived observer session is an admission fact, not a candidate build
+// identity.  Keep the complete live value in discovery/readiness, but exclude
+// availability, binding status and transient dependency failures from the
+// immutable deployment fingerprint.  Static interfaces, scope and safety
+// assertions remain frozen, so a real capability or security change still
+// produces drift.
+function candidateObservationFingerprint(value) {
+  const normalized = publicCandidateObservation(value);
+  return Object.freeze({
+    contract_version: normalized.contract_version,
+    mode: normalized.mode,
+    binding: normalized.binding,
+    supported: normalized.supported,
+    scope_contract_version: normalized.scope_contract_version,
+    namespace_scope_supported: normalized.namespace_scope_supported,
+    audit_contract_version: normalized.audit_contract_version,
+    security_assertions: normalized.security_assertions,
+    safety_fuses: normalized.safety_fuses,
+    semantic_capabilities: normalized.semantic_capabilities.map((item) => ({
+      name: item.name,
+      interfaces: [...(item.interfaces ?? [])].map(String).sort(),
+      resource_types: [...(item.resource_types ?? [])].map(String).sort(),
+    })).sort((left, right) => String(left.name).localeCompare(String(right.name))),
+  });
+}
+
+function immutableCapabilityProjection(capability) {
+  if (!capability?.candidate_observation) return {
+    fingerprint_contract_version: CANDIDATE_FINGERPRINT_CONTRACT, ...capability };
+  return { fingerprint_contract_version: CANDIDATE_FINGERPRINT_CONTRACT, ...capability,
+    candidate_observation: candidateObservationFingerprint(capability.candidate_observation) };
+}
+
+function immutableRuntimeProjection(runtime) {
+  if (!runtime?.candidate_observation) return {
+    fingerprint_contract_version: CANDIDATE_FINGERPRINT_CONTRACT, ...runtime };
+  return { fingerprint_contract_version: CANDIDATE_FINGERPRINT_CONTRACT, ...runtime,
+    candidate_observation: candidateObservationFingerprint(runtime.candidate_observation) };
 }
 
 function publicModelVisibleResult(value) {
@@ -695,11 +745,17 @@ function projectionEvidence(sourceSystem, sourceRef, projection) {
 
 function discovery(attestation, architecture, capability, runtime, health, candidateRuntime,
   { nativeRunContextSupported = false, usageComplete = false } = {}) {
+  const fingerprintCapability = immutableCapabilityProjection(capability);
+  const fingerprintRuntime = immutableRuntimeProjection(runtime);
+  const capabilityContractDigest = digest(fingerprintCapability);
+  const runtimeManifestDigest = digest(fingerprintRuntime);
   return { candidate_kind: "REAL_PRODUCT", architecture, production_writes_available: false,
+    fingerprint_contract_version: CANDIDATE_FINGERPRINT_CONTRACT,
     source_revision: attestation.source_revision, artifact_digest: attestation.artifact_digest,
-    capability_contract_digest: digest(capability), runtime_manifest_digest: digest(runtime),
-    runtime_digest: digest({ architecture, capability_contract_digest: digest(capability),
-      runtime_manifest_digest: digest(runtime) }), capability, runtime, health, candidate_runtime: candidateRuntime,
+    capability_contract_digest: capabilityContractDigest, runtime_manifest_digest: runtimeManifestDigest,
+    runtime_digest: digest({ fingerprint_contract_version: CANDIDATE_FINGERPRINT_CONTRACT,
+      architecture, capability_contract_digest: capabilityContractDigest,
+      runtime_manifest_digest: runtimeManifestDigest }), capability, runtime, health, candidate_runtime: candidateRuntime,
     native_run_context_supported: nativeRunContextSupported,
     usage_observability: { complete: usageComplete, policy: "reported_with_explicit_unknowns" } };
 }
