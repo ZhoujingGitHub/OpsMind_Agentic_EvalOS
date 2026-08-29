@@ -30,6 +30,10 @@ TRIAL_ROOT = Path("/srv/opsmind-twin/trials")
 CONTRACT = "opsmind-candidate-observation-gateway/1.0"
 BINDING = "candidate_scoped_trial"
 SCOPE_CONTRACT = "opsmind-resource-scope/1.0"
+LANGGRAPH_IDENTITY_CONTRACT = "candidate-persistent-ssh-observer/1.0"
+LANGGRAPH_SCOPE_CONTRACT = "candidate-trial-scope:1.0"
+LANGGRAPH_AUDIT_CONTRACT = "candidate-observation-audit/1.0"
+LANGGRAPH_CONNECTOR_PROFILE = "candidate-observation-gateway:1.0"
 CAPABILITIES = {"runtime_state", "service_health", "sandboxed_readonly_diagnostic"}
 DIAGNOSTIC_PROFILES = {
     "process_summary", "service_status", "container_state", "workload_state", "bounded_log_tail",
@@ -530,9 +534,32 @@ def candidate_request(contestant_ref: str, request: dict[str, Any]) -> dict[str,
     if contestant_ref not in CONTESTANTS:
         raise ValueError("unsupported contestant_ref")
     if contestant_ref == "langgraph-v1" and request.get("operation") == "health":
-        response = public_health(contestant_ref)
-        response["operation"] = "health"
-        return response
+        health = public_health(contestant_ref)
+        return {
+            "ok": True,
+            "operation": "health",
+            "data": {
+                "contract_version": health["contract_version"],
+                "binding": health["binding"],
+                "identity_contract_version": LANGGRAPH_IDENTITY_CONTRACT,
+                "identity_role": "observer",
+                "connector_profile": LANGGRAPH_CONNECTOR_PROFILE,
+                "scope_contract_version": LANGGRAPH_SCOPE_CONTRACT,
+                "audit_contract_version": LANGGRAPH_AUDIT_CONTRACT,
+                "capabilities": health["semantic_capabilities"],
+                "namespace_scope_supported": True,
+                "read_only": health["read_only"],
+                "trial_scope_enforced": health["trial_scope_enforced"],
+                "cross_trial_access": health["cross_trial_access"],
+                "management_identity_reused": health["management_identity_reused"],
+                "hidden_evaluation_data_exposed": health["hidden_evaluation_data_exposed"],
+                "root_or_privileged_required": health["root_or_privileged_required"],
+                "audited": health["audited"],
+                "forced_command": True,
+                "limits_are_safety_fuses_only": health["limits_are_safety_fuses_only"],
+                "identity_persistent": True,
+            },
+        }
     try:
         response = (observe_agent_harness(request) if contestant_ref == "agent-harness-v2"
                     else observe_langgraph(request))

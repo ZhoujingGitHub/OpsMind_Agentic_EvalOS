@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-import datetime as dt
 import importlib.util
 from pathlib import Path
 import stat
@@ -38,10 +37,10 @@ class EvalManagerRollbackTests(unittest.TestCase):
         algorithm = b"ssh-ed25519"
         blob = len(algorithm).to_bytes(4, "big") + algorithm + (32).to_bytes(4, "big") + bytes(range(32))
         public_key = "ssh-ed25519 " + base64.b64encode(blob).decode() + " product-generated"
-        expires_at = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1)) \
-            .isoformat().replace("+00:00", "Z")
         return {"operation": "candidate_authorize", "contestant_ref": "langgraph-v1",
-                "public_key": public_key, "expires_at": expires_at}
+                "public_key": public_key,
+                "identity_contract_version": manager.PERSISTENT_CANDIDATE_IDENTITY,
+                "identity_lifetime": "persistent"}
 
     def test_partial_prepare_rolls_back_only_the_exact_trial_and_clears_binding(self) -> None:
         statuses = [
@@ -93,7 +92,7 @@ class EvalManagerRollbackTests(unittest.TestCase):
         self.assertFalse(response["clean"])
         self.assertFalse(response["candidate_binding_cleared"])
 
-    def test_candidate_authorization_installs_only_a_restricted_expiring_public_key(self) -> None:
+    def test_candidate_authorization_installs_only_a_persistent_restricted_public_key(self) -> None:
         request = self.candidate_authorization()
         with tempfile.TemporaryDirectory() as temporary:
             authorized_keys = Path(temporary) / ".ssh" / "authorized_keys"
@@ -106,25 +105,21 @@ class EvalManagerRollbackTests(unittest.TestCase):
                 response = manager.install_candidate_authorization(request)
             content = authorized_keys.read_text(encoding="utf-8")
             self.assertTrue(content.startswith(
-                'restrict,command="/usr/local/sbin/opsmind-candidate-observation-ssh-gateway",expiry-time="'
+                'restrict,command="/usr/local/sbin/opsmind-candidate-observation-ssh-gateway" '
             ))
-            expiry_option = content.split('expiry-time="', 1)[1].split('"', 1)[0]
-            self.assertRegex(expiry_option, r"^\d{14}$")
-            self.assertNotIn("Z", expiry_option)
+            self.assertNotIn("expiry-time", content)
             self.assertIn(" ssh-ed25519 ", content)
             self.assertNotIn("PRIVATE", content)
             if sys.platform != "win32":
                 self.assertEqual(stat.S_IMODE(authorized_keys.stat().st_mode), 0o600)
             self.assertEqual(response["identity_role"], "candidate_observer")
+            self.assertEqual(response["identity_lifetime"], "persistent")
             self.assertTrue(response["public_key_fingerprint"].startswith("SHA256:"))
 
-    def test_candidate_authorization_converts_utc_expiry_to_server_local_time(self) -> None:
-        expires = dt.datetime(2026, 8, 29, 17, 40, 56, tzinfo=dt.timezone.utc)
-        china_standard_time = dt.timezone(dt.timedelta(hours=8))
-
-        formatted = manager.format_openssh_expiry(expires, china_standard_time)
-
-        self.assertEqual(formatted, "20260830014056")
+    def test_candidate_authorization_rejects_the_removed_expiring_contract(self) -> None:
+        request = {**self.candidate_authorization(), "expires_at": "2026-08-30T00:00:00Z"}
+        with self.assertRaisesRegex(ValueError, "persistent restricted SSH identity"):
+            manager.validate_candidate_authorization(request)
 
     def test_candidate_authorization_is_refused_while_a_trial_is_active(self) -> None:
         with (

@@ -159,14 +159,17 @@ test("考务合同拒绝串用考生命名空间且绝不返回私有租约", ()
     /leaked a private lease/);
 });
 
-test("候选观察SSH公钥轮换只能用于LangGraph独立身份且不携带私钥", () => {
+test("候选观察永久SSH公钥只能用于LangGraph受限独立身份且不携带私钥", () => {
   const request = validateTwinManagerRequest({ operation: "candidate_authorize", contestant_ref: "langgraph-v1",
     public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestPublicKeyOnly",
-    expires_at: "2026-08-29T00:00:00Z" });
+    identity_contract_version: "candidate-persistent-ssh-observer/1.0",
+    identity_lifetime: "persistent" });
   assert.equal(request.operation, "candidate_authorize");
   assert.throws(() => validateTwinManagerRequest({ ...request, contestant_ref: "agent-harness-v2" }),
     /candidate_authorize/);
   assert.throws(() => validateTwinManagerRequest({ ...request, public_key: "PRIVATE KEY" }),
+    /candidate_authorize/);
+  assert.throws(() => validateTwinManagerRequest({ ...request, expires_at: "2026-08-29T00:00:00Z" }),
     /candidate_authorize/);
 });
 

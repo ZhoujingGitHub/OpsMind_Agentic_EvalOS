@@ -120,6 +120,27 @@ class CandidateObservationGatewayTest(unittest.TestCase):
         })
         self.assertTrue(health["ok"])
         self.assertEqual(health["operation"], "health")
+        self.assertEqual(health["data"], {
+            "contract_version": gateway.CONTRACT,
+            "binding": gateway.BINDING,
+            "identity_contract_version": gateway.LANGGRAPH_IDENTITY_CONTRACT,
+            "identity_role": "observer",
+            "connector_profile": gateway.LANGGRAPH_CONNECTOR_PROFILE,
+            "scope_contract_version": gateway.LANGGRAPH_SCOPE_CONTRACT,
+            "audit_contract_version": gateway.LANGGRAPH_AUDIT_CONTRACT,
+            "capabilities": sorted(gateway.CAPABILITIES),
+            "namespace_scope_supported": True,
+            "read_only": True,
+            "trial_scope_enforced": True,
+            "cross_trial_access": False,
+            "management_identity_reused": False,
+            "hidden_evaluation_data_exposed": False,
+            "root_or_privileged_required": False,
+            "audited": True,
+            "forced_command": True,
+            "limits_are_safety_fuses_only": True,
+            "identity_persistent": True,
+        })
         request = {
             "operation": "observe",
             "trial_id": managed_trial_id,

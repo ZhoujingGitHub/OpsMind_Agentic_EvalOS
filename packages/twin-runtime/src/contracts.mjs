@@ -102,8 +102,10 @@ export function validateTwinManagerRequest(request) {
   }
   if (request.operation === "candidate_authorize") {
     if (request.contestant_ref !== "langgraph-v1" || typeof request.public_key !== "string" ||
-        !request.public_key.startsWith("ssh-ed25519 ") || typeof request.expires_at !== "string") {
-      throw new Error("candidate_authorize requires a LangGraph Ed25519 public key and expiry");
+        !request.public_key.startsWith("ssh-ed25519 ") ||
+        request.identity_contract_version !== "candidate-persistent-ssh-observer/1.0" ||
+        request.identity_lifetime !== "persistent" || request.expires_at !== undefined) {
+      throw new Error("candidate_authorize requires the persistent restricted LangGraph Ed25519 identity");
     }
   }
   if (request.seed !== undefined && !Number.isSafeInteger(Number(request.seed))) {

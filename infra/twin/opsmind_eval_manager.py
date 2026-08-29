@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import datetime as dt
 import hashlib
 import json
 import os
@@ -49,6 +48,7 @@ REGRESSION_FAILURE_MODES = {"source_unavailable", "timeout"}
 CANDIDATE_OBSERVER_AUTHORIZED_KEYS = Path(
     "/home/opsmind_lg_candidate_observer/.ssh/authorized_keys"
 )
+PERSISTENT_CANDIDATE_IDENTITY = "candidate-persistent-ssh-observer/1.0"
 
 
 def error(operation: str, code: str, message: str) -> dict[str, Any]:
@@ -144,7 +144,7 @@ def validate(request: Any) -> dict[str, Any]:
     return request
 
 
-def validate_candidate_authorization(request: dict[str, Any]) -> tuple[str, str, str]:
+def validate_candidate_authorization(request: dict[str, Any]) -> tuple[str, str]:
     parts = str(request.get("public_key") or "").strip().split()
     if len(parts) < 2 or parts[0] != "ssh-ed25519":
         raise ValueError("candidate observer public key must be Ed25519")
@@ -159,49 +159,22 @@ def validate_candidate_authorization(request: dict[str, Any]) -> tuple[str, str,
     key_length = int.from_bytes(blob[len(expected):len(expected) + 4], "big")
     if key_length != 32:
         raise ValueError("candidate observer public key payload is invalid")
-    expires_text = str(request.get("expires_at") or "")
-    try:
-        parsed_expiry = dt.datetime.fromisoformat(expires_text.replace("Z", "+00:00"))
-        if parsed_expiry.tzinfo is None or parsed_expiry.utcoffset() != dt.timedelta(0):
-            raise ValueError("UTC timezone required")
-        expires = parsed_expiry.astimezone(dt.timezone.utc)
-    except ValueError as exc:
-        raise ValueError("candidate observer expiry must be RFC3339 UTC") from exc
-    remaining = (expires - dt.datetime.now(dt.timezone.utc)).total_seconds()
-    if remaining < 300 or remaining > 86_400:
-        raise ValueError("candidate observer authorization must expire in 5 minutes to 24 hours")
-    openssh_expiry = format_openssh_expiry(expires)
+    if request.get("identity_contract_version") != PERSISTENT_CANDIDATE_IDENTITY:
+        raise ValueError("candidate observer identity contract mismatch")
+    if request.get("identity_lifetime") != "persistent" or request.get("expires_at") is not None:
+        raise ValueError("candidate observer must use the persistent restricted SSH identity")
     fingerprint = "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
-    return parts[1], openssh_expiry, fingerprint
-
-
-def format_openssh_expiry(
-    expires: dt.datetime,
-    local_timezone: dt.tzinfo | None = None,
-) -> str:
-    """Format an expiry accepted by the Twin host's OpenSSH 8.9 build.
-
-    The public manager contract remains RFC3339 UTC.  Only the authorized_keys
-    representation is converted to the SSH server's local civil time.  The
-    Ubuntu OpenSSH 8.9 build on the Twin accepts the documented local form but
-    rejects the otherwise equivalent trailing-``Z`` form.
-    """
-
-    local_expiry = expires.astimezone(local_timezone) if local_timezone else expires.astimezone()
-    return local_expiry.strftime("%Y%m%d%H%M%S")
+    return parts[1], fingerprint
 
 
 def install_candidate_authorization(request: dict[str, Any]) -> dict[str, Any]:
-    encoded_key, openssh_expiry, fingerprint = validate_candidate_authorization(request)
+    encoded_key, fingerprint = validate_candidate_authorization(request)
     account = pwd.getpwnam("opsmind_lg_candidate_observer")
     directory = CANDIDATE_OBSERVER_AUTHORIZED_KEYS.parent
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chown(directory, account.pw_uid, account.pw_gid)
     os.chmod(directory, 0o700)
-    options = (
-        'restrict,command="/usr/local/sbin/opsmind-candidate-observation-ssh-gateway",'
-        f'expiry-time="{openssh_expiry}"'
-    )
+    options = 'restrict,command="/usr/local/sbin/opsmind-candidate-observation-ssh-gateway"'
     content = f"{options} ssh-ed25519 {encoded_key} evalos-langgraph-candidate-observer\n"
     temporary = CANDIDATE_OBSERVER_AUTHORIZED_KEYS.with_suffix(".tmp")
     temporary.write_text(content, encoding="utf-8")
@@ -213,8 +186,9 @@ def install_candidate_authorization(request: dict[str, Any]) -> dict[str, Any]:
         "operation": "candidate_authorize",
         "contestant_ref": "langgraph-v1",
         "identity_role": "candidate_observer",
+        "identity_contract_version": PERSISTENT_CANDIDATE_IDENTITY,
+        "identity_lifetime": "persistent",
         "public_key_fingerprint": fingerprint,
-        "expires_at": str(request["expires_at"]),
         "management_identity_reused": False,
     }
 
