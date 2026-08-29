@@ -170,9 +170,25 @@ def validate_candidate_authorization(request: dict[str, Any]) -> tuple[str, str,
     remaining = (expires - dt.datetime.now(dt.timezone.utc)).total_seconds()
     if remaining < 300 or remaining > 86_400:
         raise ValueError("candidate observer authorization must expire in 5 minutes to 24 hours")
-    openssh_expiry = expires.strftime("%Y%m%d%H%M%SZ")
+    openssh_expiry = format_openssh_expiry(expires)
     fingerprint = "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
     return parts[1], openssh_expiry, fingerprint
+
+
+def format_openssh_expiry(
+    expires: dt.datetime,
+    local_timezone: dt.tzinfo | None = None,
+) -> str:
+    """Format an expiry accepted by the Twin host's OpenSSH 8.9 build.
+
+    The public manager contract remains RFC3339 UTC.  Only the authorized_keys
+    representation is converted to the SSH server's local civil time.  The
+    Ubuntu OpenSSH 8.9 build on the Twin accepts the documented local form but
+    rejects the otherwise equivalent trailing-``Z`` form.
+    """
+
+    local_expiry = expires.astimezone(local_timezone) if local_timezone else expires.astimezone()
+    return local_expiry.strftime("%Y%m%d%H%M%S")
 
 
 def install_candidate_authorization(request: dict[str, Any]) -> dict[str, Any]:

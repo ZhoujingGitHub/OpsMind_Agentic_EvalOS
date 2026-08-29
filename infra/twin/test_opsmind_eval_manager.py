@@ -108,12 +108,23 @@ class EvalManagerRollbackTests(unittest.TestCase):
             self.assertTrue(content.startswith(
                 'restrict,command="/usr/local/sbin/opsmind-candidate-observation-ssh-gateway",expiry-time="'
             ))
+            expiry_option = content.split('expiry-time="', 1)[1].split('"', 1)[0]
+            self.assertRegex(expiry_option, r"^\d{14}$")
+            self.assertNotIn("Z", expiry_option)
             self.assertIn(" ssh-ed25519 ", content)
             self.assertNotIn("PRIVATE", content)
             if sys.platform != "win32":
                 self.assertEqual(stat.S_IMODE(authorized_keys.stat().st_mode), 0o600)
             self.assertEqual(response["identity_role"], "candidate_observer")
             self.assertTrue(response["public_key_fingerprint"].startswith("SHA256:"))
+
+    def test_candidate_authorization_converts_utc_expiry_to_server_local_time(self) -> None:
+        expires = dt.datetime(2026, 8, 29, 17, 40, 56, tzinfo=dt.timezone.utc)
+        china_standard_time = dt.timezone(dt.timedelta(hours=8))
+
+        formatted = manager.format_openssh_expiry(expires, china_standard_time)
+
+        self.assertEqual(formatted, "20260830014056")
 
     def test_candidate_authorization_is_refused_while_a_trial_is_active(self) -> None:
         with (
