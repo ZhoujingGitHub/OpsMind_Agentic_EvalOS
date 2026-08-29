@@ -1157,8 +1157,10 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
       const candidateObservation = publicCandidateObservation(automation.candidate_observation,
         { requireNamespaceScope: true });
       const modelVisibleResult = publicModelVisibleResult(automation.model_visible_result);
-      const externalTwinReady = Boolean(twinConnector) && ["healthy", "ready", "ok"]
-        .includes(String(twinConnector.status ?? "").toLowerCase()) && candidateObservation.ready;
+      // Candidate Observation is the candidate-scoped, read-only Twin path.
+      // The product's management Protocol-Lab connector may deliberately stay
+      // unconfigured so evaluation never reuses a management identity.
+      const externalTwinReady = candidateObservation.ready;
       const deploymentDeclarationMatches = !runtimeLimits.observable ||
         runtimeLimits.max_run_ms === latestNativeContract.max_run_ms;
       const openResourcePolicy = publicOpenResourcePolicy(automation.open_resource_policy);
@@ -1168,7 +1170,7 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         credential_checks: { distinct_subjects: identitiesSeparated, submitter_least_privilege: submitterScoped,
           approver_least_privilege: approverScoped, administrator_authorized: administratorScoped },
         external_twin_ready: externalTwinReady,
-        twin: { configured: Boolean(twinConnector), connected: externalTwinReady,
+        twin: { configured: candidateObservation.supported || Boolean(twinConnector), connected: externalTwinReady,
           connector_id: twinConnector?.connector_id ?? twinConnector?.name ?? null,
           status: twinConnector?.status ?? null, summary: twinConnector?.public_message ?? null,
           candidate_observation: candidateObservation, model_visible_result: modelVisibleResult },

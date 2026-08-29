@@ -445,6 +445,40 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
   assert.equal(finalized.cleanup_handoff_verified, true);
 });
 
+test("Adapter 5 LangGraph以受限候选观察作为Twin就绪事实且不复用管理连接器", async (t) => {
+  let candidateObservation = LANGGRAPH_CANDIDATE_OBSERVATION;
+  const fixture = await fixtureServer({
+    "GET /api/v1/me": async ({ request }) => request.headers.authorization === "Bearer submitter"
+      ? { subject: "submitter", roles: ["on_call"], tenant_ids: ["tenant-lg"] }
+      : request.headers.authorization === "Bearer approver"
+        ? { subject: "approver", roles: ["approver"], tenant_ids: ["tenant-lg"] }
+        : { subject: "administrator", roles: ["tenant_admin"], tenant_ids: ["tenant-lg"] },
+    "GET /health/ready": async () => ({ ready: true, status: "healthy", architecture_type: "langgraph",
+      connectors: [{ connector_id: "open5gs-ueransim-protocol-lab", status: "unconfigured",
+        public_message: "management connector intentionally disabled" }] }),
+    "GET /api/v1/automation/overview": async () => ({ job_runtime_limits: LANGGRAPH_JOB_RUNTIME_LIMITS,
+      open_resource_policy: OPEN_RESOURCE_POLICY, candidate_observation: candidateObservation,
+      model_visible_result: MODEL_VISIBLE_RESULT }),
+  });
+  t.after(fixture.close);
+  const connector = createLangGraphProductConnectorV5({ origin: fixture.origin, token: "submitter",
+    approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-lg", attestation: ATTESTATION,
+    declaredRuntimeLimits: { max_run_ms: 1020000, cancellation_supported: false,
+      source: "evalos-langgraph-deployment" } });
+
+  const ready = await connector.evaluationReadiness();
+  assert.equal(ready.external_twin_ready, true);
+  assert.equal(ready.twin.configured, true);
+  assert.equal(ready.twin.connected, true);
+  assert.equal(ready.twin.status, "unconfigured");
+  assert.equal(ready.candidate_observation.ready, true);
+
+  candidateObservation = { ...LANGGRAPH_CANDIDATE_OBSERVATION, binding_status: "blocked" };
+  const blocked = await connector.evaluationReadiness();
+  assert.equal(blocked.external_twin_ready, false);
+  assert.equal(blocked.twin.connected, false);
+});
+
 test("Adapter 5 LangGraph连接器拒绝缺失、伪原生或单位错误的公开Job预算合同", async (t) => {
   let jobRuntimeLimits = null;
   const fixture = await fixtureServer({
