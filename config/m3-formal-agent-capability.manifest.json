@@ -204,9 +204,9 @@
       "adapter_version": "candidate-adapter-5.0.0",
       "source_revision": "e9e298c7d719c33244c34246a86d6b70e02590a8",
       "artifact_digest": "sha256:3a02938427b5263144e99298ebf4558519ff35c432e08681a91749c2567aa80c",
-      "runtime_digest": "sha256:be0de0cc6e026dde23f644d9a7c96d1b30ab253eaca16e32ba1a78505c23a0ff",
-      "runtime_manifest_digest": "sha256:1cf2c64b95e24c3e927ad60271f23f3d20dccf3cd76940c09ac08cbc528f62be",
-      "capability_contract_digest": "sha256:5f3a5a40a6d792143767140a1c6b3e4f45c5e3261b893ad5fdde9085fa20cb55",
+      "runtime_digest": "sha256:8340c482c7be76400d07ebf49a8d5b83f0ff03cb35484f94f98ccc19bd0c01ed",
+      "runtime_manifest_digest": "sha256:ae48b49e3d40106d0e970b901602f153ff23310d211d0b0338b741608244b25c",
+      "capability_contract_digest": "sha256:20b0aeb8088d99457bb1c7da1b2eb2b9c2269b734b57595a6ad90690492fd19d",
       "binding_requirement": "PRODUCT_NATIVE_ACK",
       "candidate_runtime": {
         "contract_version": "1.0",
@@ -241,11 +241,11 @@
       "architecture": "LANGGRAPH_PRODUCT",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "f827428cc0aeb40a8d5b185c99a8838b1375e40d",
-      "artifact_digest": "sha256:fa6d87776a45f037008f2f937bf78e6e2f1bd0fd36ba586cf611cb47387a1c8c",
-      "runtime_digest": "sha256:29188ff143703eff9f87bab5ea8536c82ed23061f652bbe8f26e05d5d59e8109",
-      "runtime_manifest_digest": "sha256:403e682709a673e8c536fb6aa2cbde9fce05207848fbfa307e4de62cde03f22c",
-      "capability_contract_digest": "sha256:c6d1bcb0e01d9d69787f1623304441998d5369396003013f6ef6216fdd368f24",
+      "source_revision": "68289f639aa794d58102bec5cae909f774fe22d5",
+      "artifact_digest": "sha256:166eb555b70720b10fd76eddec46b8a31d6e8133b8c9052292dada4f0499bbae",
+      "runtime_digest": "sha256:bbfd7f7a5e8100797ad3c3f2e3219ec3f997b64556dcc01ce56e517703ab0394",
+      "runtime_manifest_digest": "sha256:62d5ee9024cdd2c96a714a4c2f0b2833c8d5cc608c5ad6a14076f14f3a245e4c",
+      "capability_contract_digest": "sha256:be8baef1b7be9c2023ff1cb49fb89b2b75849f342e4636a7216d65d49ed73c2a",
       "binding_requirement": "PRODUCT_NATIVE_ACK",
       "candidate_runtime": {
         "contract_version": "1.0",
@@ -408,9 +408,9 @@
         "provenance": {
           "status": "product_public_maximum",
           "method": "candidate_public_runtime_contract",
-          "source_revision": "f827428cc0aeb40a8d5b185c99a8838b1375e40d",
-          "artifact_digest": "sha256:fa6d87776a45f037008f2f937bf78e6e2f1bd0fd36ba586cf611cb47387a1c8c",
-          "evidence_ref": "candidate-public-contract:langgraph:f827428cc0ae:opsmind-open-resource/1.0"
+          "source_revision": "68289f639aa794d58102bec5cae909f774fe22d5",
+          "artifact_digest": "sha256:166eb555b70720b10fd76eddec46b8a31d6e8133b8c9052292dada4f0499bbae",
+          "evidence_ref": "candidate-public-contract:langgraph:68289f639aa7:opsmind-open-resource/1.0"
         }
       }
     ]
