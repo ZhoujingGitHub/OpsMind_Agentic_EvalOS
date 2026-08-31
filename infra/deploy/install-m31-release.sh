@@ -16,6 +16,7 @@ previous_release="$(readlink -f "$current_link" || true)"
 backups_root="/var/lib/opsmind-evalos/backups"
 backup_root="$backups_root/$release_id"
 unit_backup="/var/lib/opsmind-evalos/backups/$release_id/systemd"
+nginx_config=/etc/nginx/conf.d/opsmind-evalos.conf
 rollback() {
   local exit_code=$?
   if [[ $exit_code -eq 0 ]]; then return; fi
@@ -30,6 +31,9 @@ rollback() {
   if [[ -d "$unit_backup" ]]; then
     cp -f "$unit_backup/opsmind-evalos.service" /etc/systemd/system/opsmind-evalos.service 2>/dev/null || true
     cp -f "$unit_backup/opsmind-evalos-console.service" /etc/systemd/system/opsmind-evalos-console.service 2>/dev/null || true
+    if [[ -f "$unit_backup/opsmind-evalos.conf" ]]; then
+      cp -f "$unit_backup/opsmind-evalos.conf" "$nginx_config" 2>/dev/null || true
+    fi
   fi
   if [[ -f "$backup_root/control/control.sqlite" ]]; then
     rm -f /var/lib/opsmind-evalos/control/control.sqlite*
@@ -43,6 +47,7 @@ rollback() {
   fi
   systemctl daemon-reload 2>/dev/null || true
   systemctl start opsmind-evalos opsmind-evalos-console 2>/dev/null || true
+  nginx -t >/dev/null 2>&1 && systemctl reload nginx 2>/dev/null || true
   exit "$exit_code"
 }
 trap rollback EXIT
@@ -88,6 +93,7 @@ chmod -R a+rX "$release_root"
 mkdir -p "$backup_root/control" "$backup_root/private" "$unit_backup"
 cp -f /etc/systemd/system/opsmind-evalos.service "$unit_backup/opsmind-evalos.service"
 cp -f /etc/systemd/system/opsmind-evalos-console.service "$unit_backup/opsmind-evalos-console.service"
+cp -f "$nginx_config" "$unit_backup/opsmind-evalos.conf"
 
 systemctl stop opsmind-evalos-console opsmind-evalos
 for file in /var/lib/opsmind-evalos/control/control.sqlite*; do [[ -e "$file" ]] && cp -a "$file" "$backup_root/control/"; done
@@ -95,10 +101,13 @@ for file in /var/lib/opsmind-evalos/private/labels.sqlite*; do [[ -e "$file" ]] 
 
 install -m 0644 "$release_root/evalos/infra/systemd/opsmind-evalos.service" /etc/systemd/system/opsmind-evalos.service
 install -m 0644 "$release_root/evalos/infra/systemd/opsmind-evalos-console.service" /etc/systemd/system/opsmind-evalos-console.service
+install -m 0644 "$release_root/evalos/infra/nginx/opsmind-evalos.conf" "$nginx_config"
+nginx -t
 ln -sfn "$release_root" "${current_link}.next"
 mv -Tf "${current_link}.next" "$current_link"
 systemctl daemon-reload
 systemctl start opsmind-evalos opsmind-evalos-console
+systemctl reload nginx
 for attempt in $(seq 1 30); do
   if curl --silent --fail --max-time 5 http://127.0.0.1:8787/ready >/dev/null \
     && curl --silent --fail --max-time 3 http://127.0.0.1:3000/ >/dev/null; then break; fi

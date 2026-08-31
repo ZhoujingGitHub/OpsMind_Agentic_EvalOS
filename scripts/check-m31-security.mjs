@@ -119,6 +119,8 @@ assert.doesNotMatch(consoleServer, /x-untrusted-extra/);
 assert.match(evalosUnit, /EVALOS_CANDIDATE_PRESENCE_CONFIG=\/opt\/opsmind-evalos\/current\/evalos\/config\/candidate-presence-public-keys\.json/);
 assert.match(deploymentInstaller, /test -f "\$release_root\/evalos\/config\/candidate-presence-public-keys\.json"/);
 assert.doesNotMatch(deploymentInstaller, /candidate-presence-public-keys\.json.*\/etc\/opsmind-evalos/s);
+assert.match(deploymentInstaller, /install -m 0644 "\$release_root\/evalos\/infra\/nginx\/opsmind-evalos\.conf" "\$nginx_config"/);
+assert.match(deploymentInstaller, /nginx -t/);
 assert.match(nginx, /location \^~ \/api\/candidate-relay\//);
 assert.match(nginx, /location = \/api\/candidate-presence/);
 assert.match(nginx, /location \/ \{[\s\S]*allow 111\.55\.79\.0\/24;[\s\S]*deny all;/);
