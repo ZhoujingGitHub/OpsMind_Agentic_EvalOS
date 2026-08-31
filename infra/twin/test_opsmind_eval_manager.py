@@ -75,6 +75,38 @@ class EvalManagerRollbackTests(unittest.TestCase):
         run_json.assert_not_called()
         gateway_call.assert_not_called()
 
+    def test_evalos_prepare_claims_the_single_physical_lease_with_the_real_trial_id(self) -> None:
+        request = {
+            "operation": "prepare",
+            "contestant_ref": "langgraph-v1",
+            "trial_id": "lg-managed-1",
+            "scenario_id": "amf-process-down",
+            "seed": 0,
+            "observation_profile": "public-baseline",
+            "evalos_trial_id": "trial-qualification-1",
+            "context_digest": "sha256:" + "a" * 64,
+            "environment_ref": "evalos-twin:trial-qualification-1",
+            "resource_refs": [{"identifier_domain": "opsmind-twin", "namespace": "lg-managed-1",
+                               "resource_type": "workload", "resource_id": "ue-1"}],
+            "service_ids": ["ueransim-ue"],
+        }
+        statuses = [controller_status(None, available=True), controller_status("lg-managed-1", available=False)]
+        with (
+            patch.object(manager.Path, "is_file", return_value=True),
+            patch.object(manager, "controller_status", side_effect=statuses),
+            patch.object(manager, "run_json", return_value={"ok": True, "fingerprint": "fingerprint",
+                                                               "data": {"slot_lease_id": "physical-lease"}}) as run_json,
+            patch.object(manager, "base_call", return_value={"ok": True, "observation_profile": "public-baseline",
+                                                                "profile_digest": "profile", "scenario_clock": "clock"}),
+            patch.object(manager, "gateway_call", return_value={"ok": True, "binding_digest": "binding"}),
+        ):
+            response = manager.dispatch(request)
+        self.assertTrue(response["ok"])
+        run_json.assert_called_once_with([
+            str(manager.CONTROLLERS["langgraph-v1"]["path"]), "manage-prepare", "lg-managed-1",
+            "amf-process-down", "0", "evalos_trial", "trial-qualification-1",
+        ])
+
     def test_idempotent_reset_is_not_clean_when_candidate_binding_remains(self) -> None:
         request = {
             "operation": "reset", "contestant_ref": "agent-harness-v2", "trial_id": "ah-trial-1",

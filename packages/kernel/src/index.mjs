@@ -20,4 +20,5 @@ export * from "./efficiency-audit.mjs";
 export * from "./failure-policy.mjs";
 export * from "./approval-oracle.mjs";
 export * from "./candidate-relay.mjs";
+export * from "./peripheral-mvp-contracts.mjs";
 export * from "./utils.mjs";

@@ -234,6 +234,7 @@ def public_status(contestant_ref: str, response: dict[str, Any]) -> dict[str, An
         "slot_available": data.get("slot_available") is True,
         "slot_lease_present": bool(data.get("slot_lease_id")),
         "controller_status": response.get("status") or data.get("base", {}).get("status"),
+        "physical_lease": data.get("physical_lease") or response.get("physical_lease"),
         "topology": data.get("topology"),
     }
 
@@ -276,6 +277,8 @@ def dispatch(raw_request: Any) -> dict[str, Any]:
                 trial_id,
                 str(request["scenario_id"]),
                 str(request.get("seed", 0)),
+                "evalos_trial",
+                str(request["evalos_trial_id"]),
             ])
             if response.get("ok") is not True:
                 return error(operation, "PREPARE_FAILED", str(response.get("error") or "candidate Twin prepare failed"))

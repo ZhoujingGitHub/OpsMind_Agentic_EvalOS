@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
 import sys
 import tempfile
@@ -26,24 +25,18 @@ class CandidateObservationGatewayTest(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.binding_root = self.root / "bindings"
         self.trial_root = self.root / "trials"
-        self.lease_root = self.root / "leases"
         self.trial_root.mkdir()
-        self.lease_root.mkdir()
+        self.leases: dict[str, dict] = {}
         self.patchers = [
             patch.object(gateway, "ROOT", self.root),
             patch.object(gateway, "BINDING_ROOT", self.binding_root),
             patch.object(gateway, "TRIAL_ROOT", self.trial_root),
+            patch.object(gateway, "active_lease", side_effect=lambda contestant_ref: self.leases.get(contestant_ref, {})),
         ]
         for patcher in self.patchers:
             patcher.start()
-        self.original_contestants = gateway.CONTESTANTS
-        gateway.CONTESTANTS = {
-            key: {**value, "lease": self.lease_root / f"{key}.json"}
-            for key, value in self.original_contestants.items()
-        }
 
     def tearDown(self) -> None:
-        gateway.CONTESTANTS = self.original_contestants
         for patcher in reversed(self.patchers):
             patcher.stop()
         self.temporary.cleanup()
@@ -51,10 +44,12 @@ class CandidateObservationGatewayTest(unittest.TestCase):
     def prepare_binding(self, contestant_ref: str) -> tuple[str, str]:
         managed_trial_id = ("ah-" if contestant_ref == "agent-harness-v2" else "lg-") + "trial-1"
         slot_lease_id = "lease-test-1"
-        Path(gateway.CONTESTANTS[contestant_ref]["lease"]).write_text(json.dumps({
+        self.leases[contestant_ref] = {
             "trial_id": managed_trial_id,
+            "evalos_trial_id": "trial-1",
             "slot_lease_id": slot_lease_id,
-        }), encoding="utf-8")
+            "owner_mode": "evalos_trial",
+        }
         (self.trial_root / managed_trial_id).mkdir()
         response = gateway.bind({
             "contestant_ref": contestant_ref,

@@ -47,13 +47,11 @@ CONTESTANTS = {
         "prefix": "ah-",
         "consumer_id": "opsmind-harness",
         "slot_id": "harness-slot-1",
-        "lease": Path("/var/lib/opsmind-harness-lab/active-lease.json"),
     },
     "langgraph-v1": {
         "prefix": "lg-",
         "consumer_id": "opsmind-langgraph",
         "slot_id": "langgraph-slot-1",
-        "lease": Path("/var/lib/opsmind-langgraph-lab/active-lease.json"),
     },
 }
 
@@ -173,7 +171,17 @@ def load_json(path: Path) -> dict[str, Any]:
 
 
 def active_lease(contestant_ref: str) -> dict[str, Any]:
-    return load_json(Path(CONTESTANTS[contestant_ref]["lease"]))
+    response = base_call({"operation": "lease_status"})
+    physical = dict(response.get("physical_lease") or {})
+    if physical.get("status") != "in_use" or physical.get("candidate_ref") != contestant_ref:
+        return {}
+    return {
+        "trial_id": physical.get("runtime_trial_id"),
+        "evalos_trial_id": physical.get("trial_id"),
+        "slot_lease_id": physical.get("lease_id"),
+        "owner_mode": physical.get("owner_mode"),
+        "boot_id": physical.get("boot_id"),
+    }
 
 
 def load_binding(contestant_ref: str) -> dict[str, Any]:
@@ -239,6 +247,8 @@ def bind(request: dict[str, Any]) -> dict[str, Any]:
     lease = active_lease(contestant_ref)
     if lease.get("trial_id") != managed_trial_id or not lease.get("slot_lease_id"):
         raise PermissionError("candidate observation cannot bind without the active product lease")
+    if lease.get("owner_mode") != "evalos_trial" or lease.get("evalos_trial_id") != evalos_trial_id:
+        raise PermissionError("candidate observation cannot bind outside the exact EvalOS physical lease")
     material = {
         "contract_version": CONTRACT,
         "binding": BINDING,

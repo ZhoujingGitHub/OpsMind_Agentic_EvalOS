@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import signal
 import subprocess
@@ -31,6 +32,8 @@ TRIAL_ROOT = ROOT / "trials"
 PCAP_ROOT = ROOT / "pcap"
 RUNTIME_ROOT = Path("/run/opsmind-twin")
 STATE_FILE = RUNTIME_ROOT / "active.json"
+PHYSICAL_LEASE_FILE = ROOT / "physical-lease.json"
+BOOT_ID_FILE = Path("/proc/sys/kernel/random/boot_id")
 LOCK_FILE = Path("/run/lock/opsmind-twin.lock")
 UERANSIM_ROOT = ROOT / "vendor" / "UERANSIM-3.2.7"
 GNB_BINARY = UERANSIM_ROOT / "build" / "nr-gnb"
@@ -41,6 +44,14 @@ DBCTL_CANDIDATES = [
     Path("/usr/bin/open5gs-dbctl"),
 ]
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+PHYSICAL_LEASE_CONTRACT = "opsmind-physical-lab-lease/1.0"
+OWNER_MODES = {"langgraph_direct", "agent_harness_direct", "evalos_trial"}
+CANDIDATES = {"langgraph-v1", "agent-harness-v2"}
+DIRECT_CANDIDATE = {
+    "langgraph_direct": "langgraph-v1",
+    "agent_harness_direct": "agent-harness-v2",
+}
+MAX_LEASE_TTL_SECONDS = 7200
 
 IMSI = "999700000000001"
 KEY = "465B5CE8B199B49FAA5F0A2EE238A6BC"
@@ -137,6 +148,125 @@ def save_state(state: dict) -> None:
     temporary.write_text(json.dumps(state, ensure_ascii=False, sort_keys=True), encoding="utf-8")
     os.chmod(temporary, 0o600)
     temporary.replace(STATE_FILE)
+
+
+def boot_id() -> str:
+    value = BOOT_ID_FILE.read_text(encoding="ascii").strip()
+    if not ID_RE.fullmatch(value):
+        raise RuntimeError("host boot identity is unavailable")
+    return value
+
+
+def save_physical_lease(lease: dict) -> dict:
+    ROOT.mkdir(parents=True, exist_ok=True)
+    temporary = PHYSICAL_LEASE_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(lease, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    temporary.replace(PHYSICAL_LEASE_FILE)
+    return lease
+
+
+def idle_physical_lease(current_boot_id: str | None = None) -> dict:
+    return {
+        "contract_version": PHYSICAL_LEASE_CONTRACT,
+        "status": "idle",
+        "owner_mode": None,
+        "candidate_ref": None,
+        "trial_id": None,
+        "runtime_trial_id": None,
+        "lease_id": None,
+        "expires_at": None,
+        "boot_id": current_boot_id or boot_id(),
+        "updated_at": now(),
+    }
+
+
+def quarantine_physical_lease(lease: dict | None = None) -> dict:
+    source = lease if isinstance(lease, dict) else {}
+    value = {
+        "contract_version": PHYSICAL_LEASE_CONTRACT,
+        "status": "quarantined",
+        "owner_mode": source.get("owner_mode"),
+        "candidate_ref": source.get("candidate_ref"),
+        "trial_id": source.get("trial_id"),
+        "runtime_trial_id": source.get("runtime_trial_id"),
+        "lease_id": source.get("lease_id"),
+        "expires_at": source.get("expires_at"),
+        "boot_id": source.get("boot_id") or boot_id(),
+        "updated_at": now(),
+    }
+    return save_physical_lease(value)
+
+
+def _parse_utc(value: object) -> dt.datetime | None:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        return None
+    try:
+        return dt.datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError:
+        return None
+
+
+def load_physical_lease() -> dict:
+    """Return the only physical-lab lease and fail closed after restart or damage."""
+
+    if not PHYSICAL_LEASE_FILE.exists():
+        # An upgrade cannot infer whether volatile pre-MVP state was clean.  A
+        # single explicit recover establishes the first trusted idle lease.
+        return quarantine_physical_lease({
+            **idle_physical_lease(),
+            "runtime_trial_id": (load_state() or {}).get("trial_id"),
+        })
+    try:
+        value = json.loads(PHYSICAL_LEASE_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return quarantine_physical_lease()
+    required = {"contract_version", "status", "owner_mode", "candidate_ref", "trial_id",
+                "runtime_trial_id", "lease_id", "expires_at", "boot_id", "updated_at"}
+    if not isinstance(value, dict) or set(value) != required or value.get("contract_version") != PHYSICAL_LEASE_CONTRACT:
+        return quarantine_physical_lease()
+    if value.get("status") not in {"idle", "in_use", "quarantined"}:
+        return quarantine_physical_lease(value)
+    if value.get("boot_id") != boot_id():
+        return quarantine_physical_lease(value)
+    if value.get("status") == "in_use":
+        expires_at = _parse_utc(value.get("expires_at"))
+        if expires_at is None or expires_at <= dt.datetime.now(dt.timezone.utc):
+            return quarantine_physical_lease(value)
+    return value
+
+
+def acquire_physical_lease(request: dict) -> dict:
+    current = load_physical_lease()
+    if current.get("status") != "idle":
+        raise PermissionError(f"physical lab is not idle: {current.get('status')}")
+    owner_mode = str(request["owner_mode"])
+    candidate_ref = str(request["candidate_ref"])
+    runtime_trial_id = str(request["trial_id"])
+    evalos_trial_id = str(request.get("evalos_trial_id") or "") or None
+    ttl_seconds = int(request.get("lease_ttl_seconds", MAX_LEASE_TTL_SECONDS))
+    expires_at = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=ttl_seconds)) \
+        .isoformat().replace("+00:00", "Z")
+    lease = {
+        "contract_version": PHYSICAL_LEASE_CONTRACT,
+        "status": "in_use",
+        "owner_mode": owner_mode,
+        "candidate_ref": candidate_ref,
+        "trial_id": evalos_trial_id,
+        "runtime_trial_id": runtime_trial_id,
+        "lease_id": f"lease-{secrets.token_urlsafe(24)}",
+        "expires_at": expires_at,
+        "boot_id": boot_id(),
+        "updated_at": now(),
+    }
+    return save_physical_lease(lease)
+
+
+def release_physical_lease(runtime_trial_id: str) -> dict:
+    current = load_physical_lease()
+    if current.get("status") != "in_use" or current.get("runtime_trial_id") != runtime_trial_id:
+        raise PermissionError("physical lab lease does not belong to this runtime Trial")
+    return save_physical_lease(idle_physical_lease())
 
 
 def stop_pid(pid_file: Path) -> None:
@@ -513,28 +643,38 @@ def prepare(request: dict) -> dict:
         return {"ok": False, "operation": "prepare", "error": "another Trial is active"}
     if current:
         return {"ok": False, "operation": "prepare", "error": "Trial is already prepared"}
+    lease = load_physical_lease()
+    if lease.get("status") != "idle":
+        return {"ok": False, "operation": "prepare", "error": {
+            "code": "PHYSICAL_LAB_NOT_IDLE",
+            "message": f"physical lab requires reset: {lease.get('status')}",
+        }, "physical_lease": lease}
     reset = reset_baseline()
     if not reset["ok"]:
+        quarantine_physical_lease(lease)
         return {"ok": False, "operation": "prepare", "error": "baseline reset failed",
                 "verification": reset["verification"]}
-    trial_dir = (TRIAL_ROOT / trial_id).resolve()
-    pcap_dir = (PCAP_ROOT / trial_id).resolve()
-    if not trial_dir.is_relative_to(TRIAL_ROOT.resolve()) or not pcap_dir.is_relative_to(PCAP_ROOT.resolve()):
-        return {"ok": False, "operation": "prepare", "error": "Trial path escaped root"}
-    trial_dir.mkdir(parents=True, exist_ok=False)
-    pcap_dir.mkdir(parents=True, exist_ok=False)
-    gnb_path, ue_path = copy_active_configs(scenario)
-    log_offsets = {name: Path(f"/var/log/open5gs/{name}.log").stat().st_size
-                   if Path(f"/var/log/open5gs/{name}.log").exists() else 0
-                   for name in ["amf", "smf", "upf", "nrf", "udr", "ausf", "nssf"]}
-    state = {"trial_id": trial_id, "scenario_id": scenario, "seed": int(request.get("seed", 0)),
-             "trial_dir": str(trial_dir), "pcap_dir": str(pcap_dir), "log_offsets": log_offsets,
-             "prepared_at": now(), "observation_profile": "public-baseline",
-             "regression_failure_mode": None, "overlay_contract_version": "1.0.0",
-             "baseline_ref": "opsmind-m2-baseline-v1", "profile_configured": False,
-             "observation_calls": 0, "overlay_failures": 0}
-    save_state(state)
+    physical_lease = acquire_physical_lease(request)
+    state = None
     try:
+        trial_dir = (TRIAL_ROOT / trial_id).resolve()
+        pcap_dir = (PCAP_ROOT / trial_id).resolve()
+        if not trial_dir.is_relative_to(TRIAL_ROOT.resolve()) or not pcap_dir.is_relative_to(PCAP_ROOT.resolve()):
+            raise RuntimeError("Trial path escaped root")
+        trial_dir.mkdir(parents=True, exist_ok=False)
+        pcap_dir.mkdir(parents=True, exist_ok=False)
+        gnb_path, ue_path = copy_active_configs(scenario)
+        log_offsets = {name: Path(f"/var/log/open5gs/{name}.log").stat().st_size
+                       if Path(f"/var/log/open5gs/{name}.log").exists() else 0
+                       for name in ["amf", "smf", "upf", "nrf", "udr", "ausf", "nssf"]}
+        state = {"trial_id": trial_id, "scenario_id": scenario, "seed": int(request.get("seed", 0)),
+                 "trial_dir": str(trial_dir), "pcap_dir": str(pcap_dir), "log_offsets": log_offsets,
+                 "prepared_at": now(), "observation_profile": "public-baseline",
+                 "regression_failure_mode": None, "overlay_contract_version": "1.0.0",
+                 "baseline_ref": "opsmind-m2-baseline-v1", "profile_configured": False,
+                 "observation_calls": 0, "overlay_failures": 0,
+                 "physical_lease_id": physical_lease["lease_id"]}
+        save_state(state)
         inject_fault(scenario, state)
         start_protocol_runtime(state, gnb_path, ue_path)
         time.sleep(7)
@@ -543,15 +683,18 @@ def prepare(request: dict) -> dict:
         state["evidence_cache"] = sorted(observed_evidence(state))
         save_state(state)
     except Exception:
-        reset_baseline(state)
-        STATE_FILE.unlink(missing_ok=True)
+        try:
+            reset_baseline(state)
+        finally:
+            quarantine_physical_lease(physical_lease)
         raise
     fingerprint = digest({"scenario": scenario, "seed": state["seed"], "baseline": "opsmind-m2-baseline-v1",
                           "components": {"open5gs": "2.8.0", "mongodb": "8.0.29", "ueransim": "3.2.7"}})
     state["fingerprint"] = fingerprint
     save_state(state)
     return {"ok": True, "operation": "prepare", "isolation": "serial-host-runtime+dedicated-artifact-namespace",
-            "fingerprint": fingerprint, "prepared_at": state["prepared_at"]}
+            "fingerprint": fingerprint, "prepared_at": state["prepared_at"],
+            "lease_id": physical_lease["lease_id"], "physical_lease": physical_lease}
 
 
 def configure_profile(request: dict) -> dict:
@@ -897,12 +1040,42 @@ def snapshot(request: dict) -> dict:
 
 def reset(request: dict) -> dict:
     state = require_active(request)
+    lease = load_physical_lease()
+    if lease.get("runtime_trial_id") != state.get("trial_id") or \
+            lease.get("lease_id") != state.get("physical_lease_id"):
+        raise PermissionError("physical lab lease does not match the active runtime Trial")
     result = reset_baseline(state)
     reset_hash = digest({"baseline_ref": result["baseline_ref"], "verification": result["verification"]})
-    STATE_FILE.unlink(missing_ok=True)
+    if result["clean"]:
+        STATE_FILE.unlink(missing_ok=True)
+        physical_lease = release_physical_lease(str(state["trial_id"]))
+    else:
+        physical_lease = quarantine_physical_lease(lease)
     return {"ok": result["ok"], "operation": "reset", "clean": result["clean"],
             "baseline_ref": result["baseline_ref"], "verification": result["verification"],
-            "reset_hash": reset_hash, "reset_at": now()}
+            "reset_hash": reset_hash, "reset_at": now(), "physical_lease": physical_lease}
+
+
+def recover(_: dict) -> dict:
+    """Explicitly prove a clean baseline before clearing quarantine."""
+
+    lease = load_physical_lease()
+    if lease.get("status") == "in_use":
+        return {"ok": False, "operation": "recover", "error": {
+            "code": "ACTIVE_TRIAL_REQUIRES_EXACT_RESET",
+            "message": "an active runtime Trial must be reset by its exact trial_id",
+        }, "physical_lease": lease}
+    state = load_state()
+    result = reset_baseline(state)
+    reset_hash = digest({"baseline_ref": result["baseline_ref"], "verification": result["verification"]})
+    if result["clean"]:
+        STATE_FILE.unlink(missing_ok=True)
+        physical_lease = save_physical_lease(idle_physical_lease())
+    else:
+        physical_lease = quarantine_physical_lease(lease)
+    return {"ok": result["ok"], "operation": "recover", "clean": result["clean"],
+            "baseline_ref": result["baseline_ref"], "verification": result["verification"],
+            "reset_hash": reset_hash, "reset_at": now(), "physical_lease": physical_lease}
 
 
 def health() -> dict:
@@ -915,22 +1088,49 @@ def health() -> dict:
         except Exception as error:
             versions[name] = f"unavailable: {error}"
     state = load_state()
-    return {"ok": True, "operation": "health", "status": "ready" if GNB_BINARY.exists() and UE_BINARY.exists() else "not_ready",
+    lease = load_physical_lease()
+    runtime_ready = GNB_BINARY.exists() and UE_BINARY.exists()
+    status = "quarantined" if lease.get("status") == "quarantined" else "ready" if runtime_ready else "not_ready"
+    return {"ok": True, "operation": "health", "status": status,
             "active_trial": state.get("trial_id") if state else None, "versions": versions,
-            "capacity": {"max_parallel_trials": 1, "active_trials": 1 if state else 0,
+            "physical_lease": lease, "current_boot_id": boot_id(),
+            "recovery_required": lease.get("status") == "quarantined",
+            "capacity": {"max_parallel_trials": 1, "active_trials": 1 if lease.get("status") == "in_use" else 0,
                          "isolation_mode": "serial-host-runtime", "dedicated_trial_artifacts": True},
             "core": {name: service_active(name) for name in ["mongod", *CORE_SERVICES]},
-            "baseline": baseline_verification() if state is None else None, "at": now()}
+            "baseline": baseline_verification() if state is None and lease.get("status") == "idle" else None, "at": now()}
+
+
+def lease_status() -> dict:
+    lease = load_physical_lease()
+    return {"ok": True, "operation": "lease_status", "physical_lease": lease,
+            "current_boot_id": boot_id(), "recovery_required": lease.get("status") == "quarantined",
+            "at": now()}
 
 
 def validate_request(request: dict) -> None:
     operation = request.get("operation")
-    if operation not in {"health", "prepare", "configure_profile", "observe", "act", "snapshot", "reset"}:
+    if operation not in {"health", "lease_status", "recover", "prepare", "configure_profile", "observe", "act", "snapshot", "reset"}:
         raise ValueError("unsupported operation")
-    if operation != "health" and not ID_RE.fullmatch(str(request.get("trial_id", ""))):
+    if operation not in {"health", "lease_status", "recover"} and not ID_RE.fullmatch(str(request.get("trial_id", ""))):
         raise ValueError("invalid trial_id")
-    if operation == "prepare" and not ID_RE.fullmatch(str(request.get("scenario_id", ""))):
-        raise ValueError("invalid scenario_id")
+    if operation == "prepare":
+        if not ID_RE.fullmatch(str(request.get("scenario_id", ""))):
+            raise ValueError("invalid scenario_id")
+        owner_mode = str(request.get("owner_mode", ""))
+        candidate_ref = str(request.get("candidate_ref", ""))
+        if owner_mode not in OWNER_MODES or candidate_ref not in CANDIDATES:
+            raise ValueError("physical lab owner_mode or candidate_ref is invalid")
+        if owner_mode in DIRECT_CANDIDATE and DIRECT_CANDIDATE[owner_mode] != candidate_ref:
+            raise ValueError("physical lab direct mode does not match candidate_ref")
+        evalos_trial_id = str(request.get("evalos_trial_id") or "")
+        if owner_mode == "evalos_trial" and not ID_RE.fullmatch(evalos_trial_id):
+            raise ValueError("evalos_trial requires a valid evalos_trial_id")
+        if owner_mode != "evalos_trial" and evalos_trial_id:
+            raise ValueError("direct physical lab use must not claim an evalos_trial_id")
+        ttl_seconds = request.get("lease_ttl_seconds", MAX_LEASE_TTL_SECONDS)
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or not 60 <= ttl_seconds <= MAX_LEASE_TTL_SECONDS:
+            raise ValueError("lease_ttl_seconds must be between 60 and 7200")
     if operation == "configure_profile":
         profile = request.get("observation_profile")
         if profile not in OBSERVATION_PROFILES:
@@ -943,7 +1143,8 @@ def validate_request(request: dict) -> None:
 
 def dispatch(request: dict) -> dict:
     validate_request(request)
-    return {"health": lambda _: health(), "prepare": prepare, "configure_profile": configure_profile,
+    return {"health": lambda _: health(), "lease_status": lambda _: lease_status(), "recover": recover,
+            "prepare": prepare, "configure_profile": configure_profile,
             "observe": observe, "act": act, "snapshot": snapshot, "reset": reset}[request["operation"]](request)
 
 
