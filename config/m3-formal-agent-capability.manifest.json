@@ -204,9 +204,9 @@
       "adapter_version": "candidate-adapter-5.0.0",
       "source_revision": "e9e298c7d719c33244c34246a86d6b70e02590a8",
       "artifact_digest": "sha256:3a02938427b5263144e99298ebf4558519ff35c432e08681a91749c2567aa80c",
-      "runtime_digest": "sha256:937f3e2d3ad6e9da4e16b0236b3c4b43815d8cd0d6e475800b85df580c4878e7",
-      "runtime_manifest_digest": "sha256:5494c1e65cf53c1244d12c534a53565003cb172f8f4b548464d104a5b43f968f",
-      "capability_contract_digest": "sha256:96b75e2e8cdccc892c0cc83c8df0631848cef85f77d8c22c9f672dadc3994aa5",
+      "runtime_digest": "sha256:2c0e831d62976eed504352047110841d66715c5daf81a9b315f2ef3d95424ff3",
+      "runtime_manifest_digest": "sha256:707d8172edaaaa3524259fb3c5996b709fa907c09494e04e06f50cab2c876cc2",
+      "capability_contract_digest": "sha256:944f4230b58f3dd55fa91686dab34fe3d2c471b0e87a0ecd0c21b8b0834645ed",
       "binding_requirement": "PRODUCT_NATIVE_ACK",
       "candidate_runtime": {
         "contract_version": "1.0",
