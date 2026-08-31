@@ -1,7 +1,7 @@
 # OpsMind 三条端到端链路开发期 MVP 修订版 HANDOFF
 
 - 日期：2026-08-31
-- 状态：**产品经理已明确批准实施；任务0至任务3完成，任务4进行中**
+- 状态：**产品经理已明确批准实施；任务0至任务5完成，并按产品经理要求停在任务5。任务6、7、8未开始**
 - 当前唯一有效方案：本文件
 - 被替代方案：HANDOFF_OpsMind三系统外围架构BreakingChange_会话3_20260831.md
 - 适用范围：LangGraph OpsMind、Agent+Harness OpsMind、OpsMind Agentic EvalOS、5G实验室
@@ -549,7 +549,7 @@ EvalOS 评测两个产品时，必须串行执行：
 
 ### 任务4：再跑通 Agent+Harness 直连链路
 
-**状态：进行中。** 先只读确认 Agent Service、Data Compose、Relay、三角色凭据续期、运行用户和 Secret 权限，再在不改调查核心的前提下收口部署并执行一个真实直连调查。
+**状态：已完成。** 已完成外围部署收口、受限固定发布/回滚、真实 Agent+Harness + 5G实验室直连调查、资源范围修复后的确认性复验和确定性清场。第一次运行如实暴露“资源票没有覆盖 AMF/gNB”的外围问题；修复后第二次真实调查达到 `confirmed`，没有修改 Agent 调查核心。证据见 [`implementation/MVP任务4_AgentHarness直连链路_20260831.md`](implementation/MVP任务4_AgentHarness直连链路_20260831.md)。
 
 #### 要做什么
 
@@ -571,6 +571,8 @@ EvalOS 评测两个产品时，必须串行执行：
 
 ### 任务5：实现统一 Candidate 报到和正确 readiness 顺序
 
+**状态：已完成。** 两套产品现在分别使用独立 Ed25519 机器身份，向 EvalOS 现有入口周期发送只含状态的短期签名报到；EvalOS 只在内存保留180秒，并以签名报到加唯一物理租约作为唯一开考判断。旧 Bearer/SSH Candidate Observation 活动通道、账号和凭据已经删除。两套产品连续两次公开检查均显示“可以参加资格试运行”，5G实验室保持 `idle`，未创建 Trial。证据见 [`implementation/MVP任务5_签名报到与Readiness_20260901.md`](implementation/MVP任务5_签名报到与Readiness_20260901.md)。
+
 #### 要做什么
 
 - 在 EvalOS 现有 Control API 接收签名报到；
@@ -587,6 +589,8 @@ EvalOS 评测两个产品时，必须串行执行：
 
 ### 任务6：跑通 EvalOS 评测 LangGraph
 
+**状态：未开始。** 按产品经理要求，必须等后续明确说“开干”才允许进入；当前没有创建资格 Trial，也没有启动 EvalOS Runner。
+
 #### 要做什么
 
 - 先做零模型的实验准备、绑定、快照、复位冒烟，只验证外围；
@@ -602,6 +606,8 @@ EvalOS 评测两个产品时，必须串行执行：
 
 ### 任务7：跑通 EvalOS 评测 Agent+Harness
 
+**状态：未开始。** 按产品经理要求，必须等后续明确说“开干”才允许进入。
+
 #### 要做什么
 
 - 确认上一个 Trial 已清场；
@@ -616,6 +622,8 @@ EvalOS 评测两个产品时，必须串行执行：
 六类凭证齐全，两套产品已经在同一 EvalOS 规则下各完成一次真实评测。
 
 ### 任务8：统一复盘，决定是否进入正式计分
+
+**状态：未开始。** 按产品经理要求，必须等任务6、7完成后再进入。
 
 #### 要做什么
 
