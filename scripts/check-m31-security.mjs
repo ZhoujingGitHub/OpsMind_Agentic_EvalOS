@@ -31,6 +31,7 @@ const evalosUnit = read("infra/systemd/opsmind-evalos.service");
 const nginx = read("infra/nginx/opsmind-evalos.conf");
 const deploymentSmoke = read("scripts/smoke-m31-deployment.mjs");
 const deploymentInstaller = read("infra/deploy/install-m31-release.sh");
+const releaseBuilder = read("scripts/build-m31-release.mjs");
 
 assert.match(connectors, /tokenSource:\s*"environment-only"/);
 assert.match(connectors, /real candidate product APIs require HTTPS/);
@@ -121,6 +122,8 @@ assert.match(deploymentInstaller, /test -f "\$release_root\/evalos\/config\/cand
 assert.doesNotMatch(deploymentInstaller, /candidate-presence-public-keys\.json.*\/etc\/opsmind-evalos/s);
 assert.match(deploymentInstaller, /install -m 0644 "\$release_root\/evalos\/infra\/nginx\/opsmind-evalos\.conf" "\$nginx_config"/);
 assert.match(deploymentInstaller, /nginx -t/);
+assert.match(releaseBuilder, /linuxTextExtensions/);
+assert.match(releaseBuilder, /replaceAll\("\\r\\n", "\\n"\)/);
 assert.match(nginx, /location \^~ \/api\/candidate-relay\//);
 assert.match(nginx, /location = \/api\/candidate-presence/);
 assert.match(nginx, /location \/ \{[\s\S]*allow 111\.55\.79\.0\/24;[\s\S]*deny all;/);
