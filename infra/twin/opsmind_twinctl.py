@@ -116,6 +116,55 @@ PREFIX_BY_CAPABILITY = {
     "metrics": {"metric", "forecast", "state"},
 }
 
+PUBLIC_RESOURCE_SCOPE_CONTRACT = "opsmind-lab-resource-scope/1.0"
+PUBLIC_RESOURCE_TYPES = {
+    "twin-t1": "runtime",
+    "gnb-1": "workload",
+    "ue-1": "workload",
+    "amf": "service",
+    "smf": "service",
+    "upf": "service",
+    "nrf": "service",
+    "mongodb": "service",
+    "n2": "network_path",
+    "n3": "network_path",
+    "n4": "network_path",
+    "n6": "network_path",
+    "dns": "service",
+}
+PUBLIC_SERVICE_IDS = (
+    "amf",
+    "smf",
+    "upf",
+    "nrf",
+    "mongodb",
+    "ueransim-gnb",
+    "ueransim-ue",
+)
+
+
+def public_resource_scope(trial_id: str) -> dict:
+    """Return the scenario-independent read-only inventory of one leased lab slot."""
+    if not ID_RE.fullmatch(trial_id):
+        raise ValueError("invalid resource scope trial_id")
+    return {
+        "contract_version": PUBLIC_RESOURCE_SCOPE_CONTRACT,
+        "identifier_domain": "opsmind-twin",
+        "namespace": trial_id,
+        "resource_refs": [
+            {
+                "identifier_domain": "opsmind-twin",
+                "namespace": trial_id,
+                "resource_type": resource_type,
+                "resource_id": resource_id,
+            }
+            for resource_id, resource_type in PUBLIC_RESOURCE_TYPES.items()
+        ],
+        "service_ids": list(PUBLIC_SERVICE_IDS),
+        "permissions": ["observations.read"],
+        "production": False,
+    }
+
 
 def now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
@@ -694,7 +743,8 @@ def prepare(request: dict) -> dict:
     save_state(state)
     return {"ok": True, "operation": "prepare", "isolation": "serial-host-runtime+dedicated-artifact-namespace",
             "fingerprint": fingerprint, "prepared_at": state["prepared_at"],
-            "lease_id": physical_lease["lease_id"], "physical_lease": physical_lease}
+            "lease_id": physical_lease["lease_id"], "physical_lease": physical_lease,
+            "resource_scope": public_resource_scope(trial_id)}
 
 
 def configure_profile(request: dict) -> dict:
@@ -1034,7 +1084,8 @@ def snapshot(request: dict) -> dict:
         "observation_calls": int(state.get("observation_calls", 0)),
         "overlay_failures": int(state.get("overlay_failures", 0)),
         "processes": process_view(state), "sessions": session_view(state), "pcap": pcap_view(state),
-        "changes": state.get("changes", []), "recovery": recovery_view(state), "captured_at": now(),
+        "changes": state.get("changes", []), "recovery": recovery_view(state),
+        "resource_scope": public_resource_scope(str(state["trial_id"])), "captured_at": now(),
     }}
 
 
@@ -1094,6 +1145,7 @@ def health() -> dict:
     return {"ok": True, "operation": "health", "status": status,
             "active_trial": state.get("trial_id") if state else None, "versions": versions,
             "physical_lease": lease, "current_boot_id": boot_id(),
+            "resource_scope": public_resource_scope(str(state["trial_id"])) if state else None,
             "recovery_required": lease.get("status") == "quarantined",
             "capacity": {"max_parallel_trials": 1, "active_trials": 1 if lease.get("status") == "in_use" else 0,
                          "isolation_mode": "serial-host-runtime", "dedicated_trial_artifacts": True},

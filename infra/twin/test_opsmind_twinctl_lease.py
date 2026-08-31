@@ -113,6 +113,25 @@ class PhysicalLeaseTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "between 60 and 7200"):
             twinctl.validate_request(self.prepare_request(lease_ttl_seconds=30))
 
+    def test_public_resource_scope_is_complete_and_scenario_independent(self) -> None:
+        first = twinctl.public_resource_scope("lg-direct-check-1")
+        second = twinctl.public_resource_scope("ah-direct-check-2")
+        self.assertEqual(first["contract_version"], "opsmind-lab-resource-scope/1.0")
+        self.assertEqual(first["identifier_domain"], "opsmind-twin")
+        self.assertEqual(first["namespace"], "lg-direct-check-1")
+        self.assertEqual(second["namespace"], "ah-direct-check-2")
+        self.assertEqual(
+            {item["resource_id"]: item["resource_type"] for item in first["resource_refs"]},
+            twinctl.PUBLIC_RESOURCE_TYPES,
+        )
+        self.assertEqual(
+            {item["resource_id"]: item["resource_type"] for item in second["resource_refs"]},
+            twinctl.PUBLIC_RESOURCE_TYPES,
+        )
+        self.assertIn("amf", first["service_ids"])
+        self.assertEqual(first["permissions"], ["observations.read"])
+        self.assertFalse(first["production"])
+
     def test_failed_recovery_remains_quarantined(self) -> None:
         twinctl.load_physical_lease()
         with mock.patch.object(twinctl, "reset_baseline", return_value={
