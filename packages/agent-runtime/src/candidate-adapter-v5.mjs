@@ -145,7 +145,6 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         ? await connector.evaluationReadiness() : { isolated_tenant_slots: 1, safe_parallelism: 1 };
       const healthy = new Set(["reachable", "ready", "healthy", "ok"]).has(String(discovery.health?.status ?? "").toLowerCase());
       const twinReady = connectorReadiness.external_twin_ready === true;
-      const candidateObservationReady = connectorReadiness.candidate_observation?.ready === true;
       const modelVisibleResultReady = connectorReadiness.model_visible_result?.supported === true;
       const settlementWallclockMs = Number(settlementBudget?.wallclock_ms);
       const trialWallclockMs = Number.isFinite(settlementWallclockMs) && settlementWallclockMs > 0
@@ -174,12 +173,11 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         ? "candidate_resource_not_full_product_envelope" : "candidate_budget_would_be_clamped_by_product");
       if (dimensionAlignment.aligned === null) limitations.push("candidate_budget_dimension_alignment_unknown");
       if (openResourceRequired && !openResourceDeclared) limitations.push("candidate_open_resource_declaration_missing");
-      if (requiresTwin && !candidateObservationReady) limitations.push("candidate_observation_binding_not_ready");
       if (requiresTwin && !modelVisibleResultReady) limitations.push("candidate_model_visible_result_contract_missing");
       if (discovery.usage_observability?.complete !== true) limitations.push("candidate_usage_partially_observable");
       const hardReady = healthy && connectorReadiness.identities_separated === true &&
         connectorReadiness.tenant_bound === true && connectorReadiness.least_privilege === true &&
-        (!requiresTwin || (twinReady && candidateObservationReady && modelVisibleResultReady)) &&
+        (!requiresTwin || (twinReady && modelVisibleResultReady)) &&
         budgetAligned !== false && dimensionAlignment.aligned !== false && budgetContractConsistent &&
         (!openResourceRequired || openResourceDeclared);
       const formalReady = hardReady && budgetAligned === true && dimensionAlignment.aligned === true && budgetNative &&
@@ -221,7 +219,8 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         production_writes_available: discovery.production_writes_available,
       };
     },
-    async execute({ executionContract, emit, requestApproval, captureEnvironment, shouldCancel, heartbeat }) {
+    async execute({ executionContract, emit, requestApproval, captureEnvironment, beforeStart,
+      shouldCancel, heartbeat }) {
       if (executionContract.run_class !== "REAL_CANDIDATE" || executionContract.contestant.kind !== "REAL_PRODUCT") {
         throw new Error("Candidate Adapter 5.0 refuses test doubles and non-real runs");
       }
@@ -238,6 +237,10 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
       if (typeof connector.prepare === "function") {
         const preparation = await connector.prepare({ executionContract });
         await emit("candidate.evaluation_context.prepared", "candidate-adapter", preparation ?? {});
+      }
+      if (typeof beforeStart === "function") {
+        const verification = await beforeStart();
+        await emit("candidate.presence_binding.verified", "candidate-adapter", verification ?? {});
       }
       let started;
       try {

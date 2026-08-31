@@ -17,7 +17,7 @@ const failurePolicy = read("packages/kernel/src/failure-policy.mjs");
 const statistics = read("packages/kernel/src/statistics.mjs");
 const resourceProfile = read("packages/kernel/src/budget-profile.mjs");
 const twinEnvironment = read("packages/twin-runtime/src/environment.mjs");
-const candidateObservationGateway = read("infra/twin/opsmind_candidate_observation_gateway.py");
+const peripheralContracts = read("packages/kernel/src/peripheral-mvp-contracts.mjs");
 const packageFiles = ["package.json", "packages/agent-runtime/package.json", "apps/console/package.json"]
   .map(read).join("\n");
 
@@ -63,11 +63,15 @@ assert.match(grader, /descriptive only/);
 assert.match(grader, /DETERMINISTIC_CODE_GRADER/);
 assert.match(twinEnvironment, /ExternalProductTwinEnvironment/);
 assert.match(twinEnvironment, /real candidate product must invoke its own MCP tools/i);
-assert.match(twinEnvironment, /candidate_observation_bound/);
+assert.match(twinEnvironment, /candidate_runtime_lease_bound/);
+assert.match(twinEnvironment, /verifyCandidateBinding/);
 assert.match(connectorsV5, /candidate observation namespace is required/);
 assert.match(connectorsV5, /candidate_observation_binding_not_ready/);
-assert.doesNotMatch(candidateObservationGateway, /(?:LangGraph|ClaudeSDKClient|DeepSeek|hypothesis|root_cause|scenario_id)/,
-  "Candidate observation gateway must remain a semantic read-only boundary, not a candidate workflow or Case brain");
+assert.match(peripheralContracts, /opsmind-candidate-presence\/1\.0/);
+assert.match(peripheralContracts, /assertCandidatePreflight/);
+assert.match(peripheralContracts, /assertCandidateBound/);
+assert.doesNotMatch(peripheralContracts, /(?:LangGraph|ClaudeSDKClient|DeepSeek|hypothesis|root_cause|scenario_id)/,
+  "Candidate presence must remain status-only, not a candidate workflow or Case brain");
 assert.match(runner, /environment\.independent_capture/);
 assert.doesNotMatch(packageFiles, /"(?:langgraph|@langchain\/langgraph|langchain)"\s*:/i);
 const executableManifests = readdirSync(path.join(root, "config")).filter((name) => name.endsWith(".manifest.json"));

@@ -108,7 +108,7 @@ export class ProtocolTwinEnvironment {
 }
 
 export class ExternalProductTwinEnvironment {
-  constructor({ client, caseSpec, trial, candidateBinding }) {
+  constructor({ client, caseSpec, trial, candidateBinding, candidatePresenceVerifier = null }) {
     if (!client?.invoke) throw new Error("Twin manager client with invoke() is required");
     if (caseSpec?.source?.level !== "L2" || !caseSpec?.environment?.scenario_id) throw new Error("L2 Twin environment contract is required");
     this.client = client;
@@ -116,15 +116,17 @@ export class ExternalProductTwinEnvironment {
     this.trial = trial;
     if (!candidateBinding?.context_digest || !Array.isArray(candidateBinding?.resource_refs) ||
         !Array.isArray(candidateBinding?.service_ids)) {
-      throw new Error("External candidate Twin requires a frozen candidate observation binding");
+      throw new Error("External candidate Twin requires a frozen product resource binding");
     }
     this.candidateBinding = structuredClone(candidateBinding);
+    this.candidatePresenceVerifier = candidatePresenceVerifier;
     this.managedTrialId = managedTwinTrialId(trial.contestant_ref, trial.id);
     this.prepared = false;
     this.resetDone = false;
     this.fingerprint = null;
     this.lastSnapshot = null;
     this.captureCount = 0;
+    this.physicalLease = null;
   }
 
   async prepare() {
@@ -156,9 +158,12 @@ export class ExternalProductTwinEnvironment {
       throw error;
     }
     if (response.slot_lease_present !== true) throw new Error("Candidate Twin prepare did not issue a private slot lease");
-    if (response.candidate_observation_bound !== true) throw new Error("Candidate Twin prepare did not bind candidate observation");
+    if (response.candidate_runtime_lease_bound !== true || !response.physical_lease) {
+      throw new Error("Candidate Twin prepare did not expose the public physical lease binding");
+    }
     this.prepared = true;
     this.fingerprint = response.fingerprint ?? null;
+    this.physicalLease = structuredClone(response.physical_lease);
     return {
       ok: true,
       contestant_ref: this.trial.contestant_ref,
@@ -170,9 +175,23 @@ export class ExternalProductTwinEnvironment {
       fingerprint: this.fingerprint,
       isolation: response.isolation ?? "external-product-exclusive-trial",
       slot_lease_present: true,
-      candidate_observation_bound: true,
-      candidate_binding_digest: response.candidate_binding_digest ?? null,
+      candidate_runtime_lease_bound: true,
+      physical_lease: structuredClone(this.physicalLease),
     };
+  }
+
+  async verifyCandidateBinding() {
+    if (!this.prepared || this.resetDone) throw new Error("Candidate Twin must be active before binding verification");
+    if (typeof this.candidatePresenceVerifier !== "function") {
+      throw new Error("Candidate presence binding verifier is not configured");
+    }
+    return this.candidatePresenceVerifier({
+      candidateRef: this.trial.contestant_ref,
+      trialId: this.trial.id,
+      managedTrialId: this.managedTrialId,
+      environmentRef: this.candidateBinding.environment_ref,
+      physicalLease: structuredClone(this.physicalLease),
+    });
   }
 
   async call(toolName) {

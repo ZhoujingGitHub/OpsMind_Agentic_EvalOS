@@ -49,27 +49,6 @@ trap rollback EXIT
 
 [[ ! -e "$release_root" ]] || { echo "release already exists: $release_root" >&2; exit 2; }
 
-# Candidate observer sessions are reloaded on every request.  The service must
-# be able to traverse the private configuration directory and read the atomic
-# hash file, without making either location world-readable.  Reassert this on
-# every deployment so a restored or newly provisioned host cannot silently
-# turn all valid sessions into authentication failures.
-getent group opsmind-secret >/dev/null || { echo "opsmind-secret group is missing" >&2; exit 2; }
-id -nG opsmindeval | tr ' ' '\n' | grep -qx opsmind-secret || {
-  echo "opsmindeval is not a member of opsmind-secret" >&2
-  exit 2
-}
-install -d -o root -g opsmind-secret -m 0750 /etc/opsmind-evalos
-candidate_identity_file=/etc/opsmind-evalos/candidate-observation-identities.json
-if [[ -f "$candidate_identity_file" ]]; then
-  chown root:opsmind-secret "$candidate_identity_file"
-  chmod 0440 "$candidate_identity_file"
-  runuser -u opsmindeval -- test -r "$candidate_identity_file" || {
-    echo "candidate observation identity file is not readable by EvalOS" >&2
-    exit 2
-  }
-fi
-
 # 全量 SQLite 备份只保留最近一代；本次成功后合计两代。防止连续发布把系统盘写满。
 mkdir -p "$backups_root"
 mapfile -t previous_backups < <(find "$backups_root" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
@@ -93,6 +72,7 @@ required_bytes=$((database_bytes + reserve_bytes))
 mkdir -p "$release_root"
 tar -xzf "$archive" -C "$release_root"
 test -f "$release_root/evalos/RELEASE.json"
+test -f "$release_root/evalos/config/candidate-presence-public-keys.json"
 grep -q '"includes_external_candidate_source": false' "$release_root/evalos/RELEASE.json"
 grep -q '"formal_480_enabled": false' "$release_root/evalos/RELEASE.json"
 

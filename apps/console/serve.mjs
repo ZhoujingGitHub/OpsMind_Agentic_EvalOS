@@ -32,11 +32,11 @@ async function assetFetch(request) {
 export async function handleRequest(request) {
   const url = new URL(request.url);
   const relayPath = url.pathname.startsWith("/api/candidate-relay/");
-  const candidateObservationPath = url.pathname.startsWith("/api/candidate-observation/");
+  const candidatePresencePath = url.pathname === "/api/candidate-presence";
   const proxied = url.pathname === "/health" || url.pathname === "/api/runtime/capabilities"
     || url.pathname.startsWith("/api/m2/") || url.pathname.startsWith("/api/workbench/")
     || url.pathname === "/api/analysis-runs" || url.pathname.startsWith("/api/analysis-runs/")
-    || relayPath || candidateObservationPath;
+    || relayPath || candidatePresencePath;
   if (["GET", "POST"].includes(request.method) && proxied) {
     const protectedPath = url.pathname.startsWith("/api/workbench/") || url.pathname.startsWith("/api/analysis-runs");
     if (protectedPath && !API_TOKEN) return new Response(JSON.stringify({ error: "工作台服务端认证尚未配置" }), {
@@ -61,8 +61,8 @@ export async function handleRequest(request) {
         if (value) headers.set(name, value);
       }
     }
-    if (candidateObservationPath) {
-      for (const name of ["authorization", "x-opsmind-identity-role"]) {
+    if (candidatePresencePath) {
+      for (const name of ["x-opsmind-key-id", "x-opsmind-signature"]) {
         const value = request.headers.get(name);
         if (value) headers.set(name, value);
       }

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { generateKeyPairSync, sign } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { buildCandidateConnectorSet, candidatePreflightInput, createApp, evaluationRunName, trialLiveProgressView,
   trustedDeploymentAttestation } from "../src/app.mjs";
-import { createTestDouble, freezeSourceSnapshot } from "../../../packages/kernel/src/index.mjs";
+import { CANDIDATE_PRESENCE_CONTRACT, candidatePresenceSignaturePayload,
+  createTestDouble, freezeSourceSnapshot } from "../../../packages/kernel/src/index.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "config", "m15-smoke.manifest.json"), "utf8"));
@@ -173,75 +174,65 @@ test("Twin状态接口只允许可信服务器执行只读status且不创建Tria
   } finally { app.close(); }
 });
 
-test("候选观察HTTPS入口使用独立短期身份且只转发受限Twin观察", async () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-candidate-observation-"));
-  const calls = [];
-  const accessToken = "candidate-observer-test-session-value";
-  const tokenSha256 = createHash("sha256").update(accessToken).digest("hex");
+test("候选报到入口只收独立签名状态，内存过期且不转发任何调查", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-candidate-presence-"));
+  const langgraph = generateKeyPairSync("ed25519");
+  const agent = generateKeyPairSync("ed25519");
+  const presenceConfig = { candidates: {
+    "agent-harness-v2": { key_id: "agent-presence-key",
+      public_key_pem: agent.publicKey.export({ type: "spki", format: "pem" }) },
+    "langgraph-v1": { key_id: "langgraph-presence-key",
+      public_key_pem: langgraph.publicKey.export({ type: "spki", format: "pem" }) },
+  } };
   const app = createApp({ databasePath: path.join(root, "control.sqlite"),
     privateLabelDatabasePath: path.join(root, "private", "labels.sqlite"), runtimeRoot: root,
-    apiToken: "admin-secret", candidateObservationIdentityConfig: { candidates: {
-      "agent-harness-v2": { token_sha256: `sha256:${tokenSha256}`,
-        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString() },
-    } }, twinManagerClientOverride: { invoke: async (request) => {
-      calls.push(structuredClone(request));
-      if (request.operation === "candidate_health") return { ok: true, operation: "candidate_health",
-        contract_version: "opsmind-candidate-observation-gateway/1.0", binding: "candidate_scoped_trial",
-        identity_role: "candidate_observer", read_only: true, trial_scope_enforced: true,
-        cross_trial_access: false, management_identity_reused: false,
-        hidden_evaluation_data_exposed: false, audited: true };
-      if (request.candidate_request?.capability === "backend_failure") return { ok: false,
-        operation: "candidate_observe", error: { code: "CANDIDATE_OBSERVATION_BACKEND_FAILURE" } };
-      if (request.candidate_request?.capability === "scope_denied") return { ok: false,
-        operation: "candidate_observe", error: { code: "CANDIDATE_OBSERVATION_SCOPE_DENIED" } };
-      return { ok: true, operation: "candidate_observe", request_id: request.candidate_request.request_id,
-        records: [], partial: true, read_only: true };
-    } } });
-  const headers = { authorization: `Bearer ${accessToken}`, "x-opsmind-identity-role": "candidate_observer" };
+    apiToken: "admin-secret", candidatePresenceConfig: presenceConfig });
+  const now = Date.now();
+  const report = { contract_version: CANDIDATE_PRESENCE_CONTRACT,
+    candidate_ref: "agent-harness-v2", release_id: "abcdef123456", product_boot_id: "agent-boot-1",
+    status: "ready", capabilities: ["investigation", "model_visible_result", "protocol_lab_mcp"],
+    database_revision: "017_native_run_context_budget",
+    binding: { status: "unbound", owner_mode: null, trial_id: null, lease_id: null,
+      environment_ref: null, lab_boot_id: null }, observed_at: new Date(now).toISOString(),
+    expires_at: new Date(now + 180000).toISOString(), nonce: "nonce_0123456789012345678901" };
+  const signedRequest = (value, privateKey = agent.privateKey, keyId = "agent-presence-key") => new Request(
+    "http://local/api/candidate-presence", { method: "POST", headers: { "content-type": "application/json",
+      "x-opsmind-key-id": keyId,
+      "x-opsmind-signature": sign(null, Buffer.from(candidatePresenceSignaturePayload(value)), privateKey)
+        .toString("base64url") }, body: JSON.stringify(value) });
   try {
-    const rejected = await app.handler(new Request(
-      "http://local/api/candidate-observation/agent-harness-v2/health",
-      { headers: { authorization: "Bearer admin-secret", "x-opsmind-identity-role": "candidate_observer" } }));
+    const rejected = await app.handler(signedRequest(report, langgraph.privateKey));
     assert.equal(rejected.status, 401);
-    const health = await app.handler(new Request(
-      "http://local/api/candidate-observation/agent-harness-v2/health", { headers }));
-    assert.equal(health.status, 200);
-    const candidateRequest = { request_id: "candidate-observe-1", capability: "runtime_state" };
-    const observed = await app.handler(new Request(
-      "http://local/api/candidate-observation/agent-harness-v2/observe", {
-        method: "POST", headers: { ...headers, "content-type": "application/json" },
-        body: JSON.stringify(candidateRequest),
-      }));
-    assert.equal(observed.status, 200);
+    const accepted = await app.handler(signedRequest(report));
+    assert.equal(accepted.status, 202);
+    assert.equal((await accepted.json()).accepted, true);
+    assert.equal((await app.handler(signedRequest(report))).status, 401);
     const oversized = await app.handler(new Request(
-      "http://local/api/candidate-observation/agent-harness-v2/observe", {
-        method: "POST", headers: { ...headers, "content-type": "application/json" },
+      "http://local/api/candidate-presence", {
+        method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ padding: "x".repeat(2 * 1024 * 1024) }),
       }));
     assert.equal(oversized.status, 413);
     const malformed = await app.handler(new Request(
-      "http://local/api/candidate-observation/agent-harness-v2/observe", {
-        method: "POST", headers: { ...headers, "content-type": "application/json" }, body: "{",
+      "http://local/api/candidate-presence", {
+        method: "POST", headers: { "content-type": "application/json" }, body: "{",
       }));
     assert.equal(malformed.status, 400);
-    assert.deepEqual(calls, [
-      { operation: "candidate_health", contestant_ref: "agent-harness-v2" },
-      { operation: "candidate_observe", contestant_ref: "agent-harness-v2",
-        candidate_request: candidateRequest },
-    ]);
-    for (const [capability, expectedStatus] of [["backend_failure", 503], ["scope_denied", 403]]) {
-      const failure = await app.handler(new Request(
-        "http://local/api/candidate-observation/agent-harness-v2/observe", {
-          method: "POST", headers: { ...headers, "content-type": "application/json" },
-          body: JSON.stringify({ request_id: `candidate-${capability}`, capability }),
-        }));
-      assert.equal(failure.status, expectedStatus);
-    }
     assert.equal(app.store.listTrials().length, 0);
-    const wrongTransport = await app.handler(new Request(
-      "http://local/api/candidate-observation/langgraph-v1/health", { headers }));
-    assert.equal(wrongTransport.status, 404);
+    const view = await app.handler(new Request("http://local/api/workbench/candidate-presence", {
+      headers: { authorization: "Bearer admin-secret" } }));
+    assert.equal(view.status, 200);
+    assert.equal((await view.json()).items.find((item) => item.ref === "agent-harness-v2").report.status, "ready");
   } finally { app.close(); }
+
+  const restarted = createApp({ databasePath: path.join(root, "control.sqlite"),
+    privateLabelDatabasePath: path.join(root, "private", "labels.sqlite"), runtimeRoot: root,
+    apiToken: "admin-secret", candidatePresenceConfig: presenceConfig });
+  try {
+    const view = await restarted.handler(new Request("http://local/api/workbench/candidate-presence", {
+      headers: { authorization: "Bearer admin-secret" } }));
+    assert.equal((await view.json()).items.find((item) => item.ref === "agent-harness-v2").report, null);
+  } finally { restarted.close(); }
 });
 
 test("后续安全复位会解除平台健康阻塞但不会改写失败Trial", async () => {

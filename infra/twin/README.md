@@ -12,12 +12,12 @@
 - 租约持久化记录使用模式、候选产品、EvalOS Trial、内部 Trial、唯一 lease、到期时间和主机
   boot_id。主机重启、租约过期、文件损坏或首次从旧版升级都会进入 `quarantined`；管理员必须执行
   固定的 `recover` 请求，完成确定性基线复位后才能重新变为 `idle`。
-- 真实候选产品的 `runtime_state/service_health/sandboxed_readonly_diagnostic` 通过
-  `opsmind-candidate-observation-gateway/1.0` 访问。它复用同一个独占 Trial 租约，
-  严格绑定上下文摘要和四元资源 Scope，不接受任意 shell、路径、主机、端口或服务名。
-- 当前旧 Candidate 观察入口只在新 HTTPS 报到通道切换完成前临时保留；它们同样只引用最底层
-  物理租约。任务5验收后会一次性删除旧中继和旧 SSH 观察入口。
-- LangGraph 只把公开 Ed25519 公钥交给 EvalOS；`candidate_authorize` 仅在没有活动 Trial
-  时原子安装最长 24 小时的 forced-command 授权。私钥始终留在产品安全存储中。
+- 两套真实候选产品始终使用各自原生的协议实验室 MCP 身份调查；EvalOS 不代理工具调用，
+  也不把考务管理身份借给候选产品。
+- EvalOS 的考务管理器只有 `status/prepare/snapshot/reset` 四个操作。它准备独占物理租约后，
+  只把公开租约编号交给运行面核对，不提供候选 SSH 授权、远程观察或远程健康监督入口。
+- 两套产品每 60 秒向 EvalOS HTTPS 入口发送独立 Ed25519 签名的短时状态。状态只保存在
+  EvalOS 内存 180 秒，说明产品身份、版本、就绪状态及当前 Trial/租约绑定；不包含调查证据、
+  Case、Seed、答案、凭据或修复权限。
 
 组件版本、官方来源和 UERANSIM 源码哈希记录在 `stack.manifest.json`。

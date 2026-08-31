@@ -225,6 +225,9 @@ export class TrialRunner {
       };
       const adapterResult = await adapter.execute({ caseSpec, trial, experiment, executionContract, toolExecutor, emit, requestApproval,
         captureEnvironment,
+        beforeStart: typeof environment.verifyCandidateBinding === "function"
+          ? async () => environment.verifyCandidateBinding()
+          : null,
         shouldCancel: async () => {
           if (leaseError) throw leaseError;
           return this.store.isTrialCancellationRequested(trial.id);

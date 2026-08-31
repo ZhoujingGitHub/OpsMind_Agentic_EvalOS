@@ -92,7 +92,13 @@ test("外部真实考生由 EvalOS 考务控制器准备独立前缀 Trial，考
       active = request.trial_id;
       return { ok: true, operation: "prepare", fingerprint: "candidate-twin-fingerprint",
         isolation: "exclusive_trial", slot_lease_present: true,
-        candidate_observation_bound: true, candidate_binding_digest: `sha256:${"b".repeat(64)}`,
+        candidate_runtime_lease_bound: true, physical_lease: {
+          contract_version: "opsmind-physical-lab-lease/1.0", status: "in_use",
+          owner_mode: "evalos_trial", candidate_ref: "agent-harness-v2",
+          trial_id: "trial_external_1", runtime_trial_id: "ah-trial_external_1",
+          lease_id: "physical-lease-1", expires_at: "2026-09-01T10:00:00.000Z",
+          boot_id: "lab-boot-1", updated_at: "2026-09-01T09:00:00.000Z",
+        },
         observation_profile: request.observation_profile, scenario_clock: "2026-08-23T00:00:00Z",
         profile_digest: "sha256:frozen-profile" };
     }
@@ -110,13 +116,19 @@ test("外部真实考生由 EvalOS 考务控制器准备独立前缀 Trial，考
       identifier_domain: "opsmind-twin", namespace: "ah-trial_external_1",
       resource_type: "network_function", resource_id: "amf",
     }] };
+  const presenceChecks = [];
   const environment = new ExternalProductTwinEnvironment({ client: manager, caseSpec, trial: externalTrial,
-    candidateBinding });
+    candidateBinding, candidatePresenceVerifier: async (binding) => {
+      presenceChecks.push(binding);
+      return { stage: "bound", candidate_ref: binding.candidateRef };
+    } });
   const prepared = await environment.prepare();
   assert.equal(prepared.managed_trial_id, "ah-trial_external_1");
   assert.equal(prepared.slot_lease_present, true);
   assert.equal(prepared.observation_profile, "public-baseline");
   assert.equal(prepared.profile_digest, "sha256:frozen-profile");
+  assert.equal((await environment.verifyCandidateBinding()).stage, "bound");
+  assert.equal(presenceChecks[0].physicalLease.lease_id, "physical-lease-1");
   assert.deepEqual(calls[0].service_ids, ["amf"]);
   assert.deepEqual(calls[0].resource_refs, candidateBinding.resource_refs);
   assert.deepEqual({
@@ -159,21 +171,14 @@ test("考务合同拒绝串用考生命名空间且绝不返回私有租约", ()
     /leaked a private lease/);
 });
 
-test("候选观察永久SSH公钥只能用于LangGraph受限独立身份且不携带私钥", () => {
-  const request = validateTwinManagerRequest({ operation: "candidate_authorize", contestant_ref: "langgraph-v1",
-    public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestPublicKeyOnly",
-    identity_contract_version: "candidate-persistent-ssh-observer/1.0",
-    identity_lifetime: "persistent" });
-  assert.equal(request.operation, "candidate_authorize");
-  assert.throws(() => validateTwinManagerRequest({ ...request, contestant_ref: "agent-harness-v2" }),
-    /candidate_authorize/);
-  assert.throws(() => validateTwinManagerRequest({ ...request, public_key: "PRIVATE KEY" }),
-    /candidate_authorize/);
-  assert.throws(() => validateTwinManagerRequest({ ...request, expires_at: "2026-08-29T00:00:00Z" }),
-    /candidate_authorize/);
+test("考务管理器不再保留候选SSH授权、远程观察或健康监督入口", () => {
+  for (const operation of ["candidate_authorize", "candidate_health", "candidate_observe"]) {
+    assert.throws(() => validateTwinManagerRequest({ operation, contestant_ref: "langgraph-v1" }),
+      /Unsupported Twin manager operation/);
+  }
 });
 
-test("候选观察绑定失败归入平台配置，回滚不干净则停队并归入清场故障", async () => {
+test("候选租约准备失败归入平台配置，回滚不干净则停队并归入清场故障", async () => {
   const caseSpec = M3_CASES["M3-PUB-003"];
   const externalTrial = { id: "trial_binding_failure", contestant_ref: "agent-harness-v2",
     environment_seed: 2026081601 };

@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { createHash, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -8,6 +7,8 @@ import {
   expertCalibrationFromConsensusSamples, createEvalRegistry, createCaseEnvironment, createTestDouble,
   evaluationDecisionReport, evaluationEvidenceTraceView, explainTraceRecord, TRACE_FILTERS, readSnapshotFile, sha256,
   auditTrialEfficiency, candidateExecutionBudget, trialSettlementBudget,
+  CANDIDATE_PRESENCE_PATH, CandidatePresenceRegistry, assertCandidateBound,
+  assertCandidatePreflight,
 } from "../../../packages/kernel/src/index.mjs";
 import {
   BLIND_JUDGE_VERSION, CASE_INVESTIGATOR_RUNTIME, createAgentHarnessProductConnector, createAgentHarnessProductConnectorV5,
@@ -184,9 +185,19 @@ export function createApp({
   cleanupConnectorOverrides = {},
   discoveryConnectorOverrides = {},
   twinManagerClientOverride = null,
-  candidateObservationIdentityConfig = null,
+  candidatePresenceConfig = null,
 } = {}) {
   const registry = createEvalRegistry({ m15Cases: CASES, m2Cases: M2_CASES, m3Cases: M3_CASES });
+  const loadedCandidatePresenceConfig = (() => {
+    if (candidatePresenceConfig) return candidatePresenceConfig;
+    const configPath = process.env.EVALOS_CANDIDATE_PRESENCE_CONFIG;
+    if (!configPath) return { candidates: {} };
+    return JSON.parse(readFileSync(configPath, "utf8"));
+  })();
+  const candidatePresenceCandidates = loadedCandidatePresenceConfig?.candidates ?? {};
+  const candidatePresenceRegistry = Object.keys(candidatePresenceCandidates).length
+    ? new CandidatePresenceRegistry({ candidates: candidatePresenceCandidates })
+    : null;
   const store = new EvalStore({ databasePath, runtimeRoot,
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_m15.sql"),
     migrationPaths: [path.join(ROOT, "infra", "migrations", "sqlite", "002_m25_workbench.sql"),
@@ -318,27 +329,39 @@ export function createApp({
   const twinConfigured = Boolean(twinManagerClientOverride || twinEnvironmentConfigured);
   const twinClient = twinEnvironmentConfigured ? new SshTwinClient() : null;
   const twinManagerClient = twinManagerClientOverride ?? (twinConfigured ? new SshTwinManagerClient() : null);
-  const loadCandidateObservationIdentities = () => {
-    if (candidateObservationIdentityConfig) return candidateObservationIdentityConfig;
-    const configPath = process.env.EVALOS_CANDIDATE_OBSERVATION_IDENTITIES;
-    if (!configPath) return { candidates: {} };
-    try { return JSON.parse(readFileSync(configPath, "utf8")); }
-    catch { return { candidates: {} }; }
+  const presenceExpectation = (candidateRef) => {
+    const item = candidatePresenceCandidates[candidateRef];
+    if (!candidatePresenceRegistry || !item) throw new Error("candidate signed presence is not configured");
+    return {
+      releaseId: item.expected_release_id ?? null,
+      databaseRevision: item.expected_database_revision ?? null,
+      requiredCapabilities: item.required_capabilities ?? [],
+    };
   };
-  const authenticateCandidateObserver = (request, contestantRef) => {
-    // Reload the atomic short-session file for every request so rotation takes
-    // effect without restarting the trusted control plane.
-    const candidateObservationIdentities = loadCandidateObservationIdentities();
-    const configured = candidateObservationIdentities.candidates?.[contestantRef];
-    const authorization = request.headers.get("authorization") ?? "";
-    const identityRole = request.headers.get("x-opsmind-identity-role") ?? "";
-    if (!configured || identityRole !== "candidate_observer" || !authorization.startsWith("Bearer ")) return false;
-    const expiresAt = Date.parse(String(configured.expires_at ?? ""));
-    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now() || expiresAt - Date.now() > 86400000) return false;
-    const actual = createHash("sha256").update(authorization.slice(7).trim()).digest();
-    const expectedHex = String(configured.token_sha256 ?? "").replace(/^sha256:/, "");
-    if (!/^[a-f0-9]{64}$/.test(expectedHex)) return false;
-    return timingSafeEqual(actual, Buffer.from(expectedHex, "hex"));
+  const candidatePresencePreflight = async (candidateRef) => {
+    if (!twinManagerClient) throw new Error("physical lab manager is not configured");
+    const status = await twinManagerClient.invoke({ operation: "status", contestant_ref: candidateRef });
+    if (status?.ok !== true || !status.physical_lease) throw new Error("physical lab status is unavailable");
+    const expected = presenceExpectation(candidateRef);
+    return assertCandidatePreflight({ registry: candidatePresenceRegistry, candidateRef,
+      lease: status.physical_lease, labBootId: status.physical_lease.boot_id, ...expected });
+  };
+  const verifyCandidatePresenceBinding = async ({ candidateRef, trialId, environmentRef, physicalLease }) => {
+    const deadline = Date.now() + 90_000;
+    let lastError = null;
+    do {
+      try {
+        const expected = presenceExpectation(candidateRef);
+        return assertCandidateBound({ registry: candidatePresenceRegistry, candidateRef,
+          lease: physicalLease, trialId, leaseId: physicalLease.lease_id, environmentRef,
+          labBootId: physicalLease.boot_id, ...expected });
+      } catch (error) {
+        lastError = error;
+        if (Date.now() >= deadline) break;
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+      }
+    } while (Date.now() < deadline);
+    throw new Error(`candidate did not confirm the exact Trial binding before model start: ${lastError?.message ?? "unknown"}`);
   };
   const runner = new TrialRunner({ store, ledger, adapters, gradingService, approvalOracle,
     environmentFactory: ({ caseSpec, trial, executionContract }) => {
@@ -349,7 +372,8 @@ export function createApp({
         ? new ExternalProductTwinEnvironment({ client: twinManagerClient, caseSpec, trial,
           candidateBinding: { context_digest: context.context_digest, environment_ref: context.environment_ref,
             resource_refs: candidateResourceReferences(executionContract, namespace),
-            service_ids: candidateServiceIdentifiers(executionContract) } })
+            service_ids: candidateServiceIdentifiers(executionContract) },
+          candidatePresenceVerifier: verifyCandidatePresenceBinding })
         : new ProtocolTwinEnvironment({ client: twinClient, caseSpec, trial });
     } });
   store.recoverInterruptedAnalyses();
@@ -1032,18 +1056,17 @@ export function createApp({
     const cors = {
       "access-control-allow-origin": origin === allowedOrigin ? origin : allowedOrigin,
       vary: "origin",
-      "access-control-allow-headers": "content-type,idempotency-key,authorization,x-opsmind-identity-role,x-reviewer-id,x-reviewer-credential",
+      "access-control-allow-headers": "content-type,idempotency-key,authorization,x-opsmind-key-id,x-opsmind-signature,x-reviewer-id,x-reviewer-credential",
       "access-control-allow-methods": "GET,POST,OPTIONS",
     };
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
     const reviewerDecision = request.method === "POST" && /^\/api\/reviews\/[^/]+\/decisions$/.test(url.pathname);
     const relayMutation = request.method === "POST" && /^\/api\/candidate-relay\/[^/]+\/(?:claim|requests\/[^/]+\/complete)$/.test(url.pathname);
-    const candidateObservationMatch = url.pathname.match(/^\/api\/candidate-observation\/([^/]+)\/(health|observe)$/);
-    const candidateObservationMutation = request.method === "POST" && candidateObservationMatch?.[2] === "observe";
-    if (request.method === "POST" && !reviewerDecision && !relayMutation && !candidateObservationMutation && !apiToken) {
+    const candidatePresenceMutation = request.method === "POST" && url.pathname === CANDIDATE_PRESENCE_PATH;
+    if (request.method === "POST" && !reviewerDecision && !relayMutation && !candidatePresenceMutation && !apiToken) {
       return json({ error: "EVALOS_API_TOKEN must be configured before control-plane mutations" }, 503, cors);
     }
-    if (request.method === "POST" && !reviewerDecision && !relayMutation && !candidateObservationMutation && !isAdmin(request)) {
+    if (request.method === "POST" && !reviewerDecision && !relayMutation && !candidatePresenceMutation && !isAdmin(request)) {
       return json({ error: "authenticated control-plane token required" }, 401, cors);
     }
     try {
@@ -1058,43 +1081,24 @@ export function createApp({
         if (relayClaimMatch) return json({ request: candidateRelay.claim(candidateRef, body) }, 200, cors);
         return json(candidateRelay.complete(candidateRef, decodeURIComponent(relayCompleteMatch[2]), body), 200, cors);
       }
-      if (candidateObservationMatch && ["GET", "POST"].includes(request.method)) {
-        const contestantRef = decodeURIComponent(candidateObservationMatch[1]);
-        const operation = candidateObservationMatch[2];
-        if (contestantRef !== "agent-harness-v2") {
-          return json({ error: { code: "CANDIDATE_OBSERVATION_TRANSPORT_MISMATCH",
-            message: "this candidate uses its independent SSH observation identity" } }, 404, cors);
+      if (candidatePresenceMutation) {
+        if (!candidatePresenceRegistry) return json({ error: { code: "CANDIDATE_PRESENCE_NOT_CONFIGURED",
+          message: "signed candidate presence is not configured" } }, 503, cors);
+        const rawBody = await request.text();
+        if (Buffer.byteLength(rawBody, "utf8") > 64 * 1024) return json({ error: {
+          code: "CANDIDATE_PRESENCE_REQUEST_TOO_LARGE", message: "candidate presence report exceeds 64 KiB" } }, 413, cors);
+        let report;
+        try { report = JSON.parse(rawBody); }
+        catch { return json({ error: { code: "CANDIDATE_PRESENCE_INVALID_JSON",
+          message: "candidate presence report must be valid JSON" } }, 400, cors); }
+        try {
+          const accepted = candidatePresenceRegistry.accept({ report, headers: request.headers });
+          return json({ accepted: true, candidate_ref: accepted.candidate_ref,
+            release_id: accepted.release_id, expires_at: accepted.expires_at }, 202, cors);
+        } catch (error) {
+          return json({ error: { code: "CANDIDATE_PRESENCE_REJECTED",
+            message: String(error?.message ?? error) } }, 401, cors);
         }
-        if (!authenticateCandidateObserver(request, contestantRef)) {
-          return json({ error: { code: "CANDIDATE_OBSERVER_AUTHENTICATION_FAILED",
-            message: "candidate observer short session is missing, expired, or invalid" } }, 401, cors);
-        }
-        if (!twinConfigured) return json({ error: { code: "TWIN_NOT_CONFIGURED",
-          message: "candidate observation Twin backend is unavailable" } }, 503, cors);
-        if (operation === "health" && request.method === "GET") {
-          const response = await twinManagerClient.invoke({ operation: "candidate_health", contestant_ref: contestantRef });
-          return json(response, response.ok === true ? 200 : 503, cors);
-        }
-        if (operation === "observe" && request.method === "POST") {
-          const candidatePayload = await request.text();
-          if (Buffer.byteLength(candidatePayload, "utf8") > 2 * 1024 * 1024) {
-            return json({ error: { code: "CANDIDATE_OBSERVATION_REQUEST_TOO_LARGE",
-              message: "candidate observation request exceeds the gateway limit" } }, 413, cors);
-          }
-          let candidateRequest;
-          try { candidateRequest = JSON.parse(candidatePayload); }
-          catch { return json({ error: { code: "CANDIDATE_OBSERVATION_REQUEST_INVALID",
-            message: "candidate observation request must be valid JSON" } }, 400, cors); }
-          const response = await twinManagerClient.invoke({ operation: "candidate_observe", contestant_ref: contestantRef,
-            candidate_request: candidateRequest });
-          const code = String(response.error?.code ?? "");
-          const status = response.ok === true ? 200
-            : code === "CANDIDATE_OBSERVATION_SCOPE_DENIED" ? 403
-              : code === "CANDIDATE_OBSERVATION_REQUEST_INVALID" ? 400
-                : code === "CANDIDATE_OBSERVATION_BACKEND_FAILURE" ? 503 : 502;
-          return json(response, status, cors);
-        }
-        return json({ error: { code: "METHOD_NOT_ALLOWED", message: "candidate observation method is not allowed" } }, 405, cors);
       }
       if (request.method === "GET" && url.pathname === "/ready") {
         return json({ status: "ok", ready: true, service: "opsmind-evalos-control-api",
@@ -1112,6 +1116,13 @@ export function createApp({
       if (request.method === "GET" && url.pathname === "/api/workbench/operations-health") {
         if (!isAdmin(request)) return json({ error: "authenticated workbench session required" }, 401, cors);
         return json(operationsHealth(), 200, cors);
+      }
+      if (request.method === "GET" && url.pathname === "/api/workbench/candidate-presence") {
+        if (!isAdmin(request)) return json({ error: "authenticated workbench session required" }, 401, cors);
+        return json({ contract: "evalos-candidate-presence-view.1", memory_only: true,
+          items: ["agent-harness-v2", "langgraph-v1"].map((ref) => ({ ref,
+            configured: Boolean(candidatePresenceCandidates[ref]),
+            report: candidatePresenceRegistry?.current(ref) ?? null })) }, 200, cors);
       }      if (request.method === "GET" && url.pathname === "/api/runtime/capabilities") {
         return json({ contract: "evalos-runtime-capabilities.3", milestone: frozenM31Manifest.milestone,
           eval_intelligence_enabled: liveDeepSeekAvailable,
@@ -1139,6 +1150,7 @@ export function createApp({
           }
           try {
             const check = await adapter.preflight(candidatePreflightInput(frozenM31Manifest, frozen));
+            const presence = await candidatePresencePreflight(ref);
             const budgetLimited = check.formal_ready !== true;
             items.push({ ref, kind: "REAL_PRODUCT", configured: true, ready: check.ready,
               architecture: check.architecture, source_revision: check.source_revision,
@@ -1149,7 +1161,7 @@ export function createApp({
                 : "外部产品可达，版本指纹一致，评测身份相互独立，数字孪生已连接；Candidate 获得产品公开最大资源，数值只作安全熔断且用量不参与评分。")
                 : "产品健康、数字孪生、身份隔离、最小权限、评测租户或候选超时预算未达到开考要求。",
               health: check.health, isolation: check.isolation, credentials: check.credentials,
-              twin: check.twin, budget: check.budget,
+              twin: check.twin, budget: check.budget, presence,
               resource_contract: frozenM31Manifest.manifest_version === "8.0" ? {
                 manifest_version: frozenM31Manifest.manifest_version,
                 mode: frozenM31Manifest.candidate_resource_contract.mode,

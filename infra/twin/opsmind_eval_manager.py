@@ -10,11 +10,8 @@ observer/action/verifier identities after the Trial has been prepared.
 from __future__ import annotations
 
 import base64
-import binascii
-import hashlib
 import json
 import os
-import pwd
 import re
 import subprocess
 import sys
@@ -33,11 +30,7 @@ CONTROLLERS = {
     },
 }
 BASE = Path("/usr/local/sbin/opsmind-twinctl")
-CANDIDATE_GATEWAY = Path("/usr/local/sbin/opsmind-candidate-observation-gateway")
-OPERATIONS = {
-    "status", "prepare", "snapshot", "reset", "candidate_health", "candidate_observe",
-    "candidate_authorize",
-}
+OPERATIONS = {"status", "prepare", "snapshot", "reset"}
 OBSERVATION_PROFILES = {
     "public-baseline",
     "hidden-benign-noise",
@@ -45,10 +38,6 @@ OBSERVATION_PROFILES = {
     "regression-first-observation-fails",
 }
 REGRESSION_FAILURE_MODES = {"source_unavailable", "timeout"}
-CANDIDATE_OBSERVER_AUTHORIZED_KEYS = Path(
-    "/home/opsmind_lg_candidate_observer/.ssh/authorized_keys"
-)
-PERSISTENT_CANDIDATE_IDENTITY = "candidate-persistent-ssh-observer/1.0"
 
 
 def error(operation: str, code: str, message: str) -> dict[str, Any]:
@@ -81,20 +70,6 @@ def base_call(request: dict[str, Any]) -> dict[str, Any]:
     return run_json([str(BASE), "request", encoded])
 
 
-def gateway_call(operation: str, request: dict[str, Any] | None = None,
-                 contestant_ref: str | None = None) -> dict[str, Any]:
-    if not CANDIDATE_GATEWAY.is_file():
-        raise RuntimeError("candidate observation gateway is not installed")
-    if operation == "health":
-        return run_json([str(CANDIDATE_GATEWAY), "health", str(contestant_ref)], timeout=45)
-    encoded = base64.urlsafe_b64encode(
-        json.dumps(request or {}, ensure_ascii=False, separators=(",", ":")).encode()
-    ).decode().rstrip("=")
-    if operation == "request":
-        return run_json([str(CANDIDATE_GATEWAY), "request", str(contestant_ref), encoded])
-    return run_json([str(CANDIDATE_GATEWAY), operation, encoded], timeout=45)
-
-
 def validate(request: Any) -> dict[str, Any]:
     if not isinstance(request, dict):
         raise ValueError("request must be an object")
@@ -104,7 +79,7 @@ def validate(request: Any) -> dict[str, Any]:
         raise ValueError("unsupported manager operation")
     if contestant_ref not in CONTROLLERS:
         raise ValueError("unsupported contestant_ref")
-    if operation not in {"status", "candidate_health", "candidate_observe", "candidate_authorize"}:
+    if operation != "status":
         trial_id = str(request.get("trial_id", ""))
         prefix = str(CONTROLLERS[contestant_ref]["prefix"])
         if not ID_RE.fullmatch(trial_id) or not trial_id.startswith(prefix):
@@ -134,63 +109,7 @@ def validate(request: Any) -> dict[str, Any]:
             raise ValueError("candidate resource_refs are required")
         if not isinstance(request.get("service_ids"), list) or not request["service_ids"]:
             raise ValueError("candidate service_ids are required")
-    if operation == "candidate_observe":
-        if not isinstance(request.get("candidate_request"), dict):
-            raise ValueError("candidate_request must be an object")
-    if operation == "candidate_authorize":
-        if contestant_ref != "langgraph-v1":
-            raise ValueError("candidate_authorize is only available for the independent SSH candidate")
-        validate_candidate_authorization(request)
     return request
-
-
-def validate_candidate_authorization(request: dict[str, Any]) -> tuple[str, str]:
-    parts = str(request.get("public_key") or "").strip().split()
-    if len(parts) < 2 or parts[0] != "ssh-ed25519":
-        raise ValueError("candidate observer public key must be Ed25519")
-    try:
-        blob = base64.b64decode(parts[1], validate=True)
-    except (ValueError, binascii.Error) as exc:
-        raise ValueError("candidate observer public key encoding is invalid") from exc
-    algorithm = b"ssh-ed25519"
-    expected = len(algorithm).to_bytes(4, "big") + algorithm
-    if not blob.startswith(expected) or len(blob) != len(expected) + 4 + 32:
-        raise ValueError("candidate observer public key payload is invalid")
-    key_length = int.from_bytes(blob[len(expected):len(expected) + 4], "big")
-    if key_length != 32:
-        raise ValueError("candidate observer public key payload is invalid")
-    if request.get("identity_contract_version") != PERSISTENT_CANDIDATE_IDENTITY:
-        raise ValueError("candidate observer identity contract mismatch")
-    if request.get("identity_lifetime") != "persistent" or request.get("expires_at") is not None:
-        raise ValueError("candidate observer must use the persistent restricted SSH identity")
-    fingerprint = "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
-    return parts[1], fingerprint
-
-
-def install_candidate_authorization(request: dict[str, Any]) -> dict[str, Any]:
-    encoded_key, fingerprint = validate_candidate_authorization(request)
-    account = pwd.getpwnam("opsmind_lg_candidate_observer")
-    directory = CANDIDATE_OBSERVER_AUTHORIZED_KEYS.parent
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chown(directory, account.pw_uid, account.pw_gid)
-    os.chmod(directory, 0o700)
-    options = 'restrict,command="/usr/local/sbin/opsmind-candidate-observation-ssh-gateway"'
-    content = f"{options} ssh-ed25519 {encoded_key} evalos-langgraph-candidate-observer\n"
-    temporary = CANDIDATE_OBSERVER_AUTHORIZED_KEYS.with_suffix(".tmp")
-    temporary.write_text(content, encoding="utf-8")
-    os.chown(temporary, account.pw_uid, account.pw_gid)
-    os.chmod(temporary, 0o600)
-    temporary.replace(CANDIDATE_OBSERVER_AUTHORIZED_KEYS)
-    return {
-        "ok": True,
-        "operation": "candidate_authorize",
-        "contestant_ref": "langgraph-v1",
-        "identity_role": "candidate_observer",
-        "identity_contract_version": PERSISTENT_CANDIDATE_IDENTITY,
-        "identity_lifetime": "persistent",
-        "public_key_fingerprint": fingerprint,
-        "management_identity_reused": False,
-    }
 
 
 def controller_status(contestant_ref: str) -> dict[str, Any]:
@@ -211,14 +130,9 @@ def rollback_prepared_trial(contestant_ref: str, controller: str, trial_id: str)
         else:
             reset_clean = before.get("slot_available") is True
         status = public_status(contestant_ref, controller_status(contestant_ref))
-        cleared = gateway_call("clear", {
-            "contestant_ref": contestant_ref,
-            "managed_trial_id": trial_id,
-        })
         return (
             reset_clean
             and status.get("slot_available") is True
-            and cleared.get("ok") is True
         )
     except Exception:
         return False
@@ -249,18 +163,6 @@ def dispatch(raw_request: Any) -> dict[str, Any]:
 
     if operation == "status":
         return public_status(contestant_ref, controller_status(contestant_ref))
-
-    if operation == "candidate_health":
-        return gateway_call("health", contestant_ref=contestant_ref)
-
-    if operation == "candidate_observe":
-        return gateway_call("request", request=dict(request["candidate_request"]), contestant_ref=contestant_ref)
-
-    if operation == "candidate_authorize":
-        status = public_status(contestant_ref, controller_status(contestant_ref))
-        if status.get("active_trial") is not None or status.get("slot_available") is not True:
-            return error(operation, "TWIN_SLOT_BUSY", "candidate identity cannot rotate during an active Trial")
-        return install_candidate_authorization(request)
 
     trial_id = str(request["trial_id"])
     if operation == "prepare":
@@ -304,23 +206,6 @@ def dispatch(raw_request: Any) -> dict[str, Any]:
                 return error(operation, "PREPARE_ROLLBACK_FAILED",
                              "candidate Twin lease verification failed and rollback did not prove clean")
             return error(operation, "LEASE_NOT_ISSUED", "candidate Twin did not issue an isolated slot lease")
-        binding_response = gateway_call("bind", {
-            "contestant_ref": contestant_ref,
-            "evalos_trial_id": request["evalos_trial_id"],
-            "managed_trial_id": trial_id,
-            "context_digest": request["context_digest"],
-            "environment_ref": request["environment_ref"],
-            "resource_refs": request["resource_refs"],
-            "service_ids": request["service_ids"],
-        })
-        if binding_response.get("ok") is not True:
-            rolled_back = rollback_prepared_trial(contestant_ref, controller, trial_id)
-            if not rolled_back:
-                return error(operation, "PREPARE_ROLLBACK_FAILED",
-                             "candidate observation binding failed and the exact Trial rollback did not prove clean")
-            return error(operation, "CANDIDATE_BINDING_FAILED", str(
-                binding_response.get("error") or "candidate observation binding failed"
-            ))
         return {
             "ok": True,
             "operation": "prepare",
@@ -334,8 +219,8 @@ def dispatch(raw_request: Any) -> dict[str, Any]:
             "fingerprint": profile_response.get("fingerprint") or response.get("fingerprint"),
             "isolation": (response.get("data") or {}).get("isolation", "exclusive_trial"),
             "slot_lease_present": True,
-            "candidate_observation_bound": True,
-            "candidate_binding_digest": binding_response.get("binding_digest"),
+            "candidate_runtime_lease_bound": True,
+            "physical_lease": after.get("physical_lease"),
             "idempotent": bool(idempotent or profile_response.get("idempotent")),
             "topology": (response.get("data") or {}).get("topology") or after.get("topology"),
         }
@@ -367,12 +252,8 @@ def dispatch(raw_request: Any) -> dict[str, Any]:
 
     status = public_status(contestant_ref, controller_status(contestant_ref))
     if status.get("active_trial") is None and status.get("slot_available"):
-        binding_clear = gateway_call("clear", {
-            "contestant_ref": contestant_ref,
-            "managed_trial_id": trial_id,
-        })
         health = base_call({"operation": "health"})
-        clean = health.get("active_trial") is None and binding_clear.get("ok") is True
+        clean = health.get("active_trial") is None
         return {
             "ok": clean,
             "operation": "reset",
@@ -381,7 +262,6 @@ def dispatch(raw_request: Any) -> dict[str, Any]:
             "clean": clean,
             "idempotent": True,
             "baseline": health.get("baseline"),
-            "candidate_binding_cleared": binding_clear.get("ok") is True,
         }
     if status.get("active_trial") != trial_id:
         return error(operation, "TRIAL_SCOPE_MISMATCH", "refusing to reset a different active Twin Trial")
@@ -394,8 +274,6 @@ def dispatch(raw_request: Any) -> dict[str, Any]:
         and after.get("slot_available") is True
         and health.get("active_trial") is None
     )
-    binding_clear = gateway_call("clear", {"contestant_ref": contestant_ref, "managed_trial_id": trial_id})
-    clean = clean and binding_clear.get("ok") is True
     return {
         "ok": clean,
         "operation": "reset",
@@ -405,7 +283,6 @@ def dispatch(raw_request: Any) -> dict[str, Any]:
         "reset_hash": response.get("reset_hash"),
         "baseline_ref": response.get("baseline_ref"),
         "slot_available": after.get("slot_available") is True,
-        "candidate_binding_cleared": binding_clear.get("ok") is True,
     }
 
 

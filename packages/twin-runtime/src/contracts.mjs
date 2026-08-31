@@ -21,7 +21,7 @@ const OBSERVATION_PROFILES = new Set([
 ]);
 const REGRESSION_FAILURE_MODES = new Set(["source_unavailable", "timeout"]);
 const MANAGER_OPERATIONS = new Set([
-  "status", "prepare", "snapshot", "reset", "candidate_health", "candidate_observe", "candidate_authorize",
+  "status", "prepare", "snapshot", "reset",
 ]);
 const MANAGED_CONTESTANTS = Object.freeze({
   "agent-harness-v2": "ah-",
@@ -69,7 +69,7 @@ export function validateTwinManagerRequest(request) {
   if (!MANAGER_OPERATIONS.has(request.operation)) throw new Error(`Unsupported Twin manager operation: ${request.operation}`);
   const prefix = MANAGED_CONTESTANTS[request.contestant_ref];
   if (!prefix) throw new Error(`Unsupported managed contestant: ${request.contestant_ref}`);
-  if (!["status", "candidate_health", "candidate_observe", "candidate_authorize"].includes(request.operation)) {
+  if (request.operation !== "status") {
     if (!ID.test(String(request.trial_id ?? "")) || !String(request.trial_id).startsWith(prefix)) {
       throw new Error(`Managed Twin trial_id must start with ${prefix}`);
     }
@@ -94,18 +94,6 @@ export function validateTwinManagerRequest(request) {
     if (!Array.isArray(request.service_ids) || request.service_ids.length === 0 ||
         request.service_ids.some((value) => !CONTEXT_REF.test(String(value)))) {
       throw new Error("Candidate service_ids are required");
-    }
-  }
-  if (request.operation === "candidate_observe" &&
-      (!request.candidate_request || typeof request.candidate_request !== "object" || Array.isArray(request.candidate_request))) {
-    throw new Error("candidate_observe requires candidate_request");
-  }
-  if (request.operation === "candidate_authorize") {
-    if (request.contestant_ref !== "langgraph-v1" || typeof request.public_key !== "string" ||
-        !request.public_key.startsWith("ssh-ed25519 ") ||
-        request.identity_contract_version !== "candidate-persistent-ssh-observer/1.0" ||
-        request.identity_lifetime !== "persistent" || request.expires_at !== undefined) {
-      throw new Error("candidate_authorize requires the persistent restricted LangGraph Ed25519 identity");
     }
   }
   if (request.seed !== undefined && !Number.isSafeInteger(Number(request.seed))) {

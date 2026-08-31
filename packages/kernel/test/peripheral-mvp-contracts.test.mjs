@@ -44,7 +44,7 @@ function presenceFixture() {
   } });
   const report = (overrides = {}) => ({ contract_version: CANDIDATE_PRESENCE_CONTRACT,
     candidate_ref: "langgraph-v1", release_id: "68289f639aa7", product_boot_id: "product-boot-lg",
-    status: "ready", capabilities: ["investigation", "candidate_observation", "model_visible_result"],
+    status: "ready", capabilities: ["investigation", "model_visible_result", "protocol_lab_mcp"],
     database_revision: "20260828_0011", binding: { status: "unbound", owner_mode: null, trial_id: null,
       lease_id: null, environment_ref: null, lab_boot_id: null }, observed_at: new Date(now).toISOString(),
     expires_at: new Date(now + 180_000).toISOString(), nonce: "nonce_0123456789012345678901", ...overrides });
@@ -101,7 +101,7 @@ test("readiness 先允许未绑定预检，模型启动前必须再次核对精�
   fixture.submit(fixture.report());
   const preflight = assertCandidatePreflight({ registry: fixture.registry, candidateRef: "langgraph-v1",
     lease: idleLease(), releaseId: "68289f639aa7", databaseRevision: "20260828_0011",
-    requiredCapabilities: ["investigation", "candidate_observation", "model_visible_result"], labBootId: BOOT });
+    requiredCapabilities: ["investigation", "model_visible_result", "protocol_lab_mcp"], labBootId: BOOT });
   assert.equal(preflight.stage, "preflight");
   assert.throws(() => assertCandidateBound({ registry: fixture.registry, candidateRef: "langgraph-v1",
     lease: activeLease(), trialId: "trial-qualification-1", leaseId: "lease-qualification-1",
@@ -116,7 +116,7 @@ test("readiness 先允许未绑定预检，模型启动前必须再次核对精�
   const bound = assertCandidateBound({ registry: fixture.registry, candidateRef: "langgraph-v1",
     lease: activeLease(), trialId: "trial-qualification-1", leaseId: "lease-qualification-1",
     environmentRef: "evalos-twin:trial-qualification-1", releaseId: "68289f639aa7",
-    databaseRevision: "20260828_0011", requiredCapabilities: ["candidate_observation"],
+    databaseRevision: "20260828_0011", requiredCapabilities: ["protocol_lab_mcp"],
     labBootId: BOOT, nowMs: NOW + 1_000 });
   assert.equal(bound.stage, "bound");
 });
