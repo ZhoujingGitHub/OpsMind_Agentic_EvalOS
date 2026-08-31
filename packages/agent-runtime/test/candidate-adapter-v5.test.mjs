@@ -109,6 +109,23 @@ test("Candidate Adapter 5.0在产品公开预算与部署声明漂移时阻止�
   assert.equal(check.budget.deployment_declaration_matches, false);
 });
 
+test("Candidate Adapter 5.0指纹漂移错误给出实际公开摘要", async () => {
+  const base = connector("PRODUCT_NATIVE_ACK");
+  const drifted = { ...base,
+    discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "EXTERNAL_PRODUCT",
+      production_writes_available: false, health: { status: "healthy" }, native_run_context_supported: true,
+      usage_observability: { complete: true }, ...FINGERPRINTS,
+      runtime_digest: `sha256:${"1".repeat(64)}`,
+      runtime_manifest_digest: `sha256:${"2".repeat(64)}` }),
+  };
+  const adapter = createCandidateAdapterV5({ id: "candidate", connector: drifted });
+
+  await assert.rejects(
+    adapter.preflight({ contestant: contract("PRODUCT_NATIVE_ACK").contestant }),
+    new RegExp(`runtime_digest=sha256:${"1".repeat(64)}.*runtime_manifest_digest=sha256:${"2".repeat(64)}`),
+  );
+});
+
 test("Candidate Adapter 5.0不把仅公开数值但未原生强制的预算当作正式就绪", async () => {
   const base = connector("PRODUCT_NATIVE_ACK");
   const unnativelyBounded = { ...base,

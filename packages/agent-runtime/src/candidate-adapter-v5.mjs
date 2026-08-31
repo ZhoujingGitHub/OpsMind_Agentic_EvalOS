@@ -34,8 +34,11 @@ function assertDiscovery(discovery, contestant) {
   if (!discovery || discovery.candidate_kind !== "REAL_PRODUCT") {
     throw new Error("Candidate Adapter 5.0 accepts only an external REAL_PRODUCT discovery document");
   }
-  for (const field of ["source_revision", "artifact_digest", "runtime_digest", "runtime_manifest_digest", "capability_contract_digest"]) {
-    if (discovery[field] !== contestant[field]) throw new Error(`candidate discovery drift: ${field}`);
+  const fingerprintDrift = ["source_revision", "artifact_digest", "runtime_digest", "runtime_manifest_digest",
+    "capability_contract_digest"].filter((field) => discovery[field] !== contestant[field]);
+  if (fingerprintDrift.length) {
+    throw new Error(`candidate discovery drift: ${fingerprintDrift
+      .map((field) => `${field}=${String(discovery[field] ?? "missing")}`).join(",")}`);
   }
   if (discovery.architecture !== contestant.architecture) throw new Error("candidate discovery drift: architecture");
   if (contestant.candidate_runtime && canonical(discovery.candidate_runtime) !== canonical(contestant.candidate_runtime)) {
