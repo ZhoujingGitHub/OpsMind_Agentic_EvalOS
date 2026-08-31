@@ -15,7 +15,7 @@
     "langgraph-v1": {
       "key_id": "langgraph-presence-20260901",
       "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEADNES37BWyx9Z60kRYB0v3fxDzMNpF8ReMxPws+6ITuI=\n-----END PUBLIC KEY-----\n",
-      "expected_release_id": "b97488187eae",
+      "expected_release_id": "4acc8432f2e8",
       "expected_database_revision": "20260828_0011",
       "required_capabilities": [
         "investigation",
