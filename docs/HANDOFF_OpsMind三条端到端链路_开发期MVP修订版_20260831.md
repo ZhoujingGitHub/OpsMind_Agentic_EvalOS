@@ -1,7 +1,7 @@
 # OpsMind 三条端到端链路开发期 MVP 修订版 HANDOFF
 
 - 日期：2026-08-31
-- 状态：**产品经理已明确批准实施；任务0、任务1、任务2完成，任务3进行中**
+- 状态：**产品经理已明确批准实施；任务0至任务3完成，任务4进行中**
 - 当前唯一有效方案：本文件
 - 被替代方案：HANDOFF_OpsMind三系统外围架构BreakingChange_会话3_20260831.md
 - 适用范围：LangGraph OpsMind、Agent+Harness OpsMind、OpsMind Agentic EvalOS、5G实验室
@@ -11,6 +11,8 @@
 > 实施已开始。任务0完成了版本冻结、只读核对、保护性磁盘清理和本机管理 WireGuard 持久化修复；没有修改三套平台的产品核心，没有创建调查或 Trial，没有启动 EvalOS Runner，也没有对5G实验室执行 prepare、observe 或 reset。详细证据见 [`implementation/MVP任务0_冻结基线_20260831.md`](implementation/MVP任务0_冻结基线_20260831.md)。
 >
 > 产品经理已于 2026-08-31 明确要求“现在开始做，八个任务依次完成”，满足开工门禁。按本文编号，先执行不计入八个改造任务的任务0，再严格串行执行任务1至任务8。任务6和任务7各只允许一个真实资格验证 Trial，不计入正式成绩和排名；正式计分和批量 Trial 仍未获授权。
+>
+> 任务3已完成 LangGraph OpsMind + 真实5G实验室直连：真实双模型、自主工具取证、Evidence Gate、Checkpoint、报告归档和实验室复位均留下可核对证据；同时收掉 systemd/Docker 双重监督，固定受限发布与回滚路径，并修复真实耗时记账为0的问题。详细证据见 [`implementation/MVP任务3_LangGraph直连链路_20260831.md`](implementation/MVP任务3_LangGraph直连链路_20260831.md)。该运行不是 EvalOS Trial，也没有正式成绩。
 
 ---
 
@@ -525,7 +527,7 @@ EvalOS 评测两个产品时，必须串行执行：
 
 ### 任务3：先跑通 LangGraph 直连链路
 
-**状态：进行中。** 必须先完成应用和数据库恢复备份，再精确移除旧双重监督，随后才允许运行一次真实 LangGraph + 5G实验室直连调查。
+**状态：已完成。** 已完成恢复备份、单一 Docker 监督、受限固定发布/回滚、一次真实 LangGraph + 5G实验室调查和清场；真实运行暴露的耗时记账问题也已修复并部署。六类证据与诚实限制见 [`implementation/MVP任务3_LangGraph直连链路_20260831.md`](implementation/MVP任务3_LangGraph直连链路_20260831.md)。
 
 #### 要做什么
 
@@ -546,6 +548,8 @@ EvalOS 评测两个产品时，必须串行执行：
 停在本任务内定位，不进入 Agent+Harness，不用改 EvalOS 来掩盖问题。
 
 ### 任务4：再跑通 Agent+Harness 直连链路
+
+**状态：进行中。** 先只读确认 Agent Service、Data Compose、Relay、三角色凭据续期、运行用户和 Secret 权限，再在不改调查核心的前提下收口部署并执行一个真实直连调查。
 
 #### 要做什么
 
