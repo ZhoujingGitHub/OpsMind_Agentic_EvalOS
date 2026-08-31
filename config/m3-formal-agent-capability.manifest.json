@@ -220,7 +220,7 @@
           }
         ],
         "versions": {
-          "service": "2.7.2",
+          "service": "2.8.0",
           "investigation": "opsmind-investigation/3.0",
           "report": "opsmind-report-delivery/2.0",
           "protocol_binding": "opsmind-protocol-lab-binding/2.0",

@@ -144,7 +144,6 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
       const connectorReadiness = typeof connector.evaluationReadiness === "function"
         ? await connector.evaluationReadiness() : { isolated_tenant_slots: 1, safe_parallelism: 1 };
       const healthy = new Set(["reachable", "ready", "healthy", "ok"]).has(String(discovery.health?.status ?? "").toLowerCase());
-      const twinReady = connectorReadiness.external_twin_ready === true;
       const modelVisibleResultReady = connectorReadiness.model_visible_result?.supported === true;
       const settlementWallclockMs = Number(settlementBudget?.wallclock_ms);
       const trialWallclockMs = Number.isFinite(settlementWallclockMs) && settlementWallclockMs > 0
@@ -177,7 +176,7 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
       if (discovery.usage_observability?.complete !== true) limitations.push("candidate_usage_partially_observable");
       const hardReady = healthy && connectorReadiness.identities_separated === true &&
         connectorReadiness.tenant_bound === true && connectorReadiness.least_privilege === true &&
-        (!requiresTwin || (twinReady && modelVisibleResultReady)) &&
+        (!requiresTwin || modelVisibleResultReady) &&
         budgetAligned !== false && dimensionAlignment.aligned !== false && budgetContractConsistent &&
         (!openResourceRequired || openResourceDeclared);
       const formalReady = hardReady && budgetAligned === true && dimensionAlignment.aligned === true && budgetNative &&
@@ -202,8 +201,8 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         isolation: { tenant_bound: connectorReadiness.tenant_bound === true,
           isolated_tenant_slots: Number(connectorReadiness.isolated_tenant_slots ?? 0),
           safe_parallelism: Number(connectorReadiness.safe_parallelism ?? 1) },
-        twin: { required: requiresTwin, ready: twinReady, ...(connectorReadiness.twin ?? {}),
-          candidate_observation: connectorReadiness.candidate_observation ?? null,
+        twin: { required: requiresTwin, ready: null,
+          readiness_authority: "evalos_signed_candidate_presence",
           model_visible_result: connectorReadiness.model_visible_result ?? null },
         budget: { trial_wallclock_ms: Number.isFinite(trialWallclockMs) ? trialWallclockMs : null,
           candidate_max_run_ms: budgetObservable ? candidateMaxRunMs : null,

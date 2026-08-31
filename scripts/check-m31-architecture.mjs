@@ -65,8 +65,9 @@ assert.match(twinEnvironment, /ExternalProductTwinEnvironment/);
 assert.match(twinEnvironment, /real candidate product must invoke its own MCP tools/i);
 assert.match(twinEnvironment, /candidate_runtime_lease_bound/);
 assert.match(twinEnvironment, /verifyCandidateBinding/);
-assert.match(connectorsV5, /candidate observation namespace is required/);
-assert.match(connectorsV5, /candidate_observation_binding_not_ready/);
+assert.match(adapterV5, /readiness_authority: "evalos_signed_candidate_presence"/);
+assert.doesNotMatch(adapterV5, /candidate_observation_binding_not_ready/,
+  "Legacy Candidate Observation must not remain a second Twin readiness authority");
 assert.match(peripheralContracts, /opsmind-candidate-presence\/1\.0/);
 assert.match(peripheralContracts, /assertCandidatePreflight/);
 assert.match(peripheralContracts, /assertCandidateBound/);

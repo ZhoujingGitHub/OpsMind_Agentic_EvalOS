@@ -151,6 +151,21 @@ class PhysicalLeaseTest(unittest.TestCase):
         self.assertEqual(response["physical_lease"]["status"], "idle")
         run.assert_not_called()
 
+    def test_legacy_lease_timestamp_is_canonicalized_once(self) -> None:
+        lease = {
+            **twinctl.idle_physical_lease("boot-one"),
+            "updated_at": "2026-09-01T09:00:00.123456Z",
+        }
+        twinctl.save_physical_lease(lease)
+
+        loaded = twinctl.load_physical_lease()
+
+        self.assertEqual(loaded["updated_at"], "2026-09-01T09:00:00.123Z")
+        self.assertEqual(
+            twinctl.load_physical_lease()["updated_at"],
+            "2026-09-01T09:00:00.123Z",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

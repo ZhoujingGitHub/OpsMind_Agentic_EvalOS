@@ -167,7 +167,13 @@ def public_resource_scope(trial_id: str) -> dict:
 
 
 def now() -> str:
-    return dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    return _format_utc(dt.datetime.now(dt.timezone.utc))
+
+
+def _format_utc(value: dt.datetime) -> str:
+    return value.astimezone(dt.timezone.utc).isoformat(timespec="milliseconds").replace(
+        "+00:00", "Z"
+    )
 
 
 def digest(value: object) -> str:
@@ -278,11 +284,18 @@ def load_physical_lease() -> dict:
         return quarantine_physical_lease(value)
     if value.get("boot_id") != boot_id():
         return quarantine_physical_lease(value)
+    updated_at = _parse_utc(value.get("updated_at"))
+    if updated_at is None:
+        return quarantine_physical_lease(value)
+    normalized = {**value, "updated_at": _format_utc(updated_at)}
     if value.get("status") == "in_use":
         expires_at = _parse_utc(value.get("expires_at"))
         if expires_at is None or expires_at <= dt.datetime.now(dt.timezone.utc):
             return quarantine_physical_lease(value)
-    return value
+        normalized["expires_at"] = _format_utc(expires_at)
+    if normalized != value:
+        return save_physical_lease(normalized)
+    return normalized
 
 
 def acquire_physical_lease(request: dict) -> dict:
@@ -294,8 +307,9 @@ def acquire_physical_lease(request: dict) -> dict:
     runtime_trial_id = str(request["trial_id"])
     evalos_trial_id = str(request.get("evalos_trial_id") or "") or None
     ttl_seconds = int(request.get("lease_ttl_seconds", MAX_LEASE_TTL_SECONDS))
-    expires_at = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=ttl_seconds)) \
-        .isoformat().replace("+00:00", "Z")
+    expires_at = _format_utc(
+        dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=ttl_seconds)
+    )
     lease = {
         "contract_version": PHYSICAL_LEASE_CONTRACT,
         "status": "in_use",

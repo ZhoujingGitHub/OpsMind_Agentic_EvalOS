@@ -130,6 +130,30 @@ test("Candidate Adapter 5.0不把仅公开数值但未原生强制的预算当�
   assert.ok(check.limitations.includes("candidate_budget_not_natively_enforced"));
 });
 
+test("Candidate Adapter 5.0不再把旧Candidate Observation当作第二套Twin监督", async () => {
+  const base = connector("PRODUCT_NATIVE_ACK");
+  const oldObserverUnavailable = { ...base,
+    discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "EXTERNAL_PRODUCT",
+      production_writes_available: false, health: { status: "healthy" }, native_run_context_supported: true,
+      usage_observability: { complete: true }, ...FINGERPRINTS }),
+    evaluationReadiness: async () => ({ identities_separated: true, tenant_bound: true, least_privilege: true,
+      isolated_tenant_slots: 1, safe_parallelism: 1, external_twin_ready: false,
+      candidate_observation: { supported: true, ready: false, binding_status: "blocked" },
+      model_visible_result: MODEL_VISIBLE_RESULT_READY,
+      budget_contract: { observable: true, max_run_ms: 1000, native_enforcement: true,
+        dimensions: { max_tool_calls: 24 }, deployment_declaration_matches: true } }),
+  };
+  const adapter = createCandidateAdapterV5({ id: "candidate", connector: oldObserverUnavailable });
+
+  const check = await adapter.preflight({ contestant: contract("PRODUCT_NATIVE_ACK").contestant,
+    requiresTwin: true, budget: { wallclock_ms: 1000 } });
+
+  assert.equal(check.ready, true);
+  assert.equal(check.twin.ready, null);
+  assert.equal(check.twin.readiness_authority, "evalos_signed_candidate_presence");
+  assert.equal(Object.hasOwn(check.twin, "candidate_observation"), false);
+});
+
 test("Candidate Adapter 5.0逐维核对冻结资源，拒绝产品用更低原生上限静默截断", async () => {
   const base = connector("PRODUCT_NATIVE_ACK");
   const bounded = { ...base,
