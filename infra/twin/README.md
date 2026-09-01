@@ -21,3 +21,15 @@
   Case、Seed、答案、凭据或修复权限。
 
 组件版本、官方来源和 UERANSIM 源码哈希记录在 `stack.manifest.json`。
+
+## 控制器版本与回滚
+
+开发期只使用一套很小的版本机制，不新增服务和数据库：
+
+1. 在已经提交且没有未提交代码的分支上运行 `python3 infra/twin/build-controller-release.py`。
+2. 构建结果记录完整 Git 版本、固定文件清单、逐文件摘要和组件清单摘要。
+3. 服务器只保留 `/opt/opsmind-twin-controller/current` 与 `previous` 两个活动指针。
+4. 统一入口 `opsmind-twin-install-release` 只提供 `status`、`install`、`rollback`；安装和回滚都要求物理实验室租约处于 `idle`。
+5. `health` 与 `lease_status` 返回当前控制器的版本身份；旧式、无法溯源的安装会明确显示为 `legacy-unversioned`，不能冒充已确认版本。
+
+仓库不再保存手工打包且来源不明的控制器压缩包。构建产物只生成在被 Git 忽略的 `.deploy/twin-controller/`，通过版本身份和摘要交付。

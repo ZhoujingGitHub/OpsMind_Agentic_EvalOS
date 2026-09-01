@@ -35,6 +35,7 @@ STATE_FILE = RUNTIME_ROOT / "active.json"
 PHYSICAL_LEASE_FILE = ROOT / "physical-lease.json"
 BOOT_ID_FILE = Path("/proc/sys/kernel/random/boot_id")
 LOCK_FILE = Path("/run/lock/opsmind-twin.lock")
+CONTROLLER_RELEASE_FILE = Path("/opt/opsmind-twin-controller/current/RELEASE.json")
 UERANSIM_ROOT = ROOT / "vendor" / "UERANSIM-3.2.7"
 GNB_BINARY = UERANSIM_ROOT / "build" / "nr-gnb"
 UE_BINARY = UERANSIM_ROOT / "build" / "nr-ue"
@@ -141,6 +142,32 @@ PUBLIC_SERVICE_IDS = (
     "ueransim-gnb",
     "ueransim-ue",
 )
+
+
+def controller_release() -> dict:
+    """Return the installed controller identity without probing the lab runtime."""
+
+    try:
+        metadata = json.loads(CONTROLLER_RELEASE_FILE.read_text(encoding="utf-8"))
+        if metadata.get("contract") != "opsmind-twin-controller-release/1.0":
+            raise ValueError("unsupported release contract")
+        if not re.fullmatch(r"twin-controller-[0-9]{8}-[a-f0-9]{10}", str(metadata.get("release_id", ""))):
+            raise ValueError("invalid release id")
+        if not re.fullmatch(r"[a-f0-9]{40}", str(metadata.get("source_revision", ""))):
+            raise ValueError("invalid source revision")
+        for field in ("content_digest", "component_manifest_digest"):
+            if not re.fullmatch(r"sha256:[a-f0-9]{64}", str(metadata.get(field, ""))):
+                raise ValueError(f"invalid {field}")
+        return {
+            "installed": True,
+            **{field: metadata.get(field) for field in (
+                "release_id", "source_revision", "content_digest", "component_manifest_digest"
+            )},
+        }
+    except FileNotFoundError:
+        return {"installed": False, "status": "legacy-unversioned"}
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+        return {"installed": False, "status": "invalid", "error": str(error)[:160]}
 
 
 def public_resource_scope(trial_id: str) -> dict:
@@ -1158,6 +1185,7 @@ def health() -> dict:
     status = "quarantined" if lease.get("status") == "quarantined" else "ready" if runtime_ready else "not_ready"
     return {"ok": True, "operation": "health", "status": status,
             "active_trial": state.get("trial_id") if state else None, "versions": versions,
+            "controller_release": controller_release(),
             "physical_lease": lease, "current_boot_id": boot_id(),
             "resource_scope": public_resource_scope(str(state["trial_id"])) if state else None,
             "recovery_required": lease.get("status") == "quarantined",
@@ -1170,6 +1198,7 @@ def health() -> dict:
 def lease_status() -> dict:
     lease = load_physical_lease()
     return {"ok": True, "operation": "lease_status", "physical_lease": lease,
+            "controller_release": controller_release(),
             "current_boot_id": boot_id(), "recovery_required": lease.get("status") == "quarantined",
             "at": now()}
 
