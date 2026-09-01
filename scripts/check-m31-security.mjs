@@ -124,6 +124,11 @@ assert.match(deploymentInstaller, /install -m 0644 "\$release_root\/evalos\/infr
 assert.match(deploymentInstaller, /nginx -t/);
 assert.match(releaseBuilder, /linuxTextExtensions/);
 assert.match(releaseBuilder, /replaceAll\("\\r\\n", "\\n"\)/);
+assert.match(releaseBuilder, /git", \["rev-parse", "--verify", "HEAD"\]/);
+assert.match(releaseBuilder, /release source contains uncommitted tracked changes/);
+assert.match(releaseBuilder, /contract: "evalos-release\.2"/);
+assert.match(releaseBuilder, /source_revision: sourceRevision/);
+assert.match(deploymentInstaller, /"source_revision": "\[a-f0-9\]\{40\}"/);
 assert.match(nginx, /location \^~ \/api\/candidate-relay\//);
 assert.match(nginx, /location = \/api\/candidate-presence/);
 assert.match(nginx, /location \/ \{[\s\S]*allow 111\.55\.79\.0\/24;[\s\S]*deny all;/);
