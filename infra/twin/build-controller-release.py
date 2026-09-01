@@ -12,7 +12,6 @@ import gzip
 import hashlib
 import json
 from pathlib import Path
-import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -63,7 +62,6 @@ def main() -> int:
 
     commit_time = git("show", "-s", "--format=%ct", "HEAD")
     commit_day = git("show", "-s", "--format=%cd", "--date=format:%Y%m%d", "HEAD")
-    component_manifest_digest = f"sha256:{sha256(TWIN_ROOT / 'stack.manifest.json')}"
 
     with tempfile.TemporaryDirectory(prefix="opsmind-twin-controller-") as temporary:
         payload_root = Path(temporary) / "controller"
@@ -74,7 +72,9 @@ def main() -> int:
                 raise RuntimeError(f"controller release input is missing: {relative}")
             target = payload_root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, target)
+            target.write_bytes(source.read_bytes().replace(b"\r\n", b"\n"))
+
+        component_manifest_digest = f"sha256:{sha256(payload_root / 'stack.manifest.json')}"
 
         inventory = [
             {

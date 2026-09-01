@@ -84,6 +84,7 @@ assert.match(twinControllerInstaller, /PREVIOUS_LINK=.*\/previous/);
 assert.doesNotMatch(twinControllerInstaller, /SOURCE_ROOT/);
 assert.match(twinControllerReleaseBuilder, /refuses uncommitted tracked changes/);
 assert.match(twinControllerReleaseBuilder, /source_revision/);
+assert.match(twinControllerReleaseBuilder, /replace\(b"\\r\\n", b"\\n"\)/);
 assert.match(candidatePresence, /CandidatePresenceRegistry/);
 assert.match(candidatePresence, /createPublicKey/);
 assert.match(candidatePresence, /signature verification failed/);
