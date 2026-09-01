@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -29,6 +30,7 @@ class PhysicalLeaseTest(unittest.TestCase):
             mock.patch.object(twinctl, "PHYSICAL_LEASE_FILE", self.root / "physical-lease.json"),
             mock.patch.object(twinctl, "STATE_FILE", self.root / "active.json"),
             mock.patch.object(twinctl, "BOOT_ID_FILE", self.boot_file),
+            mock.patch.object(twinctl, "CONTROLLER_RELEASE_FILE", self.root / "RELEASE.json"),
         ]
         for patcher in self.patches:
             patcher.start()
@@ -149,6 +151,27 @@ class PhysicalLeaseTest(unittest.TestCase):
         with mock.patch.object(twinctl, "run") as run:
             response = twinctl.dispatch({"operation": "lease_status"})
         self.assertEqual(response["physical_lease"]["status"], "idle")
+        self.assertEqual(response["controller_release"]["status"], "legacy-unversioned")
+        run.assert_not_called()
+
+    def test_lease_status_reports_the_installed_controller_release(self) -> None:
+        self.establish_idle()
+        twinctl.CONTROLLER_RELEASE_FILE.write_text(json.dumps({
+            "contract": "opsmind-twin-controller-release/1.0",
+            "release_id": "twin-controller-20260901-0123456789",
+            "source_revision": "a" * 40,
+            "content_digest": "sha256:" + "b" * 64,
+            "component_manifest_digest": "sha256:" + "c" * 64,
+        }), encoding="utf-8")
+
+        with mock.patch.object(twinctl, "run") as run:
+            response = twinctl.dispatch({"operation": "lease_status"})
+
+        self.assertTrue(response["controller_release"]["installed"])
+        self.assertEqual(
+            response["controller_release"]["release_id"],
+            "twin-controller-20260901-0123456789",
+        )
         run.assert_not_called()
 
     def test_legacy_lease_timestamp_is_canonicalized_once(self) -> None:
