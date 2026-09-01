@@ -38,7 +38,7 @@ assert.ok(overview.counts.datasets >= 1, "frozen datasets must be visible");
 assert.ok(overview.counts.cases >= 1, "versioned cases must be visible");
 
 const datasets = await (await get("/api/workbench/datasets", /application\/json/)).json();
-const frozenM3 = datasets.items.find((item) => item.dataset_ref === "m3-l2-agentic-formal@3.0.0");
+const frozenM3 = datasets.items.find((item) => item.dataset_ref === "m3-l2-agentic-formal@3.1.0");
 assert.ok(frozenM3, "M3.2 frozen dataset must be visible after every deployment");
 assert.equal(frozenM3.case_count, 80, "M3.2 frozen dataset must expose all 80 Cases before the console starts");
 

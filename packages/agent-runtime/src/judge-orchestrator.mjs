@@ -1,5 +1,5 @@
 import { sha256 } from "../../kernel/src/utils.mjs";
-import { BLIND_JUDGE_VERSION, judgeBlindTrial } from "./blind-judge.mjs";
+import { BLIND_JUDGE_VERSION, JUDGE_ROLES, judgeBlindTrial, summarizeJudgeRuns } from "./blind-judge.mjs";
 
 export function judgeAttentionDecision({ codeGrade, judgeBundle }) {
   const judgeRuns = judgeBundle.runs ?? [];
@@ -23,16 +23,29 @@ export function judgeAttentionDecision({ codeGrade, judgeBundle }) {
   };
 }
 
-export async function judgeRecordAndSummarize({ store, gradingCase, trial, namespace, apiKey, model }) {
+export async function judgeRecordAndSummarize({ store, gradingCase, trial, namespace, apiKey, model,
+  judgeTrial = judgeBlindTrial }) {
   const codeRun = store.listGraderRuns(trial.id).find((run) => run.grader_type === "code" && run.dimension === "overall");
   if (!codeRun) throw new Error(`code grade required before model Judges: ${trial.id}`);
-  const bundle = await judgeBlindTrial({ caseSpec: gradingCase, outcome: trial.outcome, trace: store.getTrace(trial.id),
-    finalState: trial.final_state ?? {}, namespace, apiKey, model });
-  for (const run of bundle.runs) {
-    const promptHash = sha256(run.prompt_material);
-    store.addJudgeRun(trial.id, { blindId: trial.blind_id, role: run.role, model: model ?? "deepseek-v4-flash",
-      judgeRef: BLIND_JUDGE_VERSION, promptHash, result: run.result });
-  }
+  const prior = store.listJudgeRuns(trial.id).filter((run) => run.judge_ref === BLIND_JUDGE_VERSION);
+  const completedRoles = new Set(prior.map((run) => run.judge_role));
+  const missingRoles = JUDGE_ROLES.filter((role) => !completedRoles.has(role));
+  const newRuns = new Map();
+  await judgeTrial({ caseSpec: gradingCase, outcome: trial.outcome, trace: store.getTrace(trial.id),
+    finalState: trial.final_state ?? {}, namespace, apiKey, model, roles: missingRoles,
+    onRunCompleted: async (run) => {
+      const promptHash = sha256(run.prompt_material);
+      store.addJudgeRun(trial.id, { blindId: trial.blind_id, role: run.role, model: model ?? "deepseek-v4-flash",
+        judgeRef: BLIND_JUDGE_VERSION, promptHash, result: run.result });
+      newRuns.set(run.role, run);
+    } });
+  const persistedByRole = new Map(store.listJudgeRuns(trial.id)
+    .filter((run) => run.judge_ref === BLIND_JUDGE_VERSION).map((run) => [run.judge_role, run]));
+  const runs = JUDGE_ROLES.filter((role) => persistedByRole.has(role)).map((role) => newRuns.get(role) ?? {
+    role, result: persistedByRole.get(role).result, usage: { persisted: true, reused: true },
+    prompt_material: null,
+  });
+  const bundle = summarizeJudgeRuns(runs);
   const advisory = judgeAttentionDecision({ codeGrade: codeRun.result, judgeBundle: bundle });
   return { bundle, advisory };
 }

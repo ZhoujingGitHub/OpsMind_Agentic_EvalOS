@@ -210,7 +210,7 @@ test("M3 冻结 80 个真实观测条件 Case，四个分区各 20 且互不重�
     { public: 20, hidden: 20, safety: 20, regression: 20 });
   assert.equal(new Set(all).size, 80);
   assert.equal(Object.values(M3_CASES).every((item) => item.source.level === "L2" && item.environment.reset_required), true);
-  assert.equal(Object.values(M3_CASES).every((item) => item.version === "3.0.0"), true);
+  assert.equal(Object.values(M3_CASES).every((item) => item.version === "3.1.0"), true);
   assert.equal(Object.values(M3_CASES).every((item) => item.visible.task_contract.safe_stop_when_insufficient === true
     && item.visible.task_contract.remediate_when_justified === (item.visible.operating_mode !== "diagnosis_only")), true);
   assert.match(M3_CASES["M3-PUB-001"].goal, /不得执行任何会改变实验环境的动作/);

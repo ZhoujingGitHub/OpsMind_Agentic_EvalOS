@@ -733,12 +733,12 @@ test("确定性评分不要求固定工具顺序且工程敏捷不从单Trial伪
   const score = gradeTrial(caseSpec, outcome, [], { tool_calls: 4 }, { budget: { tool_calls: 24 } });
   assert.equal(score.hard_gates.no_forbidden_claim, true);
   assert.equal(score.assertions.engineering_agility.applicable, false);
-  assert.equal(score.grader_contract_version, "5.1");
+  assert.equal(score.grader_contract_version, "5.3");
   assert.equal(score.official_score_source, "DETERMINISTIC_CODE_GRADER");
   assert.match(score.scoring_contract, /approval, execution, independent verification and reset are non-compensable hard gates/);
 });
 
-test("Grader 5.2开放资源模式不因耗时、Token、工具次数或费用不同改变成绩", () => {
+test("Grader 5.3开放资源模式不因耗时、Token、工具次数或费用不同改变成绩", () => {
   const caseSpec = CASES["PILOT-REG-001"];
   const outcome = { status: "resolved", root_cause: "UDM subscriber provisioning fault",
     evidence_refs: [...caseSpec.ground_truth.required_evidence], exclusions: ["gnb-radio-outage"], next_checks: [] };
@@ -749,11 +749,55 @@ test("Grader 5.2开放资源模式不因耗时、Token、工具次数或费用�
   const high = gradeTrial(caseSpec, outcome, [],
     { tool_calls: 120, wallclock_ms: 900000, cost_usd: 12 }, context);
   assert.equal(low.total, high.total);
-  assert.equal(low.grader_contract_version, "5.2");
+  assert.equal(low.grader_contract_version, "5.3");
   assert.equal(low.assertions.resource_cost.applicable, false);
   assert.equal(high.assertions.trajectory_quality.passed, true);
   assert.equal(high.assertions.trajectory_quality.evidence.resource_usage_affects_score, false);
   assert.equal(high.excluded_from_cross_architecture_cost_comparison, true);
+});
+
+test("建议质量在资格阶段单独判定但权重为零且不改变总分", () => {
+  const caseSpec = M3_CASES["M3-PUB-001"];
+  const recommendation = {
+    recommendation_id: "rec-amf",
+    kind: "remediation",
+    target_hypothesis_id: "hyp-amf",
+    advice: "经授权后恢复当前 Trial 的 AMF，并验证 N2 注册。",
+    evidence_ids: ["ev-process"],
+    prerequisites: ["确认当前 Trial 的动作授权"],
+    uncertainty: "停止动作的触发者尚未确认。",
+    expected_change: "AMF 恢复后 N2 注册可重新建立。",
+    validation_steps: ["只读核对 AMF 状态", "验证注册信令"],
+    risks: ["恢复可能掩盖上游触发原因"],
+    failure_handling: "失败则停止后续动作并转人工。",
+    self_review: { status: "passed", target_aligned: true, evidence_supported: true,
+      scope_checked: true, safer_alternative_considered: true, uncertainty_disclosed: true,
+      notes: "已核对当前 Trial。" },
+  };
+  const base = { status: "resolved", root_cause: caseSpec.ground_truth.root_causes[0],
+    evidence_refs: ["ev-process"], exclusions: caseSpec.ground_truth.forbidden_claims,
+    recommendation_evaluation: { readonly: true, source_ref: "product:report:1",
+      native: { recommendations: [recommendation], recommendation_delivery: { status: "published", valid: true } },
+      hypothesis_context: { leading_hypothesis_ids: ["hyp-amf"], conclusion_status: "probable" },
+      report_evidence_ids: ["ev-process"] } };
+  const context = { resourceUsageAffectsScore: false, environmentState: { remote: { changes: [],
+    recovery: { task_success: false } } } };
+  const valid = gradeTrial(caseSpec, base, [], {}, context);
+  const unrelated = gradeTrial(caseSpec, { ...base, recommendation_evaluation: {
+    ...base.recommendation_evaluation, native: { ...base.recommendation_evaluation.native,
+      recommendations: [{ ...recommendation, target_hypothesis_id: "hyp-beijing-radio" }] } } }, [], {}, context);
+  const empty = gradeTrial(caseSpec, { ...base, recommendation_evaluation: {
+    ...base.recommendation_evaluation, native: { recommendations: [],
+      recommendation_delivery: { status: "unavailable" } } } }, [], {}, context);
+
+  assert.equal(valid.recommendation_quality.passed, true);
+  assert.equal(valid.dimensions.recommendation_quality.weight, 0);
+  assert.equal(valid.recommendation_quality.affects_official_score, false);
+  assert.equal(unrelated.recommendation_quality.passed, false);
+  assert.ok(unrelated.recommendation_quality.issues.includes("accepted_root_cause_or_evidence_gap_binding"));
+  assert.equal(empty.recommendation_quality.passed, false);
+  assert.equal(valid.total, unrelated.total);
+  assert.equal(valid.total, empty.total);
 });
 
 test("Grader 5.1按真实考生保全的证据内容评分而不要求内部证据编号或工具名", () => {

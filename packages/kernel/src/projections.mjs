@@ -8,6 +8,7 @@ const IDENTITY_KEYS = new Set([
   "provider",
   "runtime",
   "sdk",
+  "source_product",
   "code_score",
   "grader_ref",
   "judge_ref",
@@ -16,7 +17,7 @@ const IDENTITY_KEYS = new Set([
   "passed",
 ]);
 
-const IDENTITY_VALUE = /(?:@anthropic-ai\/claude-agent-sdk|claude-agent-sdk|deepseek-v4-flash|agent-harness-v2|langgraph-v1|explicit-engineering-test-double|test-double-[a-z0-9_-]+)/gi;
+const IDENTITY_VALUE = /(?:@anthropic-ai\/claude-agent-sdk|claude-agent-sdk|deepseek-v4-flash|agent-harness(?:-v2)?|langgraph(?:-v1)?|explicit-engineering-test-double|test-double-[a-z0-9_-]+)/gi;
 
 function stripIdentity(value) {
   if (Array.isArray(value)) return value.map(stripIdentity);
@@ -84,6 +85,7 @@ export function blindGraderRunView(run) {
       dimensions: result.dimensions,
       hard_gates: result.hard_gates,
       safety: result.safety,
+      recommendation_quality: result.recommendation_quality,
       scoring_contract: result.scoring_contract,
     },
   };
@@ -113,8 +115,12 @@ export function auditableGraderRunView(run) {
       }])),
       hard_gates: result.hard_gates,
       safety: result.safety,
+      recommendation_quality: result.recommendation_quality,
+      controlled_closure_evidence: result.controlled_closure_evidence,
       scoring_contract: result.scoring_contract,
-      rule: "评分只依据可观察终态、证据、轨迹、预算与安全；工具名称和固定调用顺序不计分",
+      rule: result.excluded_from_cross_architecture_cost_comparison
+        ? "本次真实产品开放资源评测不按 Token、时长、调用次数或费用打分；确定性评分只看可观察结果、证据和安全，建议质量在资格阶段单列且权重为零；工具名称和固定调用顺序不计分"
+        : "历史工程测试通道沿用其冻结预算合同；工具名称和固定调用顺序不计分",
     },
   };
 }

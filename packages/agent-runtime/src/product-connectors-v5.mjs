@@ -610,13 +610,45 @@ function gatePassed(gate) {
   return gate.passed === true || ["passed", "confirmed"].includes(String(gate.status ?? gate.verdict ?? "").toLowerCase());
 }
 
-function leadingReportHypothesis(report) {
+function leadingReportHypotheses(report) {
   const hypotheses = (report?.hypotheses ?? []).filter((item) => item && typeof item === "object");
   const leading = hypotheses.filter((item) => String(item.status ?? "").toLowerCase() === "leading");
   const viable = hypotheses.filter((item) => !["weakened", "rejected", "contradicted"]
     .includes(String(item.status ?? "").toLowerCase()));
-  return (leading.length ? leading : viable).sort((left, right) =>
-    (boundedConfidence(right.confidence) ?? -1) - (boundedConfidence(left.confidence) ?? -1))[0] ?? null;
+  if (leading.length) return leading;
+  if (!viable.length) return [];
+  const highest = Math.max(...viable.map((item) => boundedConfidence(item.confidence) ?? -1));
+  return viable.filter((item) => (boundedConfidence(item.confidence) ?? -1) === highest);
+}
+
+function leadingReportHypothesis(report) {
+  return leadingReportHypotheses(report)[0] ?? null;
+}
+
+function recommendationEvaluationView({ product, report, taskResult, projection, required, sourceRef }) {
+  const recommendations = Array.isArray(taskResult?.recommendations) ? taskResult.recommendations
+    : Array.isArray(report?.recommendations) ? report.recommendations : [];
+  const delivery = taskResult?.recommendation_delivery ?? report?.recommendation_delivery ?? null;
+  const sideFindings = Array.isArray(taskResult?.side_findings) ? taskResult.side_findings
+    : Array.isArray(report?.side_findings) ? report.side_findings : [];
+  const hypotheses = (product === "langgraph" ? projection?.hypotheses ?? taskResult?.hypotheses
+    : report?.hypotheses) ?? [];
+  const leading = leadingReportHypotheses({ hypotheses });
+  const evidence = product === "langgraph" ? projection?.evidence ?? [] : report?.evidence_ids ?? [];
+  return {
+    contract_version: "evalos-recommendation-evaluation-view/1.0",
+    readonly: true,
+    required: required === true,
+    source_product: product,
+    source_ref: sourceRef,
+    native: { recommendations, recommendation_delivery: delivery, side_findings: sideFindings },
+    hypothesis_context: {
+      leading_hypothesis_ids: leading.map((item) => item.hypothesis_id).filter(Boolean).map(String),
+      hypotheses,
+      conclusion_status: String(report?.conclusion_status ?? taskResult?.outcome ?? "").toLowerCase(),
+    },
+    report_evidence_ids: product === "langgraph" ? evidenceRefs(evidence) : stringList(evidence),
+  };
 }
 
 function evidenceRefs(...sources) {
@@ -633,7 +665,8 @@ function evidenceRefs(...sources) {
   return [...refs];
 }
 
-function authoritativeOutcome({ status, detail = {}, projection = null, events = [], product }) {
+function authoritativeOutcome({ status, detail = {}, projection = null, events = [], product,
+  recommendationRequired = false, recommendationSourceRef = null }) {
   const report = detail.report ?? {};
   const taskResult = projection?.task_result ?? detail.task_result ?? report.task_result ?? {};
   const gate = projection?.evidence_gate ?? detail.evidence_gate ?? report.evidence_gate ?? taskResult.evidence_gate;
@@ -655,6 +688,8 @@ function authoritativeOutcome({ status, detail = {}, projection = null, events =
   const recoverySuccess = recoveryFailure && (failureRecovery.some((item) => item?.recovered === true ||
     ["recovered", "succeeded", "success"].includes(String(item?.status ?? item?.outcome ?? "").toLowerCase())) ||
     events.some((event) => /retry|recover|resume/.test(String(event?.event_type ?? event?.name ?? "").toLowerCase())));
+  const recommendationEvaluation = recommendationEvaluationView({ product, report, taskResult, projection,
+    required: recommendationRequired, sourceRef: recommendationSourceRef });
   return { status: rootCauseConfirmed ? "resolved" : "inconclusive",
     root_cause: rootCauseConfirmed ? publishedRootCause : null,
     confidence: rootCauseConfirmed ? boundedConfidence(projection?.root_cause_confidence ?? taskResult.root_cause_confidence ??
@@ -669,6 +704,7 @@ function authoritativeOutcome({ status, detail = {}, projection = null, events =
     candidate_task_outcome: taskOutcome || null,
     evidence_gate: gate ?? null,
     evidence_gate_passed: gatePassed(gate),
+    recommendation_evaluation: recommendationEvaluation,
     authoritative_source: product === "langgraph" ? "product_e2e.task_result" : "investigation.report.evidence_gate",
     safe_stop: !rootCauseConfirmed && inconclusiveState };
 }
@@ -825,6 +861,7 @@ function langGraphSubmission(executionContract, nativeContract = null) {
   const runtimeVersions = Object.fromEntries(Object.entries(executionContract.contestant.candidate_runtime?.versions ?? {})
     .filter(([name]) => allowedVersionNames.has(name)));
   return { goal: executionContract.case.goal, trigger_type: "user", title: `EvalOS ${executionContract.trial.id}`,
+    recommendation_required: executionContract.case.visible.task_contract?.recommendation_required === true,
     resource_ids: scope.resource_ids ?? scope.entity_ids ?? [],
     service_ids: scope.service_ids ?? (scope.service_id ? [scope.service_id] : []),
     namespace_ids: [candidateManagedNamespace(executionContract)],
@@ -1069,7 +1106,10 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         : ["inconclusive", "insufficient_evidence", "budget_exhausted"].includes(state) ? "INCONCLUSIVE" : "COMPLETED" : "RUNNING";
       return { run_ref: runRef, status, next_cursor: log.next_sequence ?? cursor, raw_events: allRaw,
         normalized_events: translated.normalized, approval_requests: approvalRequests,
-        outcome: terminal ? authoritativeOutcome({ status: state, detail, events, product: "agent-harness" }) : null,
+        outcome: terminal ? authoritativeOutcome({ status: state, detail, events, product: "agent-harness",
+          recommendationRequired: executionContract.case.visible.task_contract?.recommendation_required === true,
+          recommendationSourceRef: detail.report?.delivery_receipt?.delivery_id
+            ? `agent-harness:report-delivery:${detail.report.delivery_receipt.delivery_id}` : reportRef }) : null,
         product_evidence: terminal ? productEvidence({ events, raw: translated.raw,
           artifactRefs: [reportRef].filter(Boolean), projectionRef: reportRaw[0]?.source_ref,
           jobRef: bindingRaw[0]?.source_ref }) : null,
@@ -1347,7 +1387,9 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         raw_events: [...translated.raw, ...projected.raw, ...jobRaw],
         normalized_events: [...translated.normalized, ...projected.normalized], approval_requests: approvalRequests,
         outcome: terminalReady && !failureTerminal
-          ? authoritativeOutcome({ status: detailState, detail, projection, events: allEvents, product: "langgraph" }) : null,
+          ? authoritativeOutcome({ status: detailState, detail, projection, events: allEvents, product: "langgraph",
+            recommendationRequired: executionContract.case.visible.task_contract?.recommendation_required === true,
+            recommendationSourceRef: `langgraph:product-e2e:${runRef}` }) : null,
         product_evidence: terminalReady && !failureTerminal ? productEvidence({ events: allEvents,
           raw: translated.raw, artifactRefs: archiveRefs, projectionRef: projected.raw[0]?.source_ref,
           jobRef: jobRaw[0]?.source_ref, failureRecovery: projection.failure_recovery ?? [] }) : null,

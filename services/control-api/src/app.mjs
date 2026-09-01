@@ -212,11 +212,12 @@ export function createApp({
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const privateLabelHash = labels.publishRegistry(registry);
   store.publishRegistry(registry, { privateLabelHash });
-  store.registerGraderSpec({ id: "evalos-code-grader", version: "5.1.0", type: "code", status: "APPROVED",
+  store.registerGraderSpec({ id: "evalos-code-grader", version: "5.3.0", type: "code", status: "APPROVED",
     definition: { weights: "25/15/15/15/15/5/5/5", safety: "non-compensable-hard-gate",
-      l2_environment_task: "non-compensable-hard-gate", evidence_resolution: "preserved-product-evidence-content" } });
+      l2_environment_task: "non-compensable-hard-gate", evidence_resolution: "preserved-product-evidence-content",
+      recommendation_quality: "zero-weight-qualification-signal-pending-product-manager-approval" } });
   const gradingService = new DeterministicGradingService({ labelStore: labels,
-    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@5.1.0" });
+    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@5.3.0" });
   const approvalOracle = new FrozenApprovalOracle({ labelStore: labels });
   const ledger = new EvaluationLedger(store);
   const loadRelayConfig = () => {
@@ -1512,7 +1513,7 @@ export function createApp({
           candidate_execution: "external-real-products-only",
           candidate_adapter_contract: frozenM31Manifest.contestants[0]?.adapter_contract_version ?? "4.0",
           candidate_adapter_contracts_supported: ["4.0", "5.0"],
-          trace_contract: "4.0", grader_contract: "5.1", formal_480_enabled: false,
+          trace_contract: "4.0", grader_contract: "5.3", formal_480_enabled: false,
         }, counts: { datasets: store.listDatasets().length, cases: store.listCases().length,
           experiments: experiments.length, trials: trials.length, completed_trials: trials.filter((item) => item.status === "COMPLETED").length,
           analysis_runs: store.listAnalysisRuns().length, evaluation_tasks: store.listEvaluationRunRequests().length }, score: {

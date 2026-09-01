@@ -12,6 +12,7 @@ type View = "dashboard" | "datasets" | "experiments" | "experiment" | "trial" | 
 const DIMENSION_LABELS: Record<string, string> = {
   task_success: "任务终态", rca_quality: "根因质量", evidence_quality: "证据质量", trajectory_quality: "轨迹质量",
   open_world: "开放环境", proactive_capability: "主动发现", resource_cost: "资源用量（新合同仅记录）", engineering_agility: "工程敏捷",
+  recommendation_quality: "建议质量（资格信号，暂不计分）",
 };
 const STATUS_LABELS: Record<string, string> = { COMPLETED: "已完成", RUNNING: "运行中", QUEUED: "排队中", FAILED: "失败",
   PASSED: "通过", IN_PROGRESS: "进行中", CANCELLED: "已取消", FROZEN: "设计已冻结" };
@@ -355,6 +356,12 @@ function TrialOverview({ data, onChanged }: { data: Json; onChanged: () => Promi
       <KeyValue label="环境种子" value={trial.environment_seed} /><KeyValue label="重复编号" value={trial.replicate_id} /><KeyValue label="运行时长" value={formatDuration(trial.duration_ms)} /><KeyValue label="轨迹哈希" value={shortHash(data.evidence.trace_hash)} /></div>
     <SectionHead title="Agent 最终结果" sub="结构化公开结论" /><div className="outcome-card"><Status status={(trial.outcome?.status ?? "UNKNOWN").toUpperCase()} /><h3>{trial.outcome?.root_cause ?? "无根因结论"}</h3><p>{trial.outcome?.summary}</p>
       <div className="evidence-chips">{(trial.outcome?.evidence_refs ?? []).map((ref: string) => <Tag key={ref}>{ref}</Tag>)}</div></div>
+    <SectionHead title="产品原生建议" sub="EvalOS 只读展示原件，不生成或改写建议" />
+    {(trial.outcome?.recommendation_evaluation?.native?.recommendations ?? []).length
+      ? <div className="gate-stack">{trial.outcome.recommendation_evaluation.native.recommendations.map((item: Json) =>
+        <div className="gate-pass" key={item.recommendation_id}><span>→</span><div><strong>{item.advice}</strong>
+          <small>对应假设：{item.target_hypothesis_id} · 类型：{item.kind} · 证据：{(item.evidence_ids ?? []).join("、") || "补证建议"}</small></div></div>)}</div>
+      : <Empty text="产品没有交付建议；若本题要求建议，这会在资格信号中明确判为不通过。" />}
   </section><aside className="surface"><SectionHead title="环境终态与证据" sub="由评测执行层（Harness）独立采集，不采信 Agent 自报" />
     <div className="evidence-stats"><Mini label="工具完成" value={data.evidence.tools} /><Mini label="轨迹记录" value={data.evidence.trace_records} /><Mini label="证据制品" value={data.evidence.artifacts.length} /></div>
     <JsonBlock value={trial.final_state} /><SectionHead title="资源实际使用" sub="仅在程序失控或安全风险时触发熔断；资源用量不直接评分。考生没有公开的数据明确显示“未提供”，绝不按 0 计算" /><div className="kv-grid">
@@ -400,9 +407,9 @@ function TraceRow({ item }: { item: Json }) {
 function GraderPanel({ graders, official }: { graders: Json[]; official: boolean }) {
   const grade = graders?.[0]?.result;
   if (!grade) return <Empty text="该 Trial 还没有确定性评分结果" />;
-  return <div className="split-grid grader-grid"><section className="surface"><SectionHead title="确定性评分器 Grader 5.1（Code Grader）" sub={official ? "正式成绩来源 · 只看可验证事实 · 评分结果不可被 AI 分析覆盖" : "本次为资格/工程结果 · 不写入正式成绩 · 只看可验证事实"} />
+  return <div className="split-grid grader-grid"><section className="surface"><SectionHead title="确定性评分器 Grader 5.3（Code Grader）" sub={official ? "正式成绩来源 · 只看可验证事实 · 评分结果不可被 AI 分析覆盖" : "本次为资格/工程结果 · 不写入正式成绩 · 只看可验证事实"} />
     <div className="grade-hero"><ScoreBadge score={grade.total} passed={grade.passed} large official={official} /><div><h3>{grade.passed ? official ? "通过全部正式硬门禁" : "通过本次资格/工程门禁" : official ? "未通过正式门禁" : "未通过本次资格/工程门禁"}</h3><p>{grade.rule}</p><code>{grade.scoring_contract}</code></div></div>
-    <div className="dimension-list">{Object.entries(grade.dimensions ?? {}).map(([name, value]: [string, any]) => { const normalized = Number(value.normalized ?? 0); return <div className="dimension" key={name}><div><span>{DIMENSION_LABELS[name] ?? name}</span><b>{Number(value.weighted ?? 0).toFixed(2)} / {value.weight}</b></div><div className="bar"><i style={{ width: `${Math.max(0, Math.min(100, normalized * 100))}%` }} /></div><small>{grade.assertions?.[name]?.applicable === false ? "本 Trial 不适用，不计入归一化总分" : normalized >= 1 ? "该维度满分通过" : normalized > 0 ? "已获得部分分数，仍需改进" : "该维度未通过，需要改进"}</small></div>; })}</div>
+    <div className="dimension-list">{Object.entries(grade.dimensions ?? {}).map(([name, value]: [string, any]) => { const normalized = Number(value.normalized ?? 0); const qualificationOnly = value.scoring_authority === "qualification_only"; return <div className="dimension" key={name}><div><span>{DIMENSION_LABELS[name] ?? name}</span><b>{qualificationOnly ? "不计分" : `${Number(value.weighted ?? 0).toFixed(2)} / ${value.weight}`}</b></div><div className="bar"><i style={{ width: `${Math.max(0, Math.min(100, normalized * 100))}%` }} /></div><small>{qualificationOnly ? normalized >= 1 ? "建议质量资格检查通过；是否纳入正式分数留待产品经理批准" : "建议质量资格检查未通过；当前仍不改变总分" : grade.assertions?.[name]?.applicable === false ? "本 Trial 不适用，不计入归一化总分" : normalized >= 1 ? "该维度满分通过" : normalized > 0 ? "已获得部分分数，仍需改进" : "该维度未通过，需要改进"}</small></div>; })}</div>
   </section><aside className="surface"><SectionHead title="不可补偿硬门禁" sub="任何一项失败都不能靠其他高分抵消" />
     <div className="gate-stack">{Object.entries(grade.hard_gates ?? {}).map(([name, passed]) => <div key={name} className={passed ? "gate-pass" : "gate-fail"}><span>{passed ? "✓" : "×"}</span><div><strong>{hardGateLabel(name)}</strong><small>{passed ? "通过（Pass）" : "失败（Fail）"}</small></div></div>)}</div>
     {grade.controlled_closure_evidence?.operating_mode && <div className="selected-summary"><strong>受控闭环证据（Controlled closure）</strong>
@@ -484,6 +491,7 @@ function RunComposer({ intent, caseRefs, defaultExperimentId, datasetRef, onClos
   const [mode, setMode] = useState("QUICK_VALIDATION");
   const [capacityConcurrency, setCapacityConcurrency] = useState(4);
   const [repetitions, setRepetitions] = useState(1);
+  const [environmentSeed, setEnvironmentSeed] = useState<number | null>(null);
   const [reason, setReason] = useState("");
   const [setName, setSetName] = useState("");
   const [preflight, setPreflight] = useState<Json | null>(null);
@@ -495,6 +503,11 @@ function RunComposer({ intent, caseRefs, defaultExperimentId, datasetRef, onClos
   const effectiveSourceExperimentId = intent === "rerun" ? (sourceIsAvailable ? sourceExperimentId : "")
     : sourceIsAvailable ? sourceExperimentId : (availableTemplates[0]?.id || "");
   const selectedTemplate = availableTemplates.find((item: Json) => item.id === effectiveSourceExperimentId);
+  const frozenEnvironmentSeeds = (selectedTemplate?.environment_seeds ?? []).map(Number).filter(Number.isInteger);
+  const effectiveEnvironmentSeed = environmentSeed !== null && frozenEnvironmentSeeds.includes(environmentSeed)
+    ? environmentSeed : frozenEnvironmentSeeds[0] ?? null;
+  const selectedEnvironmentSeeds = intent === "rerun" ? frozenEnvironmentSeeds
+    : effectiveEnvironmentSeed === null ? [] : [effectiveEnvironmentSeed];
   const incompatibleFrozenSource = intent === "rerun" && !templates.loading && Boolean(defaultExperimentId) && !sourceIsAvailable;
   const frozenContestants = selectedTemplate?.contestants ?? [];
   const purposeIsAvailable = evaluationPurpose === "PAIRED_COMPARISON" ? frozenContestants.length > 1
@@ -508,7 +521,8 @@ function RunComposer({ intent, caseRefs, defaultExperimentId, datasetRef, onClos
   const purposeLabel = contestantRefs.length > 1 ? "双系统公平对比（Paired comparison）" : "单系统回归（Single-system regression）";
   const payload = { request_kind: requestKind, evaluation_purpose: contestantRefs.length > 1 ? "PAIRED_COMPARISON" : "SINGLE_SYSTEM_REGRESSION",
     source_experiment_id: effectiveSourceExperimentId, case_refs: caseRefs, contestant_refs: contestantRefs,
-    repetitions, mode, requested_concurrency: mode === "CAPACITY_REHEARSAL" ? capacityConcurrency : 1,
+    environment_seeds: selectedEnvironmentSeeds, repetitions, mode,
+    requested_concurrency: mode === "CAPACITY_REHEARSAL" ? capacityConcurrency : 1,
     requested_by: "evalos-operator", reason };
   const check = async () => { setBusy(true); setError(""); setPreflight(null); try {
     if (!reason.trim()) throw new Error(`请填写本次${intent === "rerun" ? "重新评测" : "新建评测"}的原因，便于以后追溯。`);
@@ -537,12 +551,13 @@ function RunComposer({ intent, caseRefs, defaultExperimentId, datasetRef, onClos
         <strong>{templates.loading ? "正在读取…" : incompatibleFrozenSource ? "该实验不符合当前可执行评测合同，不能按原配置重新评测" : selectedTemplate?.name ?? "没有可用的冻结配置"}</strong>
         <code>{effectiveSourceExperimentId || defaultExperimentId}</code><small>{incompatibleFrozenSource ? "当前真实产品复评必须使用 Manifest 8.0 开放资源合同与 Candidate Adapter 5.0；旧实验继续保留查看，但不能冒充本轮冻结版本。" : "重新评测不可更换考生；需要更换时请从数据集页面新建评测。"}</small>
         {incompatibleFrozenSource && <a className="text-link" href="/datasets">前往数据集与 Case →</a>}</div>}
+      {intent === "new" && <label>本次环境种子 <small>Environment seed</small><select value={effectiveEnvironmentSeed ?? ""} onChange={(event) => { setEnvironmentSeed(Number(event.target.value)); setPreflight(null); }}><option value="" disabled>请选择</option>{frozenEnvironmentSeeds.map((seed: number) => <option value={seed} key={seed}>{seed}</option>)}</select><small>开发期资格验证默认只选一个 Seed，因此每个产品、每道题、重复一次只创建一个 Trial。</small></label>}
       <label>每个 Seed 的重复次数 <small>Replicates per Seed</small><select value={repetitions} onChange={(event) => { setRepetitions(Number(event.target.value)); setPreflight(null); }}>{[1,2,3,4,5].map((value) => <option value={value} key={value}>{value} 次</option>)}</select></label>
       {mode === "CAPACITY_REHEARSAL" && <label>请求并发 <small>Requested concurrency</small><select value={capacityConcurrency} onChange={(event) => { setCapacityConcurrency(Number(event.target.value)); setPreflight(null); }}><option value={4}>4 路</option><option value={8}>8 路</option></select></label>}
       <label className="full">评测原因 <small>Audit reason</small><textarea rows={3} value={reason} onChange={(event) => { setReason(event.target.value); setPreflight(null); }} placeholder="例如：验证新版本是否修复了误判且没有回归" /></label>
       {mode === "TARGETED_REGRESSION" && <label className="full">保存为回归集（可选） <small>Regression set</small><input value={setName} onChange={(event) => setSetName(event.target.value)} placeholder="例如：跨租户安全核心回归集" /></label>}
     </div>
-    <div className="selected-summary"><strong>{caseRefs.length} 道评测题目（Cases） · {contestantRefs.length} 名参评考生（Contestants）</strong><span>{caseRefs.slice(0, 4).join("、")}{caseRefs.length > 4 ? ` 等 ${caseRefs.length} 道` : ""}</span><span>{purposeLabel}：{contestantRefs.map(contestantDisplayName).join("、") || "等待选择冻结配置"}</span><span>Seed 决定同一道题的环境扰动；Replicate 是同一 Seed 下的再次独立作答。平台会把两者分别留痕。</span></div>
+    <div className="selected-summary"><strong>{caseRefs.length} 道评测题目（Cases） · {contestantRefs.length} 名参评考生（Contestants）</strong><span>{caseRefs.slice(0, 4).join("、")}{caseRefs.length > 4 ? ` 等 ${caseRefs.length} 道` : ""}</span><span>{purposeLabel}：{contestantRefs.map(contestantDisplayName).join("、") || "等待选择冻结配置"}</span><span>本次 Seed：{selectedEnvironmentSeeds.join("、") || "等待选择"}。Seed 决定同一道题的环境扰动；Replicate 是同一 Seed 下的再次独立作答。平台会把两者分别留痕。</span></div>
     {(error || templates.error) && <ErrorBox text={error || templates.error} />}
     {preflight && <PreflightCard data={preflight} />}
     <div className="modal-actions"><button onClick={onClose}>暂不评测</button>{!preflight ? <button className="toolbar-primary" disabled={busy || !effectiveSourceExperimentId} onClick={check}>{busy ? "正在检查…" : "生成执行前检查"}</button>

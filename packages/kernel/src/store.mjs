@@ -695,11 +695,14 @@ export class EvalStore {
   }
 
   addJudgeRun(trialId, { blindId, role, model, judgeRef, promptHash, result }) {
+    const existing = this.db.prepare(`SELECT * FROM judge_runs
+      WHERE trial_id=? AND judge_role=? AND judge_ref=? ORDER BY created_at LIMIT 1`).get(trialId, role, judgeRef);
+    if (existing) return { ...existing, result: parseJson(existing.result_json, {}), replayed: true };
     const resultHash = sha256(result);
     const id = entityId("judge", `${trialId}:${role}:${judgeRef}:${resultHash}`);
     this.db.prepare(`INSERT INTO judge_runs(id,trial_id,blind_id,judge_role,judge_model,judge_ref,prompt_hash,result_json,result_hash,created_at)
       VALUES(?,?,?,?,?,?,?,?,?,?)`).run(id, trialId, blindId, role, model, judgeRef, promptHash, stableStringify(result), resultHash, isoNow());
-    return { id, result };
+    return { id, result, replayed: false };
   }
 
   listJudgeRuns(trialId = null) {

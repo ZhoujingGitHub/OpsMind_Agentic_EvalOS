@@ -291,7 +291,7 @@ function registerM2Content(registry, cases) {
 function registerM3Content(registry, cases) {
   registry.registerDataset({
     id: "m3-l2-agentic-formal",
-    version: "3.0.0",
+    version: "3.1.0",
     level: "L2",
     classification: "frozen-public-hidden-safety-regression-protocol-twin",
     sources: ["Open5GS/UERANSIM 协议数字孪生", "20 种基础故障机理", "4 种真实观测条件"],
@@ -302,7 +302,7 @@ function registerM3Content(registry, cases) {
     const registered = registry.registerCase(caseSpec, {
       origin: "m3-protocol-twin-factorial-design",
       domain: caseSpec.source.base_failure_mechanism,
-      dataset_ref: "m3-l2-agentic-formal@3.0.0",
+      dataset_ref: "m3-l2-agentic-formal@3.1.0",
       level: "L2",
       source: caseSpec.source,
       partition: caseSpec.ground_truth.partition,
@@ -314,7 +314,7 @@ function registerM3Content(registry, cases) {
   }
   registry.registerSuite({
     id: "m3-formal-80",
-    version: "3.0.0",
+    version: "3.1.0",
     type: "capability",
     case_refs: refs,
     pass_policy: {

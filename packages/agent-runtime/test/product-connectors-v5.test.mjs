@@ -86,7 +86,8 @@ function executionContract(id, candidateRuntime) {
     contestant: { ref: id.includes("-ah-") ? "agent-harness-v2" : "langgraph-v1",
       candidate_runtime: candidateRuntime },
     case: { goal: "普通运维用户看到业务访问失败，请调查", visible: { operating_mode: "diagnosis_only",
-      time_window: "trial-relative", scope: { resource_ids: ["ue-1"], service_ids: ["mec-public-1"] } } } };
+      task_contract: { recommendation_required: true }, time_window: "trial-relative",
+      scope: { resource_ids: ["ue-1"], service_ids: ["mec-public-1"] } } } };
 }
 
 test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与显式未知用量", async (t) => {
@@ -105,7 +106,7 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
         : { user_id: "administrator", tenant_id: "tenant-ah", permissions: { manage_roles: true } },
     "GET /v2/protocol-lab": async () => ({ configured: true, connected: true, slot_id: "slot-ah" }),
     "GET /v2/capabilities": async () => ({ service_version: "5.0", investigation_schema_version: "5.0",
-      report_delivery_contract_version: "opsmind-report-delivery/2.0",
+      report_delivery_contract_version: "opsmind-report-delivery/3.0",
       protocol_tool_loading: { contract_version: "opsmind-protocol-tool-loading/1.0",
         always_loaded: ["publish_investigation_progress", "submit_investigation_report"],
         tool_search_required: false },
@@ -146,14 +147,23 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
         budget_contract_version: "opsmind-run-budget/1.0", usage_contract_version: "opsmind-run-usage/1.0",
         actual_budget: budgetAckOverride ?? runContext?.budget }, usage: { contract_version: "opsmind-run-usage/1.0", tool_calls: 2,
         model_calls: { status: "known", value: 4 }, tokens: { status: "unknown", value: null },
-        input_tokens: { status: "unknown", value: null }, output_tokens: { status: "unknown", value: null },
+      input_tokens: { status: "unknown", value: null }, output_tokens: { status: "unknown", value: null },
         cost_microunits: { status: "known", value: 250000 }, result_bytes: 2048,
         exhausted: usageExhausted }, tool_calls: [], report: {
-        summary: "确认UE路由缺失", conclusion_status: conclusionStatus,
-        hypotheses: [{ cause: "ue-route-missing", status: "leading", confidence: 0.91,
+      summary: "确认UE路由缺失", conclusion_status: conclusionStatus,
+        hypotheses: [{ hypothesis_id: "hyp-route", cause: "ue-route-missing", status: "leading", confidence: 0.91,
           supporting_evidence_ids: ["evidence:ah"] }],
         evidence_gate: { effective_conclusion_status: conclusionStatus, passed: true },
-        evidence_ids: ["evidence:ah"], delivery_receipt: { delivery_id: "delivery-ah", status: "accepted" } },
+        evidence_ids: ["evidence:ah"], recommendations: [{ recommendation_id: "rec-route", kind: "remediation",
+          target_hypothesis_id: "hyp-route", advice: "经授权后恢复当前 Trial 的路由并验证。",
+          evidence_ids: ["evidence:ah"], prerequisites: ["确认当前 Trial 动作授权"],
+          uncertainty: "上游触发者尚未确认", expected_change: "当前业务路由恢复",
+          validation_steps: ["验证当前业务连通性"], risks: ["可能掩盖上游触发原因"],
+          failure_handling: "失败则停止并转人工", self_review: { status: "passed", target_aligned: true,
+            evidence_supported: true, scope_checked: true, safer_alternative_considered: true,
+            uncertainty_disclosed: true, notes: "已核对当前 Trial" } }], side_findings: [],
+        recommendation_delivery: { status: "published", self_reviewed: true, notes: "已完成自审" },
+        delivery_receipt: { delivery_id: "delivery-ah", status: "accepted" } },
       evidence: [{ evidence_id: "evidence:ah", source_ref: "mcp:probe_sctp_association",
         raw_value_json: { records: [{ evidence_refs: ["probe:sctp-38412-refused"], accepted: false }] } }] }),
     "GET /v2/investigations/run-ah/execution-log": async ({ request }) => {
@@ -242,6 +252,10 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   assert.equal(observation.evaluation_binding.complete, true);
   assert.equal(observation.outcome.root_cause, "ue-route-missing");
   assert.equal(observation.outcome.evidence_gate_passed, true);
+  assert.equal(observation.outcome.recommendation_evaluation.readonly, true);
+  assert.equal(observation.outcome.recommendation_evaluation.native.recommendations[0].recommendation_id, "rec-route");
+  assert.equal(observation.outcome.recommendation_evaluation.source_ref,
+    "agent-harness:report-delivery:delivery-ah");
   assert.equal(observation.candidate_usage.measurement_status, "PARTIAL");
   assert.deepEqual(observation.candidate_usage.values,
     { model_calls: 4, tool_calls: 2, storage_bytes: 2048, cost_usd: 0.25 });
@@ -334,7 +348,7 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
       state_schema_version: "graph-state:5.0.0", model_portfolio: modelPortfolio,
       mcp_contract_version: "observation+protocol-lab:3.2.0", knowledge_version: "knowledge:5.0.0",
       model_version: "deepseek-v4-flash+deepseek-v4-pro",
-      product_e2e_contract_version: "opsmind-controlled-remediation:1.1",
+      product_e2e_contract_version: "opsmind-controlled-remediation:1.2",
       public_event_schema_version: "opsmind-public-event:1.0",
       job_runtime_limits: LANGGRAPH_JOB_RUNTIME_LIMITS, open_resource_policy: OPEN_RESOURCE_POLICY,
       candidate_observation: LANGGRAPH_CANDIDATE_OBSERVATION,
@@ -354,14 +368,24 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
       return { next_cursor: 1006, has_more: false, items: terminalJournalEvents };
     },
     "GET /api/v1/investigations/run-lg/product-e2e": async () => ({
-      contract_version: "opsmind-controlled-remediation:1.1", trial_id: runContext?.trial_id,
+      contract_version: "opsmind-controlled-remediation:1.2", trial_id: runContext?.trial_id,
       run_context_digest: runContext?.context_digest, run_contract_version: runContext?.contract_version,
       evaluation_budget: runContext?.budget, task_result: { outcome: "root_cause_confirmed", root_cause: "ue-route-missing",
-        root_cause_confidence: 0.85, summary: "确认UE路由缺失" }, root_cause: "ue-route-missing",
+        root_cause_confidence: 0.85, summary: "确认UE路由缺失", recommendations: [{
+          recommendation_id: "rec-route", kind: "remediation", target_hypothesis_id: "hyp-route",
+          advice: "经授权后恢复当前 Trial 的路由并验证。", evidence_ids: ["evidence:lg"],
+          prerequisites: ["确认当前 Trial 动作授权"], uncertainty: "上游触发者尚未确认",
+          expected_change: "当前业务路由恢复", validation_steps: ["验证当前业务连通性"],
+          risks: ["可能掩盖上游触发原因"], failure_handling: "失败则停止并转人工",
+          self_review: { status: "passed", target_aligned: true, evidence_supported: true,
+            scope_checked: true, safer_alternative_considered: true, uncertainty_disclosed: true,
+            notes: "已核对当前 Trial" } }],
+        recommendation_delivery: { required: true, valid: true, status: "published", errors: [] } }, root_cause: "ue-route-missing",
       root_cause_confidence: 0.85, graph_version: "opsmind-langgraph:5.0.0",
       state_schema_version: "graph-state:5.0.0", mcp_contract_version: "observation+protocol-lab:3.2.0",
       knowledge_version: "knowledge:5.0.0", model_version: "deepseek-v4-flash+deepseek-v4-pro",
-      evidence_gate: { status: "confirmed", passed: true }, evidence: [{ id: "evidence:lg" }],
+      evidence_gate: { status: "confirmed", passed: true }, hypotheses: [{ hypothesis_id: "hyp-route",
+        cause: "ue-route-missing", status: "leading", confidence: 0.85 }], evidence: [{ id: "evidence:lg" }],
       budget_usage: { input_tokens: 5000, output_tokens: 820, model_calls: 2, tool_calls: 6,
         result_bytes: 12345, cost_microunits: 200000 }, public_events: publicEvents, archive_reconciled: true,
       archive_artifacts: [{ uri: "oss://langgraph/archive-lg.json" }] }),
@@ -376,7 +400,7 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
   ], versions: { graph_version: "opsmind-langgraph:5.0.0", state_schema_version: "graph-state:5.0.0",
     mcp_contract_version: "observation+protocol-lab:3.2.0", knowledge_version: "knowledge:5.0.0",
     model_version: "deepseek-v4-flash+deepseek-v4-pro",
-    product_e2e_contract_version: "opsmind-controlled-remediation:1.1",
+    product_e2e_contract_version: "opsmind-controlled-remediation:1.2",
     public_event_schema_version: "opsmind-public-event:1.0",
     job_runtime_limits_contract_version: "opsmind-job-runtime-limits:1.0",
     candidate_observation: "opsmind-candidate-observation/1.0",
@@ -418,6 +442,7 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
     item.url === "/api/v1/candidates").body;
   assert.deepEqual(submittedCandidate.namespace_ids, ["lg-evalos-lg-1"]);
   assert.equal(Object.hasOwn(runContext, "seed"), false);
+  assert.equal(submittedCandidate.recommendation_required, true);
   assert.deepEqual(Object.keys(runContext.budget).sort(), ["max_cost_microunits", "max_duration_seconds",
     "max_model_calls", "max_result_bytes", "max_tokens", "max_tool_calls"]);
   assert.deepEqual(runContext.budget, { max_duration_seconds: 900, max_tool_calls: 24, max_model_calls: 20,
@@ -431,6 +456,8 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
   assert.equal(observation.status, "COMPLETED");
   assert.equal(observation.evaluation_binding.binding_strength, "PRODUCT_NATIVE_ACK");
   assert.equal(observation.outcome.root_cause, "ue-route-missing");
+  assert.equal(observation.outcome.recommendation_evaluation.native.recommendations[0].recommendation_id, "rec-route");
+  assert.equal(observation.outcome.recommendation_evaluation.source_ref, "langgraph:product-e2e:run-lg");
   assert.equal(observation.candidate_usage.complete, true);
   assert.equal(observation.candidate_usage.by_model["deepseek-v4-flash"].input_tokens, 1000);
   assert.equal(observation.candidate_usage.by_model["deepseek-v4-pro"].output_tokens, 700);

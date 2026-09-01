@@ -33,12 +33,14 @@ export async function handleRequest(request) {
   const url = new URL(request.url);
   const relayPath = url.pathname.startsWith("/api/candidate-relay/");
   const candidatePresencePath = url.pathname === "/api/candidate-presence";
+  const judgeRunPath = /^\/api\/trials\/[A-Za-z0-9_-]+\/judge$/.test(url.pathname);
   const proxied = url.pathname === "/health" || url.pathname === "/api/runtime/capabilities"
     || url.pathname.startsWith("/api/m2/") || url.pathname.startsWith("/api/workbench/")
     || url.pathname === "/api/analysis-runs" || url.pathname.startsWith("/api/analysis-runs/")
-    || relayPath || candidatePresencePath;
+    || (request.method === "POST" && judgeRunPath) || relayPath || candidatePresencePath;
   if (["GET", "POST"].includes(request.method) && proxied) {
-    const protectedPath = url.pathname.startsWith("/api/workbench/") || url.pathname.startsWith("/api/analysis-runs");
+    const protectedPath = url.pathname.startsWith("/api/workbench/")
+      || url.pathname.startsWith("/api/analysis-runs") || judgeRunPath;
     if (protectedPath && !API_TOKEN) return new Response(JSON.stringify({ error: "工作台服务端认证尚未配置" }), {
       status: 503, headers: { "content-type": "application/json; charset=utf-8" },
     });

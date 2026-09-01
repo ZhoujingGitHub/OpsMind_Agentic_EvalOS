@@ -58,8 +58,8 @@ assert.match(app, /createLangGraphProductConnector/);
 assert.match(app, /createTestDouble\("test-double-a"/);
 assert.match(app, /test-double-a:ENGINEERING_TEST/);
 assert.match(runner, /buildEvaluationContract/);
-assert.match(grader, /resourceUsageAffectsScore \? "5\.1" : "5\.2"/);
-assert.match(grader, /descriptive only/);
+assert.match(grader, /grader_version: context\.graderRef \?\? "evalos-code-grader@5\.3\.0"/);
+assert.match(grader, /recommendation quality is a separate zero-weight qualification signal/);
 assert.match(grader, /DETERMINISTIC_CODE_GRADER/);
 assert.match(twinEnvironment, /ExternalProductTwinEnvironment/);
 assert.match(twinEnvironment, /real candidate product must invoke its own MCP tools/i);
@@ -78,8 +78,11 @@ assert.doesNotMatch(packageFiles, /"(?:langgraph|@langchain\/langgraph|langchain
 const executableManifests = readdirSync(path.join(root, "config")).filter((name) => name.endsWith(".manifest.json"));
 for (const name of executableManifests) {
   const manifest = JSON.parse(read(name.startsWith("config/") ? name : `config/${name}`));
-  if (name === "m15-smoke.manifest.json") assert.equal(manifest.manifest_version, "6.0",
-    "工程测试替身必须继续使用历史隔离的 Manifest 6.0");
+  if (name === "m15-smoke.manifest.json") {
+    assert.equal(manifest.manifest_version, "6.0", "工程测试替身必须继续使用历史隔离的 Manifest 6.0");
+    assert.equal(manifest.frozen_dependencies.grader.ref, "evalos-code-grader@5.3.0",
+      "当前可执行工程测试不得偷偷保留旧 Grader 路径");
+  }
   if (name === "m3-formal-agent-capability.manifest.json") {
     assert.equal(manifest.manifest_version, "8.0", "新的真实产品冻结源必须使用 Manifest 8.0 开放资源合同");
     assert.equal(manifest.milestone, "M3.2");
@@ -93,9 +96,10 @@ for (const name of executableManifests) {
 }
 const formal = JSON.parse(read("config/m3-formal-agent-capability.manifest.json"));
 const relayCandidates = JSON.parse(read("config/candidate-relay-public-keys.json")).candidates;
-assert.equal(formal.dataset_ref, "m3-l2-agentic-formal@3.0.0");
-assert.equal(formal.suite_ref, "m3-formal-80@3.0.0");
-assert.equal(formal.case_refs.every((ref) => ref.endsWith("@3.0.0")), true);
+assert.equal(formal.dataset_ref, "m3-l2-agentic-formal@3.1.0");
+assert.equal(formal.suite_ref, "m3-formal-80@3.1.0");
+assert.equal(formal.case_refs.every((ref) => ref.endsWith("@3.1.0")), true);
+assert.equal(formal.frozen_dependencies.grader.ref, "evalos-code-grader@5.3.0");
 assert.equal(formal.model.sdk, "@anthropic-ai/claude-agent-sdk");
 assert.equal(formal.model.id, "deepseek-v4-flash");
 assert.deepEqual(formal.contestants.find((item) => item.ref === "langgraph-v1")

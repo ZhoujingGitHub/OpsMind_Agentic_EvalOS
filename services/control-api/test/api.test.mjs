@@ -770,7 +770,7 @@ test("M3冻结设计可用于新建评测预检但不能绕过门禁直接启动
     const preflight = await app.handler(new Request("http://local/api/workbench/run-requests/preflight", { method: "POST",
       headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ request_kind: "NEW_EVALUATION",
         evaluation_purpose: "PAIRED_COMPARISON", mode: "QUICK_VALIDATION", source_experiment_id: frozen.id,
-        case_refs: ["M3-PUB-001@3.0.0"], contestant_refs: ["agent-harness-v2", "langgraph-v1"], repetitions: 1,
+        case_refs: ["M3-PUB-001@3.1.0"], contestant_refs: ["agent-harness-v2", "langgraph-v1"], repetitions: 1,
         requested_by: "api-test-operator", reason: "验证冻结设计可以生成预检但不会误启动正式评测" }) }));
     assert.equal(preflight.status, 200);
     const preflightBody = (await preflight.json()).preflight;

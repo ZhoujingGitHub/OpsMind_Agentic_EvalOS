@@ -88,6 +88,11 @@ test("工作台明确Agent自主性、确定性评分、源码快照和只读AI�
   assert.match(source, /定向回归/);
   assert.match(source, /容量演练/);
   assert.match(source, /requested_concurrency/);
+  assert.match(source, /本次环境种子/);
+  assert.match(source, /environment_seeds: selectedEnvironmentSeeds/);
+  assert.match(source, /默认只选一个 Seed/);
+  assert.match(source, /建议质量（资格信号，暂不计分）/);
+  assert.match(source, /EvalOS 只读展示原件，不生成或改写建议/);
   assert.match(source, /仅重新评分/);
   assert.match(source, /原结果与新结果对比/);
   assert.match(source, /平台运行健康（Operations health）/);
