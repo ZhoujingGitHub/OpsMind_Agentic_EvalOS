@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
-import { createAgentHarnessProductConnectorV5, createLangGraphProductConnectorV5 } from "../src/index.mjs";
+import { assertCandidateResourceScope, candidateManagedResourceScope,
+  createAgentHarnessProductConnectorV5, createLangGraphProductConnectorV5 } from "../src/index.mjs";
 
 const ATTESTATION = Object.freeze({ source_revision: "abcdef1234567890",
   artifact_digest: `sha256:${"a".repeat(64)}` });
@@ -90,6 +91,18 @@ function executionContract(id, candidateRuntime) {
       scope: { resource_ids: ["ue-1"], service_ids: ["mec-public-1"] } } } };
 }
 
+test("候选资源范围只生成一个namespace并拒绝缺失或不一致的名称", () => {
+  const contract = executionContract("evalos-ah-scope-contract", {});
+  const scope = candidateManagedResourceScope(contract);
+  assert.equal(scope.namespace, "ah-evalos-ah-scope-contract");
+  assert.deepEqual(scope.resource_refs, [{ identifier_domain: "opsmind-twin",
+    namespace: scope.namespace, resource_type: "workload", resource_id: "ue-1" }]);
+  assert.throws(() => assertCandidateResourceScope({ resource_refs: scope.resource_refs }),
+    /namespace must exactly match every resource_ref namespace/);
+  assert.throws(() => assertCandidateResourceScope({ namespace: "ah-wrong", resource_refs: scope.resource_refs }),
+    /namespace must exactly match every resource_ref namespace/);
+});
+
 test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与显式未知用量", async (t) => {
   let candidateObservationState = AGENT_HARNESS_CANDIDATE_OBSERVATION;
   let sourceRef = null;
@@ -136,8 +149,14 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
     "GET /health": async () => ({ status: "healthy", version: "5.0", model: "deepseek-v4-flash" }),
     "GET /v2/remediation/context": async () => ({ safety_framework_version: "2.0" }),
     "PUT /v2/remediation/mode": async ({ body }) => body,
-    "POST /v2/investigation-candidates": async ({ body }) => { sourceRef = body.source_ref; runContext = body.run_context; return {
-      candidate: { candidate_id: "candidate-ah", linked_investigation_id: "run-ah" } }; },
+    "POST /v2/investigation-candidates": async ({ body }) => {
+      const namespaces = new Set(body.scope_hint.resource_refs.map((item) => item.namespace));
+      assert.equal(namespaces.size, 1);
+      assert.equal(body.scope_hint.namespace, [...namespaces][0]);
+      sourceRef = body.source_ref;
+      runContext = body.run_context;
+      return { candidate: { candidate_id: "candidate-ah", linked_investigation_id: "run-ah" } };
+    },
     "GET /v2/investigation-candidates": async () => ({ items: [{ candidate_id: "candidate-ah",
       linked_investigation_id: "run-ah", source_ref: sourceRef, run_context: runContext,
       run_context_ack: { native: true, contract_version: "opsmind-run-context/1.0",
@@ -236,6 +255,7 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   const started = await connector.start({ executionContract: contract });
   const submitted = fixture.requests.find((item) => item.method === "POST" &&
     item.url === "/v2/investigation-candidates").body;
+  assert.equal(submitted.scope_hint.namespace, "ah-evalos-ah-1");
   assert.deepEqual(submitted.scope_hint.resource_refs, [{ identifier_domain: "opsmind-twin",
     namespace: "ah-evalos-ah-1", resource_type: "workload", resource_id: "ue-1" }]);
   assert.equal(Object.hasOwn(submitted.scope_hint, "entity_ids"), false);

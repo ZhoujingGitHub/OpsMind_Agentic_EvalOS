@@ -559,6 +559,25 @@ export function candidateManagedNamespace(executionContract) {
   return namespace;
 }
 
+export function assertCandidateResourceScope(scopeHint) {
+  const resourceRefs = scopeHint?.resource_refs;
+  if (!Array.isArray(resourceRefs)) throw new Error("candidate resource_refs must be a list");
+  if (resourceRefs.length === 0) return scopeHint;
+  const namespaces = new Set(resourceRefs.map((item) => item?.namespace));
+  if (namespaces.size !== 1 || !namespaces.has(scopeHint?.namespace)) {
+    throw new Error("candidate scope namespace must exactly match every resource_ref namespace");
+  }
+  return scopeHint;
+}
+
+export function candidateManagedResourceScope(executionContract) {
+  const namespace = candidateManagedNamespace(executionContract);
+  return assertCandidateResourceScope({
+    namespace,
+    resource_refs: candidateResourceReferences(executionContract, namespace),
+  });
+}
+
 function submissionReceipt({ runRef, expected, idempotencyKey, requestBody, channel }) {
   const material = { contract: "evalos-submission-receipt.2", run_ref: runRef,
     trial_id: expected.trial_id, context_digest: expected.context_digest,
@@ -822,11 +841,12 @@ function agentHarnessSubmission(executionContract, nativeContract) {
   }));
   const runtimeVersion = candidateRuntime?.versions?.service;
   if (!runtimeVersion) throw new Error("Agent+Harness public service version is required for native run context");
-  const resourceRefs = candidateResourceReferences(executionContract, candidateManagedNamespace(executionContract));
+  const managedScope = candidateManagedResourceScope(executionContract);
   return { goal: executionContract.case.goal, trigger_type: "natural_language",
     source_ref: `evalos:${executionContract.trial.id}:${context.context_digest.slice(-16)}`, priority: 70,
     scope_hint: { customer_id: scope.customer_id, service_id: scope.service_id, site_id: scope.site_id,
-      resource_refs: resourceRefs, source_page: `/evalos/trials/${executionContract.trial.id}` },
+      namespace: managedScope.namespace, resource_refs: managedScope.resource_refs,
+      source_page: `/evalos/trials/${executionContract.trial.id}` },
     time_window: timeWindow(executionContract.case.visible.time_window), seed_evidence_refs: [], freshness: "fresh",
     run_context: { trial_id: executionContract.trial.id, context_digest: context.context_digest.replace(/^sha256:/, ""),
       environment_ref: context.environment_ref, runtime_version: runtimeVersion, budget } };
