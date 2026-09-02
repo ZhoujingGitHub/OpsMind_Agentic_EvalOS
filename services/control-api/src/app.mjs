@@ -810,7 +810,10 @@ export function createApp({
           failure: baselineAttempt?.failure ?? null,
           hard_gates_passed: Object.values(baselineGrade?.hard_gates ?? {}).filter(Boolean).length,
           hard_gates_total: Object.keys(baselineGrade?.hard_gates ?? {}).length } : null,
-        current: item.trial ? { score: currentGrade?.total ?? null, passed: currentGrade?.passed ?? null,
+        current: item.trial ? { score: currentGrade?.total ?? null,
+          passed: request.mode === "FORMAL" ? currentGrade?.passed ?? null
+            : currentGrade?.qualification_passed ?? currentGrade?.passed ?? null,
+          score_passed: currentGrade?.passed ?? null,
           qualification_passed: currentGrade?.qualification_passed ?? currentGrade?.passed ?? null,
           duration_ms: duration(item.trial), tool_calls: measuredValue(item.trial, "tool_calls", currentAttempt),
           cost_usd: measuredValue(item.trial, "cost_usd", currentAttempt),

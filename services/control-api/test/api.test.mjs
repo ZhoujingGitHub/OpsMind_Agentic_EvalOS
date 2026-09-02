@@ -492,6 +492,8 @@ test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏
     assert.equal(evaluationRequest.decision_report.comparison.formal_winner, null);
     assert.equal(evaluationRequest.items.every((item) => item.trace_hash && item.cleanup?.reset_ok !== false), true);
     assert.equal(evaluationRequest.items.every((item) => item.current?.usage_measurement?.complete === true), true);
+    assert.equal(evaluationRequest.items.every((item) => item.current?.passed === item.current?.qualification_passed), true);
+    assert.equal(evaluationRequest.items.every((item) => typeof item.current?.score_passed === "boolean"), true);
     assert.equal((await createEvaluationRequest()).status, 200);
     const officialAfterValidation = await (await app.handler(new Request("http://local/api/workbench/overview", {
       headers: { authorization: "Bearer admin-secret" } }))).json();
