@@ -7,6 +7,7 @@ const read = (file) => readFileSync(path.join(root, file), "utf8");
 const app = read("services/control-api/src/app.mjs");
 const runtime = read("packages/agent-runtime/src/claude-agent-sdk-runtime.mjs");
 const intelligence = read("packages/agent-runtime/src/case-investigator.mjs");
+const blindJudge = read("packages/agent-runtime/src/blind-judge.mjs");
 const adapter = read("packages/agent-runtime/src/candidate-adapter-v4.mjs");
 const connectors = read("packages/agent-runtime/src/product-connectors-v4.mjs");
 const adapterV5 = read("packages/agent-runtime/src/candidate-adapter-v5.mjs");
@@ -24,6 +25,8 @@ const packageFiles = ["package.json", "packages/agent-runtime/package.json", "ap
 assert.match(runtime, /@anthropic-ai\/claude-agent-sdk/);
 assert.match(runtime, /deepseek-v4-flash/);
 assert.match(runtime, /model-driven-tool-loop/);
+assert.doesNotMatch(blindJudge, /maxBudgetUsd\s*:/,
+  "三位 AI Judge 不得设置费用截断上限；Token、费用和耗时只记录，不据此中断或评分");
 assert.match(intelligence, /自主形成可证伪假设/);
 assert.match(intelligence, /不存在固定步骤、静态节点图或预写修复流程/);
 assert.match(adapter, /external REAL_PRODUCT/);

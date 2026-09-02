@@ -95,7 +95,7 @@ async function runOneJudge({ role, caseSpec, outcome, trace, finalState, namespa
           "出现歧义、潜在坏题、评分器误判、安全风险或低置信度时必须设置 needs_attention=true。",
           "你的结论只作辅助诊断，不得改变确定性 Code Grader 的官方分数。",
         ].join(" "),
-        maxTurns: 4, maxBudgetUsd: 0.5, thinking: { type: "disabled" }, cwd: namespace,
+        maxTurns: 4, thinking: { type: "disabled" }, cwd: namespace,
         tools: [], allowedTools: [], disallowedTools: ["Agent", "AskUserQuestion", "Bash", "Read", "Write", "Edit", "WebSearch", "WebFetch", "Skill", "ToolSearch"],
         permissionMode: "dontAsk", settingSources: [], outputFormat: { type: "json_schema", schema: JUDGE_SCHEMA },
         sandbox: { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false },
