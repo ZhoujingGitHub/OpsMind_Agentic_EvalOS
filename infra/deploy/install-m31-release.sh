@@ -17,7 +17,7 @@ previous_release="$(readlink -f "$current_link" || true)"
 backups_root="/var/lib/opsmind-evalos/backups"
 backup_root="$backups_root/$release_id"
 unit_backup="/var/lib/opsmind-evalos/backups/$release_id/systemd"
-nginx_config=/etc/nginx/conf.d/opsmind-evalos.conf
+nginx_config=/etc/nginx/sites-available/opsmind-evalos
 rollback() {
   local exit_code=$?
   if [[ $exit_code -eq 0 ]]; then return; fi

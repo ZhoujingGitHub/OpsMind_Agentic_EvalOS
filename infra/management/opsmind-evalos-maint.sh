@@ -11,7 +11,7 @@ sha_pattern='^[a-f0-9]{64}$'
 incoming_root=/var/lib/opsmind-evalos/incoming
 current_link=/opt/opsmind-evalos/current
 previous_link=/opt/opsmind-evalos/previous
-nginx_config=/etc/nginx/conf.d/opsmind-evalos.conf
+nginx_config=/etc/nginx/sites-available/opsmind-evalos
 
 require_release_id() {
   [[ "${1:-}" =~ $release_pattern ]] || { echo 'invalid release id' >&2; exit 2; }
