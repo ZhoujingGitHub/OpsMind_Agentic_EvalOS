@@ -31,6 +31,7 @@ const include = [
   "packages/agent-runtime/src", "packages/agent-runtime/scripts", "packages/agent-runtime/opsmind-plugin",
   "packages/kernel/src", "packages/twin-runtime/package.json", "packages/twin-runtime/src",
   "services/control-api/src", "infra/migrations/sqlite", "infra/systemd", "infra/nginx", "infra/acme", "infra/deploy",
+  "infra/management",
   "apps/console/dist", "apps/console/serve.mjs", "apps/console/package.json", "apps/console/package-lock.json",
   "scripts/smoke-m31-deployment.mjs",
 ];

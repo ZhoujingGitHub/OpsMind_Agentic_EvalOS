@@ -498,6 +498,8 @@ export function createApp({
   };
   const gradeFor = (trialId) => store.listGraderRuns(trialId).find((item) => item.dimension === "overall") ?? null;
   const evaluationMode = (experiment) => experiment?.manifest?.evaluation_mode ?? "FORMAL";
+  const gradePassedForExperiment = (grade, experiment) => Boolean(evaluationMode(experiment) === "FORMAL"
+    ? grade?.passed : grade?.qualification_passed ?? grade?.passed);
   const workbenchExperiments = () => store.listExperiments().map((experiment) => {
     const summary = store.experimentSummary(experiment.id);
     const trials = store.listTrials(experiment.id, { includeReplays: false });
@@ -532,7 +534,8 @@ export function createApp({
   const workbenchCases = () => store.listCases().map((item) => {
     const trials = store.listTrials(null, { includeReplays: false }).filter((trial) => trial.case_ref === item.case_ref);
     const scores = trials.map((trial) => Number(gradeFor(trial.id)?.result?.total)).filter(Number.isFinite);
-    const grades = trials.map((trial) => gradeFor(trial.id)?.result).filter(Boolean);
+    const grades = trials.map((trial) => ({ result: gradeFor(trial.id)?.result,
+      experiment: store.getExperiment(trial.experiment_id) })).filter((item) => item.result);
     const compatible = store.listExperiments().find((experiment) => {
       const suite = store.listSuites().find((candidate) => candidate.suite_ref === experiment.suite_ref);
       return experiment.dataset_ref === item.dataset_ref && suite?.definition?.case_refs?.includes(item.case_ref);
@@ -545,9 +548,9 @@ export function createApp({
       level: item.metadata?.level ?? store.listDatasets().find((dataset) => dataset.dataset_ref === item.dataset_ref)?.level,
       trial_count: trials.length, completed_trials: trials.filter((trial) => trial.status === "COMPLETED").length,
       average_score: scores.length ? Number((scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(2)) : null,
-      pass_rate: grades.length ? grades.filter((grade) => grade.passed).length / grades.length : null,
+      pass_rate: grades.length ? grades.filter((item) => gradePassedForExperiment(item.result, item.experiment)).length / grades.length : null,
       unstable: scores.length > 1 && Math.max(...scores) - Math.min(...scores) >= 15,
-      safety_failed: grades.some((grade) => Object.entries(grade.hard_gates ?? {}).some(([name, passed]) => name.includes("safety") && !passed)),
+      safety_failed: grades.some((item) => Object.entries(item.result.hard_gates ?? {}).some(([name, passed]) => name.includes("safety") && !passed)),
       infrastructure_failed: trials.some((trial) => trial.status === "FAILED" && /infrastructure|lease|ssh|timeout|twin/i.test(trial.error ?? "")),
       latest_status: latest?.status ?? "NEVER_RUN", compatible_experiment_id: compatible?.id ?? null,
       latest_trial_id: trials.filter((trial) => trial.status === "COMPLETED").at(-1)?.id ?? null };
@@ -808,6 +811,7 @@ export function createApp({
           hard_gates_passed: Object.values(baselineGrade?.hard_gates ?? {}).filter(Boolean).length,
           hard_gates_total: Object.keys(baselineGrade?.hard_gates ?? {}).length } : null,
         current: item.trial ? { score: currentGrade?.total ?? null, passed: currentGrade?.passed ?? null,
+          qualification_passed: currentGrade?.qualification_passed ?? currentGrade?.passed ?? null,
           duration_ms: duration(item.trial), tool_calls: measuredValue(item.trial, "tool_calls", currentAttempt),
           cost_usd: measuredValue(item.trial, "cost_usd", currentAttempt),
           usage_measurement: measurementView(item.trial, currentAttempt),

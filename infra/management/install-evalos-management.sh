@@ -36,6 +36,6 @@ visudo -cf /etc/sudoers.d/opsmind-evalos-maint >/dev/null
 sshd -t
 systemctl reload ssh.service
 
-printf '%s\n' 'management_contract=opsmind-fixed-management/1.0'
+printf '%s\n' 'management_contract=opsmind-fixed-management/1.1'
 printf '%s\n' 'management_user=opsmind-maint'
 printf '%s\n' 'source_restriction=10.77.240.2/32'

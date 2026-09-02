@@ -9,14 +9,18 @@ WireGuard management overlay. Its authorized key uses OpenSSH `restrict` and a
 forced command, so it cannot request a shell, PTY, SFTP subsystem, agent/X11
 forwarding, or TCP forwarding.
 
-The root wrapper accepts exactly three operations:
+The root wrapper accepts exactly four operations:
 
 - `status`
 - `upload RELEASE SHA256 BYTES BASE64_BYTES`
 - `deploy RELEASE SHA256`
+- `rollback`
 
 Uploads are Base64 text to avoid platform-dependent binary stdin conversion.
 The server verifies encoded length, decoded length, and SHA-256 before an atomic
 rename. Deployment delegates to the existing release installer, which preserves
-the database backup and rollback gates. No secret is embedded in these files;
+the database backup and failed-deployment recovery gates. A successful deployment
+records exactly one previous application release. The fixed rollback command swaps
+only the current and previous application releases, services, and Nginx config; it
+never restores or rewrites a database. No secret is embedded in these files;
 the public key is supplied to the installer at deployment time.

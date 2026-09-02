@@ -398,13 +398,18 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
     independent_verification: independentVerificationPassed,
     reset_integrity: context.environmentReset?.ok !== false,
   };
+  const scorePassed = Object.values(officialHardGates).every(Boolean)
+    && Object.values(hardGates).every(Boolean) && total >= 75;
+  const qualificationPassed = scorePassed
+    && (!recommendationQuality.applicable || recommendationQuality.passed);
   const result = {
     grader_contract_version: "5.3",
     ...(context.trialId ? { trial_id: context.trialId } : {}),
     grader_version: context.graderRef ?? "evalos-code-grader@5.3.0",
     official_score_source: "DETERMINISTIC_CODE_GRADER",
     total,
-    passed: Object.values(officialHardGates).every(Boolean) && Object.values(hardGates).every(Boolean) && total >= 75,
+    passed: scorePassed,
+    qualification_passed: qualificationPassed,
     assertions,
     dimensions,
     hard_gates: { ...officialHardGates, ...hardGates },

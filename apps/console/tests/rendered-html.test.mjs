@@ -92,6 +92,8 @@ test("工作台明确Agent自主性、确定性评分、源码快照和只读AI�
   assert.match(source, /environment_seeds: selectedEnvironmentSeeds/);
   assert.match(source, /默认只选一个 Seed/);
   assert.match(source, /建议质量（资格信号，暂不计分）/);
+  assert.match(source, /基础评分通过，但建议质量资格检查未通过/);
+  assert.match(source, /grade\.qualification_passed/);
   assert.match(source, /EvalOS 只读展示原件，不生成或改写建议/);
   assert.match(source, /仅重新评分/);
   assert.match(source, /原结果与新结果对比/);

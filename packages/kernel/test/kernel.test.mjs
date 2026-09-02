@@ -791,11 +791,15 @@ test("建议质量在资格阶段单独判定但权重为零且不改变总分",
       recommendation_delivery: { status: "unavailable" } } } }, [], {}, context);
 
   assert.equal(valid.recommendation_quality.passed, true);
+  assert.equal(valid.qualification_passed, valid.passed);
   assert.equal(valid.dimensions.recommendation_quality.weight, 0);
   assert.equal(valid.recommendation_quality.affects_official_score, false);
   assert.equal(unrelated.recommendation_quality.passed, false);
+  assert.equal(unrelated.qualification_passed, false);
+  assert.equal(unrelated.passed, valid.passed);
   assert.ok(unrelated.recommendation_quality.issues.includes("accepted_root_cause_or_evidence_gap_binding"));
   assert.equal(empty.recommendation_quality.passed, false);
+  assert.equal(empty.qualification_passed, false);
   assert.equal(valid.total, unrelated.total);
   assert.equal(valid.total, empty.total);
 });
@@ -989,6 +993,13 @@ test("统计报告只在正式完整配对且置信区间不跨0时给出胜者"
   assert.equal(qualification.comparison.formal_winner, null);
   assert.equal(qualification.evidence_quality.usage_incomplete_trials, 6);
 
+  items[0].current.qualification_passed = false;
+  const qualificationWithFailedAdvice = evaluationDecisionReport({
+    requestStatus: "COMPLETED", mode: "QUICK_VALIDATION", items,
+    contestantOrder: contestants, repetitions: 3, iterations: 100, seed: "qualification-advice",
+  });
+  assert.ok(qualificationWithFailedAdvice.contestants["agent-harness-v2"].pass_rate < 1);
+
   const formal = evaluationDecisionReport({
     requestStatus: "COMPLETED", mode: "FORMAL", items,
     contestantOrder: contestants, repetitions: 3, iterations: 300, seed: "formal",
@@ -996,6 +1007,7 @@ test("统计报告只在正式完整配对且置信区间不跨0时给出胜者"
   assert.equal(formal.decision_authority, "FORMAL_DECISION");
   assert.equal(formal.comparison.clearly_different, true);
   assert.equal(formal.comparison.formal_winner, "langgraph-v1");
+  assert.equal(formal.contestants["agent-harness-v2"].pass_rate, 1);
 
   const incomplete = evaluationDecisionReport({
     requestStatus: "COMPLETED", mode: "FORMAL", items: items.map((item, index) =>

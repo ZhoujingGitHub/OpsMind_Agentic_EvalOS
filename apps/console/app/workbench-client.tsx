@@ -268,7 +268,7 @@ function TrialCenter({ mode }: { mode: "traces" | "graders" | "analyses" }) {
         {items.map((item: Json) => <tr key={item.id} className="clickable-row" role="link" tabIndex={0} aria-label={`打开 ${item.case_ref} 的评分细项`}
           onClick={(event) => navigateRow(event, `/trials/${item.id}#grader`)} onKeyDown={(event) => navigateRowByKeyboard(event, `/trials/${item.id}#grader`)}>
           <td><a className="row-title" href={`/trials/${item.id}#grader`}>{item.case_ref}</a><code>{item.id}</code></td><td><strong>{contestantDisplayName(item.contestant)}</strong><small>{item.experiment_name}</small></td><td><RunClassBadge value={item.run_class} />{!item.affects_official_score && <small>不计正式成绩</small>}</td>
-          <td><strong className="score-number">{formatScore(item.grade?.total)}</strong></td><td>{item.grade ? <Status status={item.grade.passed ? "PASSED" : "FAILED"} /> : "未评分"}</td>
+          <td><strong className="score-number">{formatScore(item.grade?.total)}</strong></td><td>{item.grade ? <Status status={gradePass(item.grade, item.affects_official_score === true) ? "PASSED" : "FAILED"} /> : "未评分"}</td>
           <td>{item.grade ? `${Object.values(item.grade.hard_gates ?? {}).filter(Boolean).length}/${Object.keys(item.grade.hard_gates ?? {}).length}` : "—"}</td><td>{formatTime(item.completed_at)}</td></tr>)}
       </tbody></table></div></section></section>;
   return <section className="page-content"><PageTitle eyebrow="READ-ONLY AGENTIC INVESTIGATION" title="AI 调查员" text="查看所有成功与失败的调查运行。调查员由 Claude Agent SDK + DeepSeek 驱动，只读查证据、源码和公开方法论，不拥有评分权。" />
@@ -407,8 +407,9 @@ function TraceRow({ item }: { item: Json }) {
 function GraderPanel({ graders, official }: { graders: Json[]; official: boolean }) {
   const grade = graders?.[0]?.result;
   if (!grade) return <Empty text="该 Trial 还没有确定性评分结果" />;
+  const displayedPass = gradePass(grade, official);
   return <div className="split-grid grader-grid"><section className="surface"><SectionHead title="确定性评分器 Grader 5.3（Code Grader）" sub={official ? "正式成绩来源 · 只看可验证事实 · 评分结果不可被 AI 分析覆盖" : "本次为资格/工程结果 · 不写入正式成绩 · 只看可验证事实"} />
-    <div className="grade-hero"><ScoreBadge score={grade.total} passed={grade.passed} large official={official} /><div><h3>{grade.passed ? official ? "通过全部正式硬门禁" : "通过本次资格/工程门禁" : official ? "未通过正式门禁" : "未通过本次资格/工程门禁"}</h3><p>{grade.rule}</p><code>{grade.scoring_contract}</code></div></div>
+    <div className="grade-hero"><ScoreBadge score={grade.total} passed={displayedPass} large official={official} /><div><h3>{displayedPass ? official ? "通过全部正式硬门禁" : "通过本次资格/工程门禁" : official ? "未通过正式门禁" : grade.passed ? "基础评分通过，但建议质量资格检查未通过" : "未通过本次资格/工程门禁"}</h3><p>{grade.rule}</p><code>{grade.scoring_contract}</code></div></div>
     <div className="dimension-list">{Object.entries(grade.dimensions ?? {}).map(([name, value]: [string, any]) => { const normalized = Number(value.normalized ?? 0); const qualificationOnly = value.scoring_authority === "qualification_only"; return <div className="dimension" key={name}><div><span>{DIMENSION_LABELS[name] ?? name}</span><b>{qualificationOnly ? "不计分" : `${Number(value.weighted ?? 0).toFixed(2)} / ${value.weight}`}</b></div><div className="bar"><i style={{ width: `${Math.max(0, Math.min(100, normalized * 100))}%` }} /></div><small>{qualificationOnly ? normalized >= 1 ? "建议质量资格检查通过；是否纳入正式分数留待产品经理批准" : "建议质量资格检查未通过；当前仍不改变总分" : grade.assertions?.[name]?.applicable === false ? "本 Trial 不适用，不计入归一化总分" : normalized >= 1 ? "该维度满分通过" : normalized > 0 ? "已获得部分分数，仍需改进" : "该维度未通过，需要改进"}</small></div>; })}</div>
   </section><aside className="surface"><SectionHead title="不可补偿硬门禁" sub="任何一项失败都不能靠其他高分抵消" />
     <div className="gate-stack">{Object.entries(grade.hard_gates ?? {}).map(([name, passed]) => <div key={name} className={passed ? "gate-pass" : "gate-fail"}><span>{passed ? "✓" : "×"}</span><div><strong>{hardGateLabel(name)}</strong><small>{passed ? "通过（Pass）" : "失败（Fail）"}</small></div></div>)}</div>
@@ -418,6 +419,12 @@ function GraderPanel({ graders, official }: { graders: Json[]; official: boolean
       <span>一次性票据：{yesNo(grade.controlled_closure_evidence.ticket_issued)}；动作留痕：{yesNo(grade.controlled_closure_evidence.action_execution_observed)}；独立验证：{yesNo(grade.controlled_closure_evidence.independent_verification_observed)}</span></div>}
     <div className="rule-note"><strong>为什么不按工具名和资源多少评分？</strong><p>Agent 可以用不同路径解决同一问题。评分器只看真实终态、证据是否可追溯、动作是否最小安全；时间、Token、工具次数和费用只用于复盘。</p></div>
   </aside></div>;
+}
+
+function gradePass(grade: Json, official: boolean) {
+  if (official) return Boolean(grade.passed);
+  return Boolean(grade.qualification_passed
+    ?? (grade.passed && grade.recommendation_quality?.passed !== false));
 }
 
 function SourcePanel({ trialId, snapshot }: { trialId: string; snapshot: Json | null }) {

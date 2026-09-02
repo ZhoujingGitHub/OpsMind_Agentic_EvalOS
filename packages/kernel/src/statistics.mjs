@@ -135,6 +135,8 @@ export function evaluationDecisionReport({ requestStatus, mode, items, contestan
   const terminalStatuses = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
   const contestants = [...new Set(contestantOrder ?? items.map((item) => item.contestant_ref))];
   const valid = items.filter((item) => item.status === "COMPLETED" && Number.isFinite(Number(item.current?.score)));
+  const passedForMode = (item) => Boolean(mode === "FORMAL" ? item.current?.passed
+    : item.current?.qualification_passed ?? item.current?.passed);
   const failureCounts = {};
   for (const item of items) {
     const category = item.failure?.category ?? (item.status === "FAILED" ? "UNCLASSIFIED_NON_RETRYABLE" : null);
@@ -145,12 +147,12 @@ export function evaluationDecisionReport({ requestStatus, mode, items, contestan
     const scored = valid.filter((item) => item.contestant_ref === contestant);
     const scores = scored.map((item) => Number(item.current.score));
     const reliability = reliabilityMetrics(scored.map((item) => ({ case_id: item.case_ref,
-      passed: Boolean(item.current.passed) })), Math.max(1, Number(repetitions)));
+      passed: passedForMode(item) })), Math.max(1, Number(repetitions)));
     return [contestant, { trials: selected.length, scored_trials: scored.length,
       failed_trials: selected.filter((item) => item.status === "FAILED").length,
       cancelled_trials: selected.filter((item) => item.status === "CANCELLED").length,
       average_score: scores.length ? round(scores.reduce((sum, value) => sum + value, 0) / scores.length, 2) : null,
-      pass_rate: scored.length ? round(scored.filter((item) => item.current.passed).length / scored.length) : null,
+      pass_rate: scored.length ? round(scored.filter(passedForMode).length / scored.length) : null,
       reliability }];
   }));
   let comparison = null;

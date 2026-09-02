@@ -31,6 +31,7 @@ const evalosUnit = read("infra/systemd/opsmind-evalos.service");
 const nginx = read("infra/nginx/opsmind-evalos.conf");
 const deploymentSmoke = read("scripts/smoke-m31-deployment.mjs");
 const deploymentInstaller = read("infra/deploy/install-m31-release.sh");
+const evalosManagement = read("infra/management/opsmind-evalos-maint.sh");
 const releaseBuilder = read("scripts/build-m31-release.mjs");
 const twinController = read("infra/twin/opsmind_twinctl.py");
 const twinControllerInstaller = read("infra/twin/install-controller.sh");
@@ -142,6 +143,16 @@ assert.match(releaseBuilder, /release source contains uncommitted tracked change
 assert.match(releaseBuilder, /contract: "evalos-release\.2"/);
 assert.match(releaseBuilder, /source_revision: sourceRevision/);
 assert.match(deploymentInstaller, /"source_revision": "\[a-f0-9\]\{40\}"/);
+assert.match(deploymentInstaller, /previous_link="\/opt\/opsmind-evalos\/previous"/);
+assert.match(deploymentInstaller, /mv -Tf "\$\{previous_link\}\.next" "\$previous_link"/);
+assert.match(releaseBuilder, /"infra\/management"/);
+assert.match(evalosManagement, /management_contract=opsmind-fixed-management\/1\.1/);
+assert.match(evalosManagement, /^  rollback\)$/m);
+const evalosRollback = evalosManagement.slice(evalosManagement.indexOf("  rollback)"), evalosManagement.indexOf("  *)"));
+assert.match(evalosRollback, /rollback_target=.*previous_link/);
+assert.match(evalosRollback, /database_action=none/);
+assert.doesNotMatch(evalosRollback, /control\.sqlite|labels\.sqlite|backups|migration/i,
+  "Manual EvalOS application rollback must never restore or migrate a database");
 assert.match(nginx, /location \^~ \/api\/candidate-relay\//);
 assert.match(nginx, /location = \/api\/candidate-presence/);
 assert.match(nginx, /location ~ \^\/api\/trials\/\[A-Za-z0-9_-\]\+\/judge\$/);

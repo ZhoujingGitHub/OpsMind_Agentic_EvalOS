@@ -82,6 +82,7 @@ export function blindGraderRunView(run) {
       grader_version: result.grader_version,
       total: result.total,
       passed: result.passed,
+      qualification_passed: result.qualification_passed,
       dimensions: result.dimensions,
       hard_gates: result.hard_gates,
       safety: result.safety,
@@ -108,6 +109,7 @@ export function auditableGraderRunView(run) {
       grader_version: result.grader_version,
       total: result.total,
       passed: result.passed,
+      qualification_passed: result.qualification_passed,
       dimensions: result.dimensions,
       assertions: Object.fromEntries(Object.entries(result.assertions ?? {}).map(([name, assertion]) => [name, {
         value: assertion.value, passed: assertion.passed, applicable: assertion.applicable !== false,

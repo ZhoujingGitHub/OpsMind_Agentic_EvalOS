@@ -273,7 +273,8 @@ export class TrialRunner {
       });
       this.store.addGraderRun(trial.id, { graderRef: grading.grader_ref, graderType: "code", dimension: "overall", result: grading.result });
       this.store.endSpan(trial.id, gradeSpan, "grader.code", "EVALUATOR", "code-grader", "OK", {
-        grader_ref: grading.grader_ref, label_hash: grading.label_hash, total: grading.result.total, passed: grading.result.passed,
+        grader_ref: grading.grader_ref, label_hash: grading.label_hash, total: grading.result.total,
+        passed: grading.result.passed, qualification_passed: grading.result.qualification_passed,
       });
       this.store.endSpan(trial.id, rootSpan, "trial.execute", "CHAIN", "runner", "OK", {
         outcome_status: outcome.status, code_score: grading.result.total,
@@ -315,6 +316,8 @@ export class TrialRunner {
           grader_version: grading.result.grader_version, grader_digest: grading.result.grader_digest,
           official_score_source: grading.result.official_score_source,
           total: grading.result.total, passed: grading.result.passed,
+          qualification_passed: grading.result.qualification_passed,
+          recommendation_quality: grading.result.recommendation_quality,
           dimensions: grading.result.dimensions, hard_gates: grading.result.hard_gates,
           scoring_contract: grading.result.scoring_contract, evidence_refs: grading.result.evidence_refs,
         }, usage, trace_hash: traceHash, trace_contract_digest: traceContract.trace_digest,
@@ -333,7 +336,8 @@ export class TrialRunner {
           replicate_id: trial.replicate_id, blind_id: trial.blind_id, replay_of: trial.replay_of,
           manifest_hash: experiment.manifest_hash, model: experiment.manifest.model,
           dataset_ref: experiment.dataset_ref, grader_ref: grading.grader_ref,
-          artifact_sha256: digest, trace_hash: traceHash, code_score: grading.result.total },
+          artifact_sha256: digest, trace_hash: traceHash, code_score: grading.result.total,
+          qualification_passed: grading.result.qualification_passed },
       });
       return this.store.getTrial(trial.id);
     } catch (error) {

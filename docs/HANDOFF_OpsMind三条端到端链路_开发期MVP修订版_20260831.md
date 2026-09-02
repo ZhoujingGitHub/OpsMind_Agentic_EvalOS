@@ -717,12 +717,19 @@ EvalOS 评测两个产品时，必须串行执行：
 - 修复当前公网实际仍走旧120秒路径的问题：收口为一份真正被 Nginx 加载的权威配置，发布后用明确冒烟证明 Judge 路径选择正确；不得继续叠加代理兼容层。涉及一次性主机权限修正时，执行前按权限流程明确申请；
 - AI Judge 即使是独立会话，底层仍为 DeepSeek 系列，必须标为辅助第二意见，不能宣传成异构模型独立批准。
 
-#### 6.5 先做两条直连补充验收
+#### 6.5 两条直连补充验收（2026-09-02 已完成）
 
 - LangGraph + 5G实验室重新完成一次真实直连调查，证明题目要求时建议非空、FINALIZE 最终报告阶段真实形成建议、自审结果可核对、只诊断模式零写入，并证明没有绕入 ACTION_PROPOSAL；
 - Agent+Harness + 5G实验室重新完成一次真实直连调查，证明 `report-workorder` Skill 自审真实发生、建议非空、AMF/N2 建议与证据一致，“宁德 MTU”和“北京 AGV 无线遮挡”等旁路线索没有污染正式建议；
 - 两次运行继续串行，各自复位并验证实验室干净；它们是任务3、4新增质量标准的补充验收，不抹掉原外围和核心链路的历史通过；
 - 页面端到端验收在可用的 Chrome 环境中补做；页面暂不可用时，可以先用真实后端凭证完成质量闭环，但任务8必须如实记录页面验收是否仍待补。
+
+2026-09-02 已按“一个物理实验室、两个产品串行、每轮独立资源票、每轮完成后清场”的方式完成后端真实验收。本次没有通过 Chrome 页面验收，因此页面状态仍是待补，不能用后端结果冒充页面已经通过。
+
+- LangGraph 使用准确候选 `f99d3775fb71` 完成真实直连调查 `inv-4e8b4822088e48d5b3841d53`：确认 AMF stopped 是直接根因，置信度 0.85，8 份证据，真实耗时 509 秒；交付两条非空建议并完成现有 FINALIZE 自审；生产写关闭，调查档案已校验。模型两次只发出正常工具调用而没有附带旧版要求的公开 JSON，新接收边界没有让整轮失败，也没有隐藏重跑模型。调查后人工通过实验室控制器复位，确认全部核心服务恢复、活动 Trial 为 0、物理租约空闲、无需恢复。
+- Agent+Harness 使用准确候选 `25b5aa5bb8f0` 完成真实直连调查 `inv-b43acc391c19`：确认 AMF stopped 是直接根因，置信度 0.88，28 份证据，33 次真实工具调用、16 次 DeepSeek V4 Flash 模型调用、168794 Token；现有单 Agent 真实调用并完成 `opsmind-domain-skills:report-workorder` Skill 自审，正式交付两条非空建议，分别绑定 AMF 根因和“AMF 为什么停止”的真实证据缺口；“宁德 MTU”“北京 AGV 无线遮挡”没有进入报告，实验室内无因果关系的 3868/EPC 现象只作为旁路线索。第一次报告提交缺少必填 `hypotheses` 被现有合同拒绝，同一个主 Agent 自行补齐后成功提交，没有增加第二 Agent、兼容旁路或固定答案。报告已经可靠入库后，SDK 有一个工具结果未在有界等待内出现终态；现有 Harness 没有重放该工具，而是凭不可变交付回执安全收口，最终 Evidence Gate 通过、报告状态 confirmed。临时验收账号、会话、授权 Scope 和令牌文件已删除，调查记录保留；实验室自动复位后再由管理面独立核对，确认全部核心服务恢复、活动 Trial 为 0、物理租约空闲、无需恢复。
+- 两套产品验收后均保持候选版本在线，数据库版本未变化，容器重启次数均为 0。LangGraph 当前候选 `f99d3775fb71` 的直接回退点为 `90db31b3dfc5`；Agent+Harness 当前候选 `25b5aa5bb8f0` 的直接回退点为 `2e62a7b47dd1`。
+- 本次结果只证明两套产品各自直连5G实验室的后端真实链路及建议质量补充标准通过；不证明 EvalOS 建议接收、确定性评分、三路 AI Judge、Trace、Ledger、盲身份或 Chrome 页面已经通过。
 
 #### 6.6 再运行一个新的 LangGraph 非计分资格验证 Trial
 
@@ -842,3 +849,64 @@ EvalOS 评测两个产品时，必须串行执行：
 > 状态：产品经理已于2026-09-01明确批准。该原则约束 LangGraph OpsMind、Agent+Harness OpsMind、EvalOS 和5G数字孪生实验室后续全部版本工作。
 
 LangGraph OpsMind、Agent+Harness OpsMind、EvalOS 和5G数字孪生实验室统一执行以下版本维护原则：三个平台各自的 `main` 是唯一稳定主线，5G实验室源码继续由 EvalOS 仓库管理，但必须拥有独立的控制器版本和生产标签；任何新需求只能从上一版已经真实验收、已经上线且标签明确的准确 `main` 版本开始，禁止从旧分支、临时分支、废弃分支或人工拼装的代码开始开发。修改代码、配置、分支、构建、部署或真实验收前，必须先向产品经理列清当前稳定版本、现存问题、准备修改的内容、明确不动的核心、拟用分支名称、测试方法、部署和回滚方法，获得本任务明确批准后才能执行。功能分支、临时分支和废弃分支必须使用一眼能看懂的“产品＋用途＋日期”名称；废弃和临时分支必须明确标注 `abandoned` 或 `temporary`，不得合并、构建或部署。历史提交号是已经验收和部署证据的一部分，不重写、不变基、不强制推送；对产品经理统一使用“中文版本名称＋短提交号”，为稳定版本建立可读、不可变的生产标签，今后的提交说明必须直接写清修改了什么。候选版本验收通过后，必须先收回 `main`、推送 `origin/main`、建立生产标签并核对线上准确版本，完成这四项后才能开始下一项需求；较早提交的端到端结果和最终提交的局部测试只能称为组合证据，不能冒充最终提交已经完成真实端到端验收。工作区中用户已有修改、临时补丁、构建产物、运行证据和未跟踪文件必须先清点并隔离，只允许提交本任务文件，Secret、Token、密码和私钥永远不得进入 Git。EvalOS 发布包必须记录准确 Git 版本和内容摘要；5G实验室控制器必须另有版本身份证、组件清单摘要和 `current/previous` 两代回滚，只保留一个权威打包与安装入口，陈旧压缩包和隐蔽兼容路径必须废弃。未经产品经理单独批准，不删除远端分支或标签、不重写历史、不自动回滚数据库、不部署、不运行 Trial、不操作5G实验室，也不得借版本纠偏改变 LangGraph 的 Graph 与双模型核心、Agent+Harness 的 Claude Agent SDK 单 Agent核心、EvalOS 的评测与账本核心或5G实验室的场景、复位和安全核心。
+
+---
+
+## 16. 2026-09-02 两套 OpsMind 小范围纠偏（代码、测试、部署和直连验收已完成）
+
+产品经理已明确批准：分别修复 LangGraph 的单轮模型公开输出容错，以及 Agent+Harness 的建议可信度缺口；完成代码、全量测试、远端候选分支、部署和两次串行真实5G直连验收。该批准不包含 EvalOS Trial、正式计分、批量运行或改变任一核心架构。
+
+### 16.1 LangGraph 模型回答容错修复
+
+- 当前修复基线为已部署候选 `90db31b3dfc5`；它完整继承已验收稳定版 `6a43ac7cb0f2`，并包含 AMF 进程证据、真实耗时和 FINALIZE 建议能力；
+- 候选分支固定为 `codex/langgraph-feature-model-output-recovery-20260902`，不得改从旧 `main`、临时分支或废弃复杂外围分支开发；
+- 只修改 DeepSeek 公开响应接收边界：展示文字安全归一、每个工具申请独立校验、一次有界纠正、第二次仍失败时拒绝可疑工具并保留已有证据、记录不含原文的安全字段级错误；
+- 不增加 Graph 节点或连线，不修改 Flash/Pro 双模型、MCP、Evidence Gate、Checkpoint、Knowledge、业务数据库、FINALIZE 建议、审批或动作安全；
+- 当前真实失败 `lg-direct-rec-20260901-02` 保留为缺陷发现证据。它证明 AMF 权限和耗时已修复，但不构成该候选通过；
+- 回滚只切应用到 `prod-langgraph-20260901-development-mvp`（`6a43ac7cb0f2`），不自动修改数据库。
+
+### 16.2 Agent+Harness 建议可信度加固
+
+- 当前修复基线为 `main` 的 `2e62a7b47dd1`；它完整继承已验收稳定版 `2de18e8dfbb3`。已有标签 `prod-agent-harness-20260902-remediation-quality` 缺少新版本真实直连验收，暂不能单独作为“建议质量已验收”证明，也不得移动或删除；
+- 候选分支固定为 `codex/agent-harness-feature-recommendation-reliability-20260902`，不得迁入已废弃旧 `main` 建议分支；
+- 只加固现有 `report-workorder` Skill 和不可变报告接收前检查：证明本次真实调用过 Skill；建议证据必须与目标假设的支持证据或真实证据缺口一致；只引用反证、任意调查证据或自称 `self_reviewed=true` 不能通过；无关发现只能进入 `side_findings`；
+- 不增加第二 Agent、subAgent、审核服务、模型、固定调查流程或关键词黑名单；同模型检查只能标为“主 Agent 自审”，不能冒充独立审批；
+- Claude Agent SDK 单 Agent、DeepSeek V4 Flash Thinking、MCP、21 个 Skills、ToolSearch、原生工具、Harness、Evidence、报告幂等交付、动作审批和回滚保持不变；
+- 回滚只切应用到 `prod-agent-harness-20260901-development-mvp`（`2de18e8dfbb3`），不自动修改 MySQL 或 Redis。
+
+### 16.3 实施与验收顺序
+
+1. 两个产品分别从上述准确基线建立可读分支并验证血缘；
+2. 分别完成定向合同测试、核心架构保护测试和全量测试；
+3. 分别提交并推送远端候选分支，构建物必须记录准确提交；
+4. 先部署 LangGraph 候选并完成一次真实5G直连验收与确定性清场；
+5. 确认物理实验室唯一租约恢复空闲后，再部署 Agent+Harness 候选并完成一次真实5G直连验收与清场；
+6. 两次运行都要核对根因、置信度、建议、自审、证据引用、真实耗时、零生产写和回滚入口；
+7. 任一产品失败只修该产品，不通过另一产品、EvalOS 或实验室兼容补丁掩盖；
+8. 两个候选真实验收通过后，才允许分别收回 `main`、推送 `origin/main` 并建立新的不可变生产标签。
+
+本节明确覆盖此前“正在实施”的宽泛表述；计划、测试、部署和真实验收必须逐项记录，不能提前写成完成。
+
+### 16.4 准确结果与当前版本状态
+
+| 产品 | 候选分支 | 准确候选提交 | 本地全量测试 | 真实直连结果 | 当前线上 | 直接回退点 |
+|---|---|---|---|---|---|---|
+| LangGraph OpsMind | `codex/langgraph-feature-model-output-recovery-20260902` | `f99d3775fb717435f9bfb5cd7b1f85bc389377f1` | 234 通过、1 跳过；格式、类型和依赖检查通过 | 通过；根因、置信度、建议、自审、真实耗时、只读安全和清场均已核对 | `f99d3775fb71` | `90db31b3dfc5` |
+| Agent+Harness OpsMind | `codex/agent-harness-feature-recommendation-reliability-20260902` | `25b5aa5bb8f02990ba8186b6d10ee709685e2cd3` | 294 通过、2 跳过；编译、前端架构、类型和构建检查通过 | 通过；真实 Skill 自审、建议相关性、证据绑定、置信度、报告交付、只读安全和清场均已核对 | `25b5aa5bb8f0` | `2e62a7b47dd1` |
+
+两个候选分支均已推送远端。跳过项没有被隐藏：LangGraph 的 1 项依赖专用隔离 MySQL DSN，本地未配置；Agent+Harness 的 2 项只适用于 Linux 的 Unix Socket/POSIX 权限，在本次 Linux 部署和真实运行中已实际覆盖非 root、Secret 权限及真实工具通信关键路径。
+
+本次明确没有修改两套 OpsMind 核心，没有增加 Agent、subAgent、模型、Graph 节点、连线、服务、队列、数据库表或迁移，也没有运行 EvalOS Trial。产品经理随后已批准发布收口：LangGraph `main`、`origin/main` 和生产标签 `prod-langgraph-20260902-model-output-recovery` 均准确指向 `f99d3775fb717435f9bfb5cd7b1f85bc389377f1`；Agent+Harness `main`、`origin/main` 和生产标签 `prod-agent-harness-20260902-recommendation-reliability` 均准确指向 `25b5aa5bb8f02990ba8186b6d10ee709685e2cd3`。两套线上产品继续运行这两个准确版本。任务6下一步仍是 6.4 和 6.6：先完成 EvalOS 建议接收、确定性检查和三路现有 Judge，再运行一个新的 LangGraph 非计分资格 Trial；任务7的 Agent+Harness 非计分资格 Trial此后再做。
+
+### 16.5 EvalOS 建议评测与轻量回滚修订（2026-09-02 已批准实施）
+
+产品经理已明确批准：继续使用可读候选分支 `codex/evalos-feature-recommendation-evaluation-20260901`，完成代码、全量测试、远端候选、部署，并依次运行一个 LangGraph 和一个 Agent+Harness 非计分资格 Trial。正式计分、排名、批量 Trial、异步 Judge、新队列、新服务、新数据库表和迁移仍未获授权。
+
+- 当前 EvalOS `main` 与 `origin/main` 均为 `c43325596197ac616ca82657e3eb5cbb2e05f727`；当前候选 `fb5abf95c6de9714d397b86278dc0aa71a57e4fd` 是它的直接单提交后代，没有混入临时或废弃分支；
+- 当前线上发布包 `m31-20260901-f36dc85f8e` 服务正常，但旧 `evalos-release.1` 合同没有记录 Git 提交，不能冒充可追溯稳定基线；已知可追溯回退基线仍为标签 `prod-evalos-20260901-development-mvp`（`cd141768939e`）对应的 `m31-20260901-f90ae61281`；
+- EvalOS 只读保存两套产品原生建议和来源，不生成、不改写建议；现有确定性 Code Grader 增加零权重建议质量资格信号，现有 Outcome、Evidence、Trajectory 三位 Judge 只提供辅助第二意见，不新增第四 Judge；
+- 资格阶段必须从现有确定性评分和建议质量信号派生一个唯一的 `qualification_passed`：建议不合格时不得显示资格通过，但正式总分、权重和排名保持不变；不增加第二评分器或数据库字段；
+- 三位 Judge 继续同步串行，每完成一位立即写入现有 `judge_runs`，重试只补缺失角色；只有准确的单 Trial Judge POST 路径使用15分钟等待，其他页面和接口保持120秒；若真实15分钟仍超时，停止并申请是否调到30分钟，不擅自改异步；
+- 现有固定 EvalOS 管理通道只增加一个无参数 `rollback`，并维护唯一 `current/previous` 应用指针；手工回滚只切应用、systemd服务和Nginx配置，明确 `database_action=none`，不增加发布平台或第二管理通道；
+- 首次部署成功后把已知稳定包 `m31-20260901-f90ae61281` 明确设为 `previous`，不把来源无法证明的旧线上包作为长期回退事实；在没有活动 Trial 时完成“候选→稳定→候选”往返验证；
+- EvalOS 的 Claude Agent SDK + DeepSeek V4 Flash 自由单 Agent、Harness、Trial隔离、开放资源合同、盲身份、Trace、Ledger、Code Grader正式评分权、Twin管理、审批和动作安全保持不变；两套 OpsMind 核心及5G实验室场景、复位与安全核心不作修改。

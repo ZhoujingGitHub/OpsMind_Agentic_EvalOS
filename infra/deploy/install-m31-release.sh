@@ -12,6 +12,7 @@ actual_sha256="$(sha256sum "$archive" | awk '{print $1}')"
 
 release_root="/opt/opsmind-evalos/releases/$release_id"
 current_link="/opt/opsmind-evalos/current"
+previous_link="/opt/opsmind-evalos/previous"
 previous_release="$(readlink -f "$current_link" || true)"
 backups_root="/var/lib/opsmind-evalos/backups"
 backup_root="$backups_root/$release_id"
@@ -121,5 +122,9 @@ done
 
 EVALOS_SMOKE_ORIGIN=http://127.0.0.1:3000 node "$release_root/evalos/scripts/smoke-m31-deployment.mjs"
 systemctl is-active --quiet opsmind-evalos opsmind-evalos-console nginx
+if [[ -n "$previous_release" && -d "$previous_release" && "$previous_release" != "$release_root" ]]; then
+  ln -sfn "$previous_release" "${previous_link}.next"
+  mv -Tf "${previous_link}.next" "$previous_link"
+fi
 trap - EXIT
 echo "EvalOS $release_id deployed successfully"
