@@ -202,8 +202,8 @@
       "architecture": "CLAUDE_AGENT_SDK_HARNESS",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "25b5aa5bb8f02990ba8186b6d10ee709685e2cd3",
-      "artifact_digest": "sha256:3ef12479eec65093b6ee23ac8fce346689114b2deb1c1afe661010aafc91e4d2",
+      "source_revision": "7426bbf1f59dadfdaf91d4116d427121ad30e9fe",
+      "artifact_digest": "sha256:0f12b3573f8aa99d7e82fcba321789d5402f6ac7c6132eb439b74cb5b9d70c67",
       "runtime_digest": "sha256:d6e2504f82f65efd41f058f32bc421d300c4f82941ce7a03595aced2a05b6531",
       "runtime_manifest_digest": "sha256:6593855f68a363c303812edae532aac61ddc78d6b53c4ad063e2000aeae89eeb",
       "capability_contract_digest": "sha256:f49bc9b0122694db33c06ca0792d4e419790bf5a53e53a8ad8be7ae7dd303cc1",
@@ -372,9 +372,9 @@
         "provenance": {
           "status": "product_public_maximum",
           "method": "candidate_public_runtime_contract",
-          "source_revision": "25b5aa5bb8f02990ba8186b6d10ee709685e2cd3",
-          "artifact_digest": "sha256:3ef12479eec65093b6ee23ac8fce346689114b2deb1c1afe661010aafc91e4d2",
-          "evidence_ref": "candidate-public-contract:agent-harness:25b5aa5bb8f0:opsmind-open-resource/1.0"
+          "source_revision": "7426bbf1f59dadfdaf91d4116d427121ad30e9fe",
+          "artifact_digest": "sha256:0f12b3573f8aa99d7e82fcba321789d5402f6ac7c6132eb439b74cb5b9d70c67",
+          "evidence_ref": "candidate-public-contract:agent-harness:7426bbf1f59d:opsmind-open-resource/1.0"
         }
       },
       {
