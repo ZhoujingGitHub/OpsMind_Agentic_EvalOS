@@ -1,5 +1,110 @@
 # OpsMind 三条端到端链路开发期 MVP 修订版 HANDOFF
 
+## 当前执行授权与唯一项目位置（2026-09-04）
+
+本节覆盖下方 2026-09-03“等待审批”和旧 C 盘位置的历史交接说明。产品经理已在本任务明确授权：“你按照顺序执行吧，我休息去了，你不需要等我审批了，切记一定不要写屎山！！！，尽快让3条链子跑起来”，并补充“提交代码的时候，一定要梳理清楚血缘”。因此按已经列明的八步顺序继续，不重复请求相同批准。
+
+本次授权范围：准确版本与活动任务核对；安装实验室版本保护和 EvalOS 安全安装器；部署 LangGraph 已推送报告修复；据实际产品部署证明更新 EvalOS 三个既有公开登记；提交、推送并部署最终 EvalOS 候选；两套产品串行独占实验室进行直连实测；各一个非计分资格 Trial；Chrome 真实页面验收；通过后归入各自 main、推送并建立准确不可变生产标签。正式计分/排名、批量 Trial、启动历史 480 个 QUEUED Trial、数据库自动恢复、改写 Git 历史、删除远端分支/标签均不在范围内。
+
+正式项目目录：
+- EvalOS：D:/AIPM/黄钊+张和AIPM训练营/5期/从0到1打造一个Agent落地产品/OpsMind_Agentic_EvalOS
+- LangGraph OpsMind：D:/AIPM/黄钊+张和AIPM训练营/5期/从0到1打造一个Agent落地产品/OpsMind-LangGraph
+- Agent+Harness OpsMind：D:/AIPM/黄钊+张和AIPM训练营/5期/从0到1打造一个Agent落地产品/OpsMind
+
+本轮唯一代码续做目录（均在 D 盘，必须显式指定，不使用当前会话的 C 盘旧工作树）：
+- LangGraph：D:/AIPM/黄钊+张和AIPM训练营/5期/从0到1打造一个Agent落地产品/OpsMind-LangGraph/runtime/codex-migration-20260903/candidates/report-evidence
+- Agent+Harness：D:/AIPM/黄钊+张和AIPM训练营/5期/从0到1打造一个Agent落地产品/OpsMind/_work/codex-migration-20260903/candidates/lab-evidence-labels
+- EvalOS：D:/AIPM/黄钊+张和AIPM训练营/5期/从0到1打造一个Agent落地产品/OpsMind_Agentic_EvalOS/_work/codex-migration-20260903/candidates/evidence-readiness
+
+正式总交接记录位于 EvalOS 正式目录 docs 下的本文件同名文档；候选仓库保留提交时的交接快照。长期记忆、HANDOFF、工程记录和新产物存 D 盘。磁盘迁移已按用户指示暂停，本轮不重启迁移、不搬回 C 盘、不删除 C 盘残留。
+
+2026-09-04 本轮现场读取确认：
+- LangGraph main/origin/main 和线上为 f99d3775fb717435f9bfb5cd7b1f85bc389377f1；候选 e2f207a33c549c5015d3f2ee2471de0711c585a3 已推送，线上提交是候选祖先。
+- Agent+Harness main/origin/main 为 25b5aa5bb8f02990ba8186b6d10ee709685e2cd3；线上候选及远端候选为 7426bbf1f59dadfdaf91d4116d427121ad30e9fe，待本轮验收后归主线。
+- EvalOS main/origin/main 为 c43325596197ac616ca82657e3eb5cbb2e05f727；线上源码 1ffb79715a67ceff018638a21e64017857251e52、包 m31-20260903-1cf445d05e；候选 5f7f9dc745b9777b2253fdcc26ad344c255a120e 已推送，线上提交是候选祖先。本轮先保留并提交已有未提交交接文档及本节；这一步不修改运行代码，不冒充真实端到端通过。
+- 实验室此前验收标签 accepted-twin-controller-20260901-physical-lease 指向 07c3e1352bbc10805c732af9c2c1ce372f2c12c6；现场尚无规范 current/previous。固定保护安装器尚待本轮安装。
+- 本轮原始核对记录和授权见 D:/AIPM/黄钊+张和AIPM训练营/5期/从0到1打造一个Agent落地产品/OpsMind_Agentic_EvalOS/_work/three-chain-acceptance-20260904；实际提交和部署以后续回执为准。
+
+血缘规则：每次构建/部署/Trial 前核对准确线上提交为候选祖先；候选先推远端再构建；不从旧、temporary 或 abandoned 分支拼装；逐项清点修改，只提交本任务文件。旧端到端与新局部检查只能称组合证据。通过后核对 main、origin/main、准确部署提交及生产标签，不能仅在旁支保留修复。
+
+---
+
+
+## 新任务接手入口：候选已交付，部署仍待批准（2026-09-03）
+
+本节是本次跨会话接手的最新状态，优先于下方历史进度。产品经理已明确要求“先补充 HANDOFF，再开新任务，在新会话中干”。这次批准的是补充交接文档和创建新任务，不是部署、真实调查或 Trial 的批准；上一轮“是否批准先安装发布保护、上线 LangGraph、生成 EvalOS 待审登记”的问题仍待明确答复。
+
+### A. 新任务首先必须知道的事情
+
+- ● 报告引用与评测接收整改的本地实现、回归、原始历史材料只读重放已经完成；候选代码已提交并推送，远端已核对。
+- ● 发布前只读核对已经完成，结果见本节；不是部署结果，也不是当前候选的真实端到端通过。
+- ○ 安装两个发布保护、部署 LangGraph、准备 EvalOS 最终登记：待新任务列清准确审批表并获产品经理明确批准。
+- ○ EvalOS 最终公开登记修改、提交/推送与部署：待前一步取得实际版本证明后，明确准确版本及审批范围；不得直接用旧登记开考。
+- ○ 新版本两套产品直连、各一个非计分资格 Trial、Chrome 页面验收：尚未开展，需获得当次实验室独占测试授权。三个目标是 LangGraph＋实验室、Agent+Harness＋实验室、EvalOS＋实验室评测这两套产品；不是设计四套并发系统。
+- ○ 真实验收通过后收回各自 main、推送和建立准确生产标签；未验收候选不能假冒稳定版。
+
+产品经理要轻量、稳定的外围，不简化三个平台的商用核心。禁止重写调查核心、引入固定调查工作流、增加服务/队列/监督器/数据库/评委或擅自改为异步。不能把旧的复杂外围、旧 Adapter 4、递归抓取任意 id、全部证据等同根因引用等废弃路径合回来。建议必须有依据，不能用“宁德 MTU”“北京 AGV 无线遮挡”之类无关内容凑数；测试保留这些案例及换名变体，不做地名黑名单。Token、时间、调用次数、费用只记录不评分；不得恢复已取消的 AI 评委费用截断，已批准的失控保护不擅自改动。
+
+### B. 唯一续做目录与准确候选
+
+真正的代码位于下列三个现有独立仓库。新任务在界面上分配的默认工作目录或自动工作树只作会话承载，不代表本次可发布代码；不要在默认旧 main 继续开发，不复制旧工作区来拼装。不要重新 clone、搬运、切换、重置或合并这三个仓库。
+
+共同父目录：`C:/Users/zhoujing/.codex/worktrees/4993/OpsMind_Agentic_EvalOS/_work/clean-branches-20260901`
+
+| 产品 | 中文候选名、准确分支 | HEAD（已推送） | 续做目录 |
+| --- | --- | --- | --- |
+| LangGraph | 报告依据清晰化；`codex/langgraph-feature-clear-report-evidence-20260903` | `e2f207a33c549c5015d3f2ee2471de0711c585a3` | 上述父目录的 `langgraph` |
+| Agent+Harness | 保留实验室证据标签；`codex/agent-harness-fix-preserve-lab-evidence-labels-20260903` | `7426bbf1f59dadfdaf91d4116d427121ad30e9fe` | 上述父目录的 `agent-harness` |
+| EvalOS（含实验室源码） | 证据接收与就绪一致性，含发布保护；`codex/evalos-feature-evidence-readiness-consistency-20260903` | `5f7f9dc745b9777b2253fdcc26ad344c255a120e` | 上述父目录的 `evalos` |
+
+EvalOS 的实际运行代码修复提交为 `3f290972cb9519133b431b755bddc310f37c2521`，后续 `5f7f9dc745b9777b2253fdcc26ad344c255a120e` 仅补交付文档。本次跨会话只编辑本 HANDOFF，未再次提交或推送，因此 EvalOS 会有这一项已授权的未提交文档；不得误当作遗留代码补丁、丢弃它、宣称工作区干净或偷偷提交。构建前按既有规则处理文档归档审批并重新明确准确构建提交，不能为清理工作区执行 reset/stash 或迁移到旧 main。两套 OpsMind 没有本次未提交修改。代码推送回执详见 [本地验证记录第 14 节](implementation/报告依据与评测接收整改_本地验证_20260903.md#14-获批候选代码交付回执2026-09-03)。
+
+唯一总 HANDOFF 就是本文件，绝对路径为 `C:/Users/zhoujing/.codex/worktrees/4993/OpsMind_Agentic_EvalOS/_work/clean-branches-20260901/evalos/docs/HANDOFF_OpsMind三条端到端链路_开发期MVP修订版_20260831.md`。同名的旧根目录/其他工作树副本、最早的 BreakingChange 文件不是当前执行入口。
+
+### C. 稳定主线、线上与恢复基线
+
+| 产品 | main/origin/main 与已有生产/验收标签 | 最近核实的线上及上一版 |
+| --- | --- | --- |
+| LangGraph | `f99d3775fb717435f9bfb5cd7b1f85bc389377f1`；`prod-langgraph-20260902-model-output-recovery` 指向此提交 | 当前 `f99d3775fb71`，上一版 `90db31b3dfc5`；数据库 `20260828_0011`；API/Worker 运行 |
+| Agent+Harness | `25b5aa5bb8f02990ba8186b6d10ee709685e2cd3`；`prod-agent-harness-20260902-recommendation-reliability` 指向此提交 | 当前在验候选 `7426bbf1f59dadfdaf91d4116d427121ad30e9fe`，上一版 `25b5aa5bb8f0`；数据库 `017_native_run_context_budget`；API 运行且健康 |
+| EvalOS | `c43325596197ac616ca82657e3eb5cbb2e05f727`；旧标签 `prod-evalos-20260901-development-mvp` 指向 `cd141768939e5fc865390ecbcfcd06744fbf0383`，不能把两者混称同一提交 | 当前源码 `1ffb79715a67ceff018638a21e64017857251e52`，包 `m31-20260903-1cf445d05e`；上一包 `m31-20260902-ab2a3cd872`，源码 `ca75b3889000d0570c6d0ecad03d7b8ea30ebbb3`；API/页面运行 |
+| 实验室 | 独立标签 `accepted-twin-controller-20260901-physical-lease` → `07c3e1352bbc10805c732af9c2c1ce372f2c12c6`，由 EvalOS 仓库管理 | 现场 8 个运行文件/基线配置与该标签一致；尚未安装规范 current/previous 和固定版本入口，不能宣称两代回退已具备 |
+
+2026-09-03 北京时间约 19:05～19:12 的只读复核确认：实验室租约为 idle，无所有者/Trial/lease，启动号匹配；没有调用会改变租约的 Twin status/health/observe/prepare/reset。EvalOS 旧固定安装器仍为 root:root、0755，摘要 `bb8e7ba20bfdb948d7b2bf5442a26e8cc2e78e957c2bfcd5178d7b0703ec2c63`，失败时覆盖数据库的风险尚未靠线上替换消除。此前已确认的 480 个历史 QUEUED Trial 不得启动；此次只读复核未重新查询业务库活动任务，上线前须再次检查，不能复用旧“无活动任务”结论。
+
+实验室 8 个准确运行路径：`/usr/local/sbin/opsmind-twinctl`、`/usr/local/sbin/opsmind-eval-manager`、`/usr/local/sbin/opsmind-twin-ssh-gateway`、`/usr/local/libexec/opsmind-twin-dns.py`、`/usr/local/libexec/opsmind-twin-dns-probe.py`、`/etc/opsmind-twin/stack.manifest.json`、`/srv/opsmind-twin/config/baseline/gnb.yaml`、`/srv/opsmind-twin/config/baseline/ue.yaml`。DNS 两个文件在 libexec，不在 sbin；不要因查错路径误报缺失。摘要见本地验证记录第 8、11 节。
+
+### D. 接下来待批准的发布前半段
+
+以下三步是待审批方案，不是已授权部署：
+
+| 顺序 | 具体动作与准确来源 | 核验和恢复 |
+| --- | --- | --- |
+| 1. 安装两个发布保护 | 实验室新包和固定安装器取已推送 EvalOS 候选 `5f7f9dc745b9777b2253fdcc26ad344c255a120e`；旧版恢复包用同一打包工具从准确验收标签 `07c3e1352bbc10805c732af9c2c1ce372f2c12c6` 取源，不合并旧分支。先验证并保存旧版，再纳入 current/previous。随后只替换 EvalOS 已修好的固定安装器，不切应用 | 实验室空闲/启动号/互斥锁/逐文件摘要不符就停止。保留原文件，失败仅恢复控制器及入口，不动租约和实验数据。EvalOS 安装失败只能退应用/服务配置，数据库不能自动恢复；旧风险安装器仅保留审计，不重新启用 |
+| 2. 部署 LangGraph 报告修复 | 只构建准确 `e2f207a33c549c5015d3f2ee2471de0711c585a3`，可信构建后登记准确镜像，通过原受限入口切 API/Worker，不碰另一产品或数据库 | 上线前确认无活动任务、血缘正确、原版仍完整、数据库版本不变。独立核对镜像/版本/公开合同；失败退回 `f99d3775fb71`。此步不发起调查、不观察实验室 |
+| 3. 生成 EvalOS 待审登记 | 取得实际已上线 LangGraph 和现有 Agent+Harness 的独立部署证明及公开合同，用 `scripts/candidate-release-registration.mjs` 唯一入口生成三个现有配置的待审修改 | 只生成待审内容，暂不修改配置、提交新 EvalOS 候选或部署应用；不改历史冻结 Trial，不从预期版本伪造实测证明。数据库、资源/权限或核心合同意外变化则停下另审 |
+
+三个公开配置固定为 `config/m3-formal-agent-capability.manifest.json`、`config/candidate-relay-public-keys.json`、`config/candidate-presence-public-keys.json`；此处的登记只解决接入同一准确版本，不新增版本服务、不抄出另一份事实源。只读 `--check` 已通过，不能把它当作新版本已上线。后续审核配置更新、形成准确已推送的最终 EvalOS 提交后，才构建部署 EvalOS，再申请/执行两套直连、各一个非计分资格 Trial 和 Chrome 验收。正式成绩、排名、批量 Trial、额外故障注入不在此批准内。
+
+已修好工具的 SHA-256：EvalOS 固定安装器 `e7697339ce9f5f1005e0a55c30f5585810ec392ed15e162f5218a748750bbab6`；实验室固定安装器 `44594da1aacbc27e3554a35707168bf48600be38fa52f309edd7d80680fd31e9`；实验室唯一打包工具 `6e0c5268cb4ca7652f06425db76da3cab3869ebee71f06d44a2332c104524638`。包号与包摘要只能在实际获批构建后生成；不能把工具摘要当包摘要。本次 HANDOFF 文档补充没有改变上述工具或运行代码。
+
+### E. 已有证据与接手方法
+
+已有本地验证：LangGraph 246 通过/1 个隔离 MySQL 跳过，报告渲染 2 通过；Agent+Harness 298 通过/2 个 Windows 条件跳过；EvalOS 189 通过、页面 9 通过；实验室 43 通过，安全/架构/SDK/20 项能力检查通过。这些是之前真实执行的本地验证，本次交接未重新全量运行，也没有用它们冒充最终提交真实端到端通过。原始 Trial 本地只读重放和 38412 端口仍缺独立证据的边界，详见本地验证记录；不得补造证据或改原成绩。
+
+接手顺序：
+
+1. 完整阅读当前承载目录 AGENTS.md、本文件、三个实际仓库各自 AGENTS.md，以及其规定的 PROJECT_MEMORY.md/memory.md 和相关进度决策；不是重新梳理所有历史分支或重做已完成任务。
+2. 用绝对路径只读检查上表三个仓库的分支、HEAD、远端、祖先与未提交文件；预期只有本 HANDOFF 文档修改。若不符，先报告，不能凭记忆重置或拼代码。
+3. 用人话向产品经理简短报告接手位置，再列本节 D 的准确审批表（包含文档归档对最终提交的影响）；没有明确批准，不构建、不部署、不写配置、不提交/推送、不调用 Twin 或创建调查/Trial。不要把“在新会话中干”当作跳过这些边界的授权。
+4. 若后续获批，继续这三个原有候选仓库，保持一个工作负责人串行使用实验室；旧任务不再并行修改。页面验收需要操作浏览器时先遵循相应技能和安全规则。向产品经理用实心圆表示真正完成，空心圆表示待做；不把正在做写成已通过。
+
+已有工具位置（不是秘密值）：Git `D:/install/Git/cmd/git.exe`，Node `D:/install/nodejs/node.exe`，Python `D:/install/anaconda3/python.exe`，本机 WSL Ubuntu 可运行 Linux 文件/锁测试。现有阿里云 CLI 位于 `D:/AIPM/黄钊+张和AIPM训练营/5期/从0到1打造一个Agent落地产品/OpsMind/.tools/aliyuncli/aliyun.exe`。2026-09-03 的 `opsmind-main-oauth`、`opsmind-evallab` 配置曾可用，下一次必须验证，禁止输出凭据。
+
+管理线索：EvalOS 原受限 status 使用 `opsmind-maint@10.77.240.1`，现有身份文件 `C:/Users/zhoujing/.ssh/opsmind-evalos-maint`、严格校验文件 `C:/Users/zhoujing/.ssh/known_hosts_opsmind_management`。产品主机实例 `i-bp12nyanjsyue1vs5bu6`、实验室 `i-bp19u0lim79nhh4y7fkg` 在 `opsmind-main-oauth`，EvalOS 主机 `i-bp14ezltpnq8mxic1gsb` 在 `opsmind-evallab`，地域 `cn-hangzhou`。公网 LangGraph SSH 本次超时，曾改用已有云助手只执行两个产品固定 status 成功；这不是放宽网络或使用 root 做普通长期自动化的授权。不得读取/回显私钥或完整云认证配置。不要调用 `opsmind-twin` SSH 别名来做普通服务器检查，它使用考务身份，可能调用实验室核心。原始 Trial 副本在承载目录 `_work/report-replay-20260903/`，只读、Git 忽略，不复制进入新仓库或提交。
+
+---
+
 ## 当前执行入口：报告依据与评测接收整改（2026-09-03 已批准）
 
 以下状态覆盖下文历史进度；历史验收、失败 Trial 和旧任务编号保留，不改写成新版本已经通过。
@@ -44,11 +149,11 @@
 - ● 第 5 项（本地实现与回归）：5.1 复用已完成修复，5.2～5.4 保留接收与展示修复；经产品经理另行明确确认，5.5、5.6 也已完成本地修改。版本登记复用既有独立部署证明检查，一次生成三个现有配置的待审修改，拒绝漏改或不一致；不自动更新线上或历史版本。已删除 Adapter 4 和旧产品连接器的运行实现及其过时测试，当前 Adapter 5 补测超时、取消和隔离保护。旧 Manifest 6/7 真实产品记录仍可查看，但不能重新开考；工程测试通道保留。本项没有放松评分规则，也没有新增服务或数据库。
 - ● 第 6 项（本地测试与历史材料只读重放）：本地贯通测试通过，覆盖错误编号、未引用证据、标准标签丢失、反证、报告修正仍失败，以及签名报到的版本漂移、过期和实验室重启等场景。LangGraph **246 通过、1 跳过**，Agent+Harness **298 通过、2 跳过**（沿用本轮前段记录，未改这两个工作树）；EvalOS 最新全量 **189 通过、0 失败、0 跳过**（含新增 21 项安装器测试）；实验室本地 **43 通过**（新增 28 项版本工具测试与原有 15 项管理/租约测试）。页面自动测试 **9 通过**，配套本地页面编译与 ESLint 通过；另有 LangGraph 页面渲染函数测试 2 项通过。用户单独批准后，只复制 `trial_88c8f5000cdb446de7bc` 的原始材料到本机 Git 忽略目录，校验摘要一致。用同一真实报告、27 张证据卡和 639 条运行记录，旧连接器准确复现错误的 45 个引用，新连接器只取报告声明的 25 个；未改评分器，引用可追溯比例由 29/45 修正为 25/25，关键证据仍只有 2/3。根因、置信度、原生建议不变。副本里的未知引用、缺引用、丢失标准标签三个反向检查均拒绝，另重跑现有接收测试 **12/12 通过**。这是本地接收及确定性检查重放，不是新 Trial、完整资格通过或 Chrome 真实端到端；后者仍在第 7 项。未构建最终发布安装包。
 - ○ 第 7 项（真实部署与验收尚未开始）：本轮此前的只读核对时管理网正常，LangGraph 当前 `f99d3775fb71`、上一版 `90db31b3dfc5`，数据库 `20260828_0011`，API/Worker 运行；Agent+Harness 当前 `7426bbf1f59d`、上一版 `25b5aa5bb8f0`，数据库 `017_native_run_context_budget`，API 健康；EvalOS 当前 `m31-20260903-1cf445d05e`（源码 `1ffb79715a67ceff018638a21e64017857251e52`）、上一版 `m31-20260902-ab2a3cd872`（`ca75b3889000d0570c6d0ecad03d7b8ea30ebbb3`），API/页面运行。两套产品的调查、LangGraph Jobs、EvalOS 运行请求均未见活动任务；历史冻结正式设计下的 480 条 QUEUED Trial 不是正在执行的请求，不得启动。实验室物理租约文件为 idle，记录的启动号与主机当前一致；未调用 health/observe/prepare/reset，不能据此声称已完成清场验收。实验室全部 8 个运行文件/基线配置与已验收版本一致，但版本目录、current/previous 与安装入口仍未部署。发布工具已本地修复和测试；准确候选、部署步骤与权限仍须列发布表获批，不能把本地通过当作线上保护已生效。
-- ○ 第 8 项：未合入 main、未推送新修改、未新建生产标签。本轮代码仍是上述修复分支中的本地未提交修改，不能冒充已上线版本。
+- ○ 第 8 项：尚未合入 main、未建立本轮生产标签。修复代码已推送上述候选分支，但尚未上线或完整验收；本次接手只补本 HANDOFF 文档，不改变候选代码提交。
 
 跳过的 3 项来自此前两套 OpsMind 的 Windows 测试：分别缺少独立 MySQL 测试库，以及该测试环境要求的 Unix socket、文件权限和原子链接条件，不算通过。本轮实验室测试改在本机 WSL Ubuntu 临时目录验证真实 Linux 文件切换，不代表已补跑上述 3 项。没有连接真实业务数据库来代替测试环境。
 
-先前单独批准包含 5.5、5.6 的本地代码与测试；随后用户分别明确批准 EvalOS 安装器、实验室发布脚本的窄范围本地修复与测试，均已完成，详见下方。这些批准不包含提交、推送、部署或真实 Trial。旧代码删除仅发生在当前本地候选工作树，原版可从 Git 历史恢复；没有删除业务数据、Trace、Ledger 或远端分支。
+先前单独批准包含 5.5、5.6 的本地代码与测试；随后用户分别明确批准 EvalOS 安装器、实验室发布脚本的窄范围本地修复与测试，均已完成，详见下方。当时的本地批准不包含提交/推送；之后用户已另行批准两个候选提交与推送，交付已完成，但部署与真实 Trial 仍待批准。旧执行代码删除已随当前候选提交保留，原版可从 Git 历史恢复；没有删除业务数据、Trace、Ledger 或远端分支。
 
 ### 发布前新核实的事项（2026-09-03，安装器已本地修复、未部署）
 
