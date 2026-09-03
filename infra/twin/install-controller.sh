@@ -1,234 +1,317 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Fixed installer entry: never execute the installer from a rollback payload.
+exec python3 - "$0" "$@" <<'PY'
+from __future__ import annotations
 
-CONTROLLER_ROOT=/opt/opsmind-twin-controller
-RELEASES_ROOT=${CONTROLLER_ROOT}/releases
-CURRENT_LINK=${CONTROLLER_ROOT}/current
-PREVIOUS_LINK=${CONTROLLER_ROOT}/previous
-DATA_ROOT=/srv/opsmind-twin
-LEASE_FILE=${DATA_ROOT}/physical-lease.json
-
-fail() {
-  echo "OPSMIND_TWIN_CONTROLLER_ERROR: $*" >&2
-  exit 2
-}
-
-require_root() {
-  [[ "$(id -u)" == "0" ]] || fail "controller version management must run as root"
-}
-
-release_id_from_link() {
-  local link_path="$1"
-  [[ -L "$link_path" ]] || return 0
-  basename "$(readlink -f "$link_path")"
-}
-
-show_status() {
-  python3 - "$CURRENT_LINK" "$PREVIOUS_LINK" <<'PY'
-import json
-from pathlib import Path
-import sys
-
-def release(link_name):
-    link = Path(link_name)
-    if not link.is_symlink():
-        return None
-    metadata_file = link.resolve() / "RELEASE.json"
-    if not metadata_file.is_file():
-        return {"release_id": link.resolve().name, "valid": False}
-    metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
-    return {key: metadata.get(key) for key in (
-        "release_id", "source_revision", "content_digest", "component_manifest_digest"
-    )} | {"valid": True}
-
-print(json.dumps({"current": release(sys.argv[1]), "previous": release(sys.argv[2])}, separators=(",", ":")))
-PY
-}
-
-require_idle_lab() {
-  [[ -f "$LEASE_FILE" ]] || fail "physical lab lease is missing; recover the lab before changing controller versions"
-  python3 - "$LEASE_FILE" <<'PY' || fail "physical lab is not idle; controller version was not changed"
-import json
-from pathlib import Path
-import sys
-
-try:
-    lease = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-except (OSError, ValueError):
-    raise SystemExit(1)
-raise SystemExit(0 if lease.get("status") == "idle" else 1)
-PY
-}
-
-atomic_link() {
-  local target="$1"
-  local link_path="$2"
-  local temporary_link="${link_path}.new.$$"
-  ln -s "$target" "$temporary_link"
-  mv -Tf "$temporary_link" "$link_path"
-}
-
-ensure_host_prerequisites() {
-  install -d -m 0755 -o root -g root "$CONTROLLER_ROOT" "$RELEASES_ROOT"
-  install -d -m 0750 -o root -g root /etc/opsmind-twin
-  install -d -m 0755 -o root -g root /usr/local/libexec
-  install -d -m 0750 -o root -g root "${DATA_ROOT}/config/baseline" "${DATA_ROOT}/config/active"
-  install -d -m 0750 -o root -g root "${DATA_ROOT}/trials" "${DATA_ROOT}/pcap" "${DATA_ROOT}/artifacts"
-
-  if ! id -u evalos-twin >/dev/null 2>&1; then
-    useradd --system --create-home --shell /bin/bash evalos-twin
-  fi
-  cat >/etc/sudoers.d/opsmind-twinctl <<'EOF'
-evalos-twin ALL=(root) NOPASSWD: /usr/local/sbin/opsmind-twinctl
-evalos-twin ALL=(root) NOPASSWD: /usr/local/sbin/opsmind-eval-manager
-EOF
-  chmod 0440 /etc/sudoers.d/opsmind-twinctl
-  visudo -cf /etc/sudoers.d/opsmind-twinctl >/dev/null
-
-  cat >/etc/modules-load.d/opsmind-twin.conf <<'EOF'
-tun
-sctp
-EOF
-  modprobe tun
-  modprobe sctp
-
-  cat >/etc/sysctl.d/90-opsmind-twin.conf <<'EOF'
-net.ipv4.ip_forward=1
-EOF
-  sysctl --system >/dev/null
-}
-
-ensure_live_links() {
-  ln -sfnT "${CURRENT_LINK}/opsmind_twinctl.py" /usr/local/sbin/opsmind-twinctl
-  ln -sfnT "${CURRENT_LINK}/opsmind_eval_manager.py" /usr/local/sbin/opsmind-eval-manager
-  ln -sfnT "${CURRENT_LINK}/ssh_gateway.sh" /usr/local/sbin/opsmind-twin-ssh-gateway
-  ln -sfnT "${CURRENT_LINK}/dns_responder.py" /usr/local/libexec/opsmind-twin-dns.py
-  ln -sfnT "${CURRENT_LINK}/dns_probe.py" /usr/local/libexec/opsmind-twin-dns-probe.py
-  ln -sfnT "${CURRENT_LINK}/stack.manifest.json" /etc/opsmind-twin/stack.manifest.json
-  ln -sfnT "${CURRENT_LINK}/config/gnb.yaml" "${DATA_ROOT}/config/baseline/gnb.yaml"
-  ln -sfnT "${CURRENT_LINK}/config/ue.yaml" "${DATA_ROOT}/config/baseline/ue.yaml"
-  ln -sfnT "${CURRENT_LINK}/install-controller.sh" /usr/local/sbin/opsmind-twin-install-release
-}
-
-validate_release() {
-  local release_root="$1"
-  local expected_release_id="$2"
-  python3 - "$release_root" "$expected_release_id" <<'PY'
+import argparse
+from contextlib import contextmanager
+import datetime as dt
+import fcntl
 import hashlib
+import io
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import sys
+import tarfile
+import tempfile
 
-root = Path(sys.argv[1])
-expected_release_id = sys.argv[2]
-metadata = json.loads((root / "RELEASE.json").read_text(encoding="utf-8"))
-required = {
-    "install-controller.sh", "opsmind_twinctl.py", "opsmind_eval_manager.py",
-    "ssh_gateway.sh", "dns_responder.py", "dns_probe.py", "stack.manifest.json",
-    "config/gnb.yaml", "config/ue.yaml",
+CONTROLLER_ROOT = Path("/opt/opsmind-twin-controller")
+CURRENT_LINK = CONTROLLER_ROOT / "current"
+PREVIOUS_LINK = CONTROLLER_ROOT / "previous"
+RELEASES_ROOT = CONTROLLER_ROOT / "releases"
+LEASE_FILE = Path("/srv/opsmind-twin/physical-lease.json")
+BOOT_FILE = Path("/proc/sys/kernel/random/boot_id")
+LOCK_FILE = Path("/run/lock/opsmind-twin.lock")
+LIVE_FILES = {
+    "opsmind_twinctl.py": Path("/usr/local/sbin/opsmind-twinctl"),
+    "opsmind_eval_manager.py": Path("/usr/local/sbin/opsmind-eval-manager"),
+    "ssh_gateway.sh": Path("/usr/local/sbin/opsmind-twin-ssh-gateway"),
+    "dns_responder.py": Path("/usr/local/libexec/opsmind-twin-dns.py"),
+    "dns_probe.py": Path("/usr/local/libexec/opsmind-twin-dns-probe.py"),
+    "stack.manifest.json": Path("/etc/opsmind-twin/stack.manifest.json"),
+    "config/gnb.yaml": Path("/srv/opsmind-twin/config/baseline/gnb.yaml"),
+    "config/ue.yaml": Path("/srv/opsmind-twin/config/baseline/ue.yaml"),
 }
-if metadata.get("contract") != "opsmind-twin-controller-release/1.0":
-    raise SystemExit("unsupported controller release contract")
-if metadata.get("release_id") != expected_release_id:
-    raise SystemExit("controller release id mismatch")
-if not re.fullmatch(r"[a-f0-9]{40}", str(metadata.get("source_revision", ""))):
-    raise SystemExit("invalid controller source revision")
-if not re.fullmatch(r"sha256:[a-f0-9]{64}", str(metadata.get("content_digest", ""))):
-    raise SystemExit("invalid controller content digest")
-inventory = metadata.get("files", [])
-if not isinstance(inventory, list) or {item.get("path") for item in inventory if isinstance(item, dict)} != required:
-    raise SystemExit("controller release file list mismatch")
-for item in inventory:
-    relative = item.get("path", "")
-    if not relative or Path(relative).is_absolute() or ".." in Path(relative).parts:
-        raise SystemExit("invalid controller release path")
-    payload = root / relative
-    if not payload.is_file():
-        raise SystemExit(f"controller release file missing: {relative}")
-    actual = hashlib.sha256(payload.read_bytes()).hexdigest()
-    if actual != item.get("sha256"):
-        raise SystemExit(f"controller release file digest mismatch: {relative}")
-canonical = json.dumps(inventory, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-if metadata.get("content_digest") != "sha256:" + hashlib.sha256(canonical).hexdigest():
-    raise SystemExit("controller release content digest mismatch")
-manifest_digest = "sha256:" + hashlib.sha256((root / "stack.manifest.json").read_bytes()).hexdigest()
-if metadata.get("component_manifest_digest") != manifest_digest:
-    raise SystemExit("controller component manifest digest mismatch")
+PAYLOAD_FILES = set(LIVE_FILES) | {"install-controller.sh"}
+RELEASE_ID = re.compile(r"twin-controller-[0-9]{8}-[a-f0-9]{10}")
+SHA256 = re.compile(r"[a-f0-9]{64}")
+
+
+def digest(payload):
+    return hashlib.sha256(payload).hexdigest()
+
+
+def canonical(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+
+
+def validate_payload(files, expected_id):
+    if not RELEASE_ID.fullmatch(expected_id) or set(files) != PAYLOAD_FILES | {"RELEASE.json"}:
+        raise ValueError("controller release file list or id mismatch")
+    metadata = json.loads(files["RELEASE.json"])
+    if metadata.get("contract") != "opsmind-twin-controller-release/1.0" or metadata.get("release_id") != expected_id:
+        raise ValueError("controller release contract or identity mismatch")
+    if not re.fullmatch(r"[a-f0-9]{40}", str(metadata.get("source_revision", ""))):
+        raise ValueError("invalid controller source revision")
+    inventory = metadata.get("files")
+    if (not isinstance(inventory, list) or len(inventory) != len(PAYLOAD_FILES)
+            or any(not isinstance(item, dict) for item in inventory)
+            or {item.get("path") for item in inventory} != PAYLOAD_FILES):
+        raise ValueError("controller release inventory mismatch")
+    for item in inventory:
+        payload = files[item["path"]]
+        if digest(payload) != item.get("sha256") or len(payload) != item.get("bytes"):
+            raise ValueError("controller release file digest mismatch: " + item["path"])
+    content_hash = digest(canonical(inventory))
+    if metadata.get("content_digest") != "sha256:" + content_hash or not expected_id.endswith(content_hash[:10]):
+        raise ValueError("controller release content digest mismatch")
+    if metadata.get("component_manifest_digest") != "sha256:" + digest(files["stack.manifest.json"]):
+        raise ValueError("controller component manifest digest mismatch")
+    return metadata
+
+
+def read_archive(archive, expected_id, expected_hash):
+    archive = Path(archive)
+    if not SHA256.fullmatch(expected_hash):
+        raise ValueError("invalid archive checksum")
+    with archive.open("rb") as stream:
+        payload = stream.read(32 * 1024 * 1024 + 1)
+    if len(payload) > 32 * 1024 * 1024:
+        raise ValueError("invalid archive checksum or size")
+    if digest(payload) != expected_hash:
+        raise ValueError("release archive checksum mismatch")
+    files = {}
+    with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as bundle:
+        for member in bundle:
+            if member.isdir() and member.name.rstrip("/") in {"controller", "controller/config"}:
+                continue
+            name = member.name.removeprefix("controller/")
+            if (member.name != "controller/" + name or name not in PAYLOAD_FILES | {"RELEASE.json"}
+                    or not member.isfile() or member.size > 8 * 1024 * 1024 or name in files):
+                raise ValueError("unsafe or duplicate controller archive member")
+            files[name] = bundle.extractfile(member).read()
+    return files, validate_payload(files, expected_id)
+
+
+def release_files(root):
+    files = {}
+    for name in PAYLOAD_FILES | {"RELEASE.json"}:
+        file = root / name
+        if file.is_symlink() or not file.is_file():
+            raise ValueError("controller release file missing or linked: " + name)
+        files[name] = file.read_bytes()
+    return files
+
+
+def release_target(link):
+    if not link.is_symlink():
+        if link.exists():
+            raise ValueError("controller version pointer is not a link")
+        return None
+    target = link.resolve(strict=True)
+    if target.parent != RELEASES_ROOT.resolve() or not RELEASE_ID.fullmatch(target.name):
+        raise ValueError("controller version pointer is outside releases")
+    validate_payload(release_files(target), target.name)
+    return target
+
+
+def fsync_directory(directory):
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def atomic_replace(path, *, target=None, payload=None, mode=0o640):
+    descriptor, temporary = tempfile.mkstemp(prefix=".controller-", dir=path.parent)
+    temporary = Path(temporary)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            if payload is not None:
+                stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if target is not None:
+            temporary.unlink()
+            temporary.symlink_to(target)
+        else:
+            temporary.chmod(mode)
+        os.replace(temporary, path)
+        fsync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def preserve_release(files, metadata):
+    RELEASES_ROOT.mkdir(parents=True, exist_ok=True, mode=0o755)
+    fsync_directory(CONTROLLER_ROOT.parent)
+    fsync_directory(CONTROLLER_ROOT)
+    target = RELEASES_ROOT / metadata["release_id"]
+    if target.exists():
+        existing = release_files(target)
+        validate_payload(existing, target.name)
+        if existing != files:
+            raise ValueError("immutable controller release already exists with different content")
+        return target
+    with tempfile.TemporaryDirectory(prefix="staging-", dir=CONTROLLER_ROOT) as temporary:
+        staging = Path(temporary)
+        staging.chmod(0o755)
+        for name, payload in files.items():
+            file = staging / name
+            file.parent.mkdir(parents=True, exist_ok=True)
+            mode = 0o755 if name in {"install-controller.sh", "ssh_gateway.sh"} else 0o750 if name.endswith(".py") else 0o640
+            atomic_replace(file, payload=payload, mode=mode)
+        os.replace(staging, target)
+        fsync_directory(RELEASES_ROOT)
+        fsync_directory(CONTROLLER_ROOT)
+    return target
+
+
+@contextmanager
+def idle_lab_lock():
+    # Share the core's existing lock; do not create another lease or supervisor.
+    with LOCK_FILE.open("a+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lease = json.loads(LEASE_FILE.read_text())
+        required = {"contract_version", "status", "owner_mode", "candidate_ref", "trial_id",
+                    "runtime_trial_id", "lease_id", "expires_at", "boot_id", "updated_at"}
+        if not isinstance(lease, dict) or set(lease) != required or lease.get("contract_version") != "opsmind-physical-lab-lease/1.0":
+            raise ValueError("physical lab lease is invalid; recover explicitly before upgrading")
+        boot = BOOT_FILE.read_text().strip()
+        updated = lease.get("updated_at")
+        if not isinstance(updated, str) or not updated.endswith("Z"):
+            raise ValueError("physical lab lease timestamp is invalid")
+        dt.datetime.fromisoformat(updated[:-1] + "+00:00")
+        owners = ("owner_mode", "candidate_ref", "trial_id", "runtime_trial_id", "lease_id", "expires_at")
+        if not boot or lease.get("boot_id") != boot or lease.get("status") != "idle" or any(lease.get(key) is not None for key in owners):
+            raise ValueError("physical lab is busy or has a stale boot identity; version was not changed")
+        yield
+
+
+def verify_live_files(release):
+    for name, path in LIVE_FILES.items():
+        if not path.is_file() or digest(path.read_bytes()) != digest((release / name).read_bytes()):
+            raise ValueError("installed controller differs from approved baseline: " + name)
+
+
+def snapshot(path):
+    if path.is_symlink():
+        return ("link", os.readlink(path), None)
+    if path.is_file():
+        return ("file", path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+    if path.exists():
+        raise ValueError("unexpected directory at controller entry")
+    return ("absent", None, None)
+
+
+def switch_release(target, old_current):
+    # First bind all eight entries to the exact old bytes. Only then switch current.
+    paths = [CURRENT_LINK, *LIVE_FILES.values(), PREVIOUS_LINK]
+    before = {path: snapshot(path) for path in paths}
+    try:
+        if not CURRENT_LINK.is_symlink():
+            atomic_replace(CURRENT_LINK, target=old_current)
+        for name, path in LIVE_FILES.items():
+            expected = CURRENT_LINK / name
+            if not path.is_symlink() or Path(os.readlink(path)) != expected:
+                atomic_replace(path, target=expected)
+        if target != old_current:
+            atomic_replace(PREVIOUS_LINK, target=old_current)
+            atomic_replace(CURRENT_LINK, target=target)
+        verify_live_files(target)
+    except Exception as original:
+        failed = []
+        for path, (kind, value, mode) in before.items():
+            try:
+                if snapshot(path) == (kind, value, mode):
+                    continue
+                if kind == "absent":
+                    path.unlink(missing_ok=True)
+                    fsync_directory(path.parent)
+                elif kind == "link":
+                    atomic_replace(path, target=Path(value))
+                else:
+                    atomic_replace(path, payload=value, mode=mode)
+            except Exception:
+                failed.append(str(path))
+        if failed:
+            raise RuntimeError("controller recovery incomplete; manual attention required: " + ", ".join(failed)) from original
+        raise
+
+
+def install_release(archive, release_id, archive_hash, baseline=None):
+    files, metadata = read_archive(archive, release_id, archive_hash)
+    baseline_payload = read_archive(*baseline) if baseline else None
+    with idle_lab_lock():
+        current = release_target(CURRENT_LINK)
+        previous = release_target(PREVIOUS_LINK)
+        if current is None:
+            if previous is not None or baseline_payload is None:
+                raise ValueError("first registration requires an explicit approved baseline archive")
+            baseline_files, baseline_metadata = baseline_payload
+            for name, path in LIVE_FILES.items():
+                if path.is_symlink() or not path.is_file() or digest(path.read_bytes()) != digest(baseline_files[name]):
+                    raise ValueError("installed controller differs from approved baseline: " + name)
+            current = preserve_release(baseline_files, baseline_metadata)
+        elif baseline is not None:
+            raise ValueError("baseline option is only allowed for first registration")
+        verify_live_files(current)
+        target = preserve_release(files, metadata)
+        switch_release(target, current)
+
+
+def rollback_release():
+    with idle_lab_lock():
+        current = release_target(CURRENT_LINK)
+        previous = release_target(PREVIOUS_LINK)
+        if current is None or previous is None or current == previous:
+            raise ValueError("two distinct verified controller versions are required")
+        verify_live_files(current)
+        switch_release(previous, current)
+
+
+def show_status(entry):
+    result = {}
+    for name, link in (("current", CURRENT_LINK), ("previous", PREVIOUS_LINK)):
+        target = release_target(link)
+        if name == "current" and target:
+            verify_live_files(target)
+        metadata = json.loads((target / "RELEASE.json").read_text()) if target else None
+        result[name] = ({key: metadata[key] for key in ("release_id", "source_revision", "content_digest", "component_manifest_digest")} if metadata else None)
+    result["rollback_ready"] = bool(result["current"] and result["previous"] and result["current"] != result["previous"])
+    result["installer_sha256"] = digest(entry.read_bytes())
+    print(json.dumps(result, separators=(",", ":")))
+
+
+def main(argv):
+    if os.geteuid() != 0:
+        raise PermissionError("controller version management must run as root")
+    parser = argparse.ArgumentParser()
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("status")
+    commands.add_parser("rollback")
+    install = commands.add_parser("install")
+    install.add_argument("archive")
+    install.add_argument("release_id")
+    install.add_argument("archive_hash")
+    install.add_argument("--baseline", nargs=3, metavar=("ARCHIVE", "RELEASE_ID", "SHA256"))
+    args = parser.parse_args(argv[1:])
+    if args.command == "install":
+        install_release(args.archive, args.release_id, args.archive_hash, args.baseline)
+    elif args.command == "rollback":
+        rollback_release()
+    show_status(Path(argv[0]))
+
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv[1:])
+    except Exception as error:
+        print("OPSMIND_TWIN_CONTROLLER_ERROR: " + str(error), file=sys.stderr)
+        raise SystemExit(2)
 PY
-}
-
-install_release() {
-  local archive="${1:?archive path is required}"
-  local expected_release_id="${2:?release id is required}"
-  local expected_archive_sha256="${3:?archive sha256 is required}"
-  [[ "$expected_release_id" =~ ^twin-controller-[0-9]{8}-[a-f0-9]{10}$ ]] || fail "invalid release id"
-  [[ "$expected_archive_sha256" =~ ^[a-f0-9]{64}$ ]] || fail "invalid archive sha256"
-  [[ -f "$archive" ]] || fail "release archive not found"
-  [[ "$(sha256sum "$archive" | awk '{print $1}')" == "$expected_archive_sha256" ]] || fail "release archive checksum mismatch"
-  require_idle_lab
-  ensure_host_prerequisites
-
-  local staging
-  staging="$(mktemp -d "${CONTROLLER_ROOT}/staging.XXXXXX")"
-  tar -xzf "$archive" -C "$staging" --no-same-owner
-  [[ -d "$staging/controller" ]] || fail "controller payload is missing"
-  validate_release "$staging/controller" "$expected_release_id"
-
-  local release_root="${RELEASES_ROOT}/${expected_release_id}"
-  if [[ -e "$release_root" ]]; then
-    validate_release "$release_root" "$expected_release_id"
-  else
-    mv "$staging/controller" "$release_root"
-  fi
-  rm -rf -- "$staging"
-  chmod 0750 "$release_root/opsmind_twinctl.py" "$release_root/opsmind_eval_manager.py"
-  chmod 0755 "$release_root/ssh_gateway.sh" "$release_root/install-controller.sh"
-  chmod 0750 "$release_root/dns_responder.py" "$release_root/dns_probe.py"
-  chmod 0640 "$release_root/stack.manifest.json" "$release_root/config/gnb.yaml" "$release_root/config/ue.yaml"
-
-  local old_current
-  old_current="$(release_id_from_link "$CURRENT_LINK")"
-  if [[ -n "$old_current" && "$old_current" != "$expected_release_id" ]]; then
-    atomic_link "${RELEASES_ROOT}/${old_current}" "$PREVIOUS_LINK"
-  fi
-  atomic_link "$release_root" "$CURRENT_LINK"
-  ensure_live_links
-  echo "OPSMIND_TWIN_CONTROLLER_INSTALLED ${expected_release_id}"
-  show_status
-}
-
-rollback_release() {
-  require_idle_lab
-  [[ -L "$CURRENT_LINK" && -L "$PREVIOUS_LINK" ]] || fail "both current and previous controller versions are required"
-  local old_current old_previous
-  old_current="$(readlink -f "$CURRENT_LINK")"
-  old_previous="$(readlink -f "$PREVIOUS_LINK")"
-  [[ -f "$old_current/RELEASE.json" && -f "$old_previous/RELEASE.json" ]] || fail "controller rollback metadata is incomplete"
-  atomic_link "$old_current" "$PREVIOUS_LINK"
-  if ! atomic_link "$old_previous" "$CURRENT_LINK"; then
-    atomic_link "$old_previous" "$PREVIOUS_LINK"
-    fail "controller rollback could not switch current version"
-  fi
-  ensure_live_links
-  echo "OPSMIND_TWIN_CONTROLLER_ROLLED_BACK $(basename "$old_previous")"
-  show_status
-}
-
-require_root
-case "${1:-}" in
-  status)
-    show_status
-    ;;
-  install)
-    [[ "$#" == 4 ]] || fail "usage: $0 install <archive> <release-id> <archive-sha256>"
-    install_release "$2" "$3" "$4"
-    ;;
-  rollback)
-    [[ "$#" == 1 ]] || fail "usage: $0 rollback"
-    rollback_release
-    ;;
-  *)
-    fail "usage: $0 status | install <archive> <release-id> <archive-sha256> | rollback"
-    ;;
-esac

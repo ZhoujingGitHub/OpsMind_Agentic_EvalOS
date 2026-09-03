@@ -253,11 +253,11 @@ function TrialCenter({ mode }: { mode: "traces" | "graders" | "analyses" }) {
       <Metric label="轨迹记录" value={items.reduce((sum: number, item: Json) => sum + Number(item.trace_records ?? 0), 0)} foot="只追加 · 可验证哈希" href="#trace-list" />
       <Metric label="源码已绑定" value={items.filter((item: Json) => item.source_snapshot).length} foot="调查读取冻结版本" href="#trace-list" accent /></div>
     <section className="surface" id="trace-list"><SectionHead title="Trial 轨迹索引" sub="点击任意一行直接打开该 Trial 的轨迹页签" />
-      <div className="table-scroll"><table className="data-table"><thead><tr><th>Case / Trial</th><th>参评架构</th><th>轨迹</th><th>工具结果</th><th>记录角色</th><th>状态</th></tr></thead><tbody>
+      <div className="table-scroll"><table className="data-table"><thead><tr><th>Case / Trial</th><th>参评架构</th><th>轨迹</th><th>工具调用</th><th>记录角色</th><th>状态</th></tr></thead><tbody>
         {items.map((item: Json) => <tr key={item.id} className="clickable-row" role="link" tabIndex={0} aria-label={`打开 ${item.case_ref} 的轨迹`}
           onClick={(event) => navigateRow(event, `/trials/${item.id}#trace`)} onKeyDown={(event) => navigateRowByKeyboard(event, `/trials/${item.id}#trace`)}>
           <td><a className="row-title" href={`/trials/${item.id}#trace`}>{item.case_ref}</a><code>{item.id}</code><RunClassBadge value={item.run_class} /></td><td><strong>{contestantDisplayName(item.contestant)}</strong><small>{item.experiment_name}</small></td>
-          <td><strong className="score-number">{item.trace_records}</strong></td><td>{item.tool_results}</td><td>{(item.trace_actors ?? []).join(" · ")}</td><td><Status status={item.status} /></td></tr>)}
+          <td><strong className="score-number">{item.trace_records}</strong></td><td>{item.tool_calls ?? "未知"}</td><td>{(item.trace_actors ?? []).join(" · ")}</td><td><Status status={item.status} /></td></tr>)}
       </tbody></table></div></section></section>;
   if (mode === "graders") return <section className="page-content"><PageTitle eyebrow="DETERMINISTIC CODE GRADER" title="评分器中心" text="这里展示确定性 Code Grader 的全部结果，并严格区分正式成绩、资格试跑和工程自测。新合同评分只看真实终态、证据、轨迹和安全门禁；时间、Token、调用量和费用只记录，不看固定工具名称或求解顺序。" />
     {error && <ErrorBox text={error} />}<div className="metric-row three"><Metric label="全部已评分" value={items.filter((item: Json) => item.grade).length} foot={`${officialItems.length} 条正式 · ${nonOfficialItems.length} 条不计正式成绩`} href="#grader-list" />
@@ -363,7 +363,7 @@ function TrialOverview({ data, onChanged }: { data: Json; onChanged: () => Promi
           <small>对应假设：{item.target_hypothesis_id} · 类型：{item.kind} · 证据：{(item.evidence_ids ?? []).join("、") || "补证建议"}</small></div></div>)}</div>
       : <Empty text="产品没有交付建议；若本题要求建议，这会在资格信号中明确判为不通过。" />}
   </section><aside className="surface"><SectionHead title="环境终态与证据" sub="由评测执行层（Harness）独立采集，不采信 Agent 自报" />
-    <div className="evidence-stats"><Mini label="工具完成" value={data.evidence.tools} /><Mini label="轨迹记录" value={data.evidence.trace_records} /><Mini label="证据制品" value={data.evidence.artifacts.length} /></div>
+    <div className="evidence-stats"><Mini label="工具调用" value={data.evidence.tool_calls ?? "未知"} /><Mini label="轨迹记录" value={data.evidence.trace_records} /><Mini label="证据制品" value={data.evidence.artifacts.length} /></div>
     <JsonBlock value={trial.final_state} /><SectionHead title="资源实际使用" sub="仅在程序失控或安全风险时触发熔断；资源用量不直接评分。考生没有公开的数据明确显示“未提供”，绝不按 0 计算" /><div className="kv-grid">
       <KeyValue label="工具调用（Tool calls）" value={usageValue(trial.usage, "tool_calls")} />
       <KeyValue label="输入 Token（Input tokens）" value={usageValue(trial.usage, "input_tokens")} />
@@ -709,7 +709,7 @@ function LiveProgress({ progress }: { progress: Json }) {
     <Progress value={Number(progress.budget_ratio ?? 0)} text={`已运行 ${formatDuration(progress.elapsed_ms)} / Trial上限 ${formatDuration(progress.total_budget_ms)} · 剩余 ${formatDuration(progress.remaining_ms)}`} />
     <div className="live-progress-grid"><Mini label="最近系统活动" value={progress.activity?.age_ms == null ? "尚无" : `${formatDuration(progress.activity.age_ms)}前`} />
       <Mini label="最近实质进展" value={progress.meaningful_progress?.age_ms == null ? "尚无" : `${formatDuration(progress.meaningful_progress.age_ms)}前`} />
-      <Mini label="外显事件" value={progress.counters?.candidate_events ?? 0} /><Mini label="工具结果" value={progress.counters?.tool_results ?? 0} /></div>
+      <Mini label="外显事件" value={progress.counters?.candidate_events ?? 0} /><Mini label="工具调用" value={progress.counters?.tool_calls ?? "未知"} /></div>
     <div className="live-progress-copy"><p><b>当前可见动作：</b>{progress.meaningful_progress?.summary_zh}</p><p><b>系统判断：</b>{progress.interpretation_zh}</p>
       <small>15分钟是进展检查点，不是死亡线；这里只展示外显事件和机器日志，不展示或伪造Agent隐式思维链，也不按日志数量计分。</small></div>
   </section>;

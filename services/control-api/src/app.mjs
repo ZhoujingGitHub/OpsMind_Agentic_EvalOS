@@ -8,12 +8,12 @@ import {
   evaluationDecisionReport, evaluationEvidenceTraceView, explainTraceRecord, TRACE_FILTERS, readSnapshotFile, sha256,
   auditTrialEfficiency, candidateExecutionBudget, trialSettlementBudget,
   CANDIDATE_PRESENCE_PATH, CandidatePresenceRegistry, assertCandidateBound,
-  assertCandidatePreflight,
+  assertCandidatePreflight, DEPLOYMENT_ATTESTATION_CONTRACT, trustedDeploymentAttestation,
 } from "../../../packages/kernel/src/index.mjs";
 import {
-  BLIND_JUDGE_VERSION, CASE_INVESTIGATOR_RUNTIME, createAgentHarnessProductConnector, createAgentHarnessProductConnectorV5,
-  createCandidateAdapterV4, createCandidateAdapterV5, createCaseInvestigator,
-  createLangGraphProductConnector, createLangGraphProductConnectorV5, judgeRecordAndSummarize,
+  BLIND_JUDGE_VERSION, CASE_INVESTIGATOR_RUNTIME, createAgentHarnessProductConnectorV5,
+  createCandidateAdapterV5, createCaseInvestigator,
+  createLangGraphProductConnectorV5, judgeRecordAndSummarize,
   candidateEvaluationContext, candidateManagedNamespace, candidateResourceReferences, candidateServiceIdentifiers,
 } from "../../../packages/agent-runtime/src/index.mjs";
 import { ExternalProductTwinEnvironment, ProtocolTwinEnvironment, SshTwinClient,
@@ -21,9 +21,6 @@ import { ExternalProductTwinEnvironment, ProtocolTwinEnvironment, SshTwinClient,
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const ANALYSIS_BUDGET = Object.freeze({ wallclock_ms: 300000, cost_usd: 2, max_turns: 32, max_tool_calls: 24 });
-const DEPLOYMENT_ATTESTATION_CONTRACT = "evalos-deployment-attestation/1.0";
-const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/;
-const GIT_REVISION = /^[a-f0-9]{40}$/;
 
 const CANDIDATE_RELAY_PATHS = Object.freeze({
   "agent-harness-v2": [
@@ -113,7 +110,7 @@ export function trialLiveProgressView(trial, experiment, trace, nowMs = Date.now
       trace_records: records.length,
       liveness_heartbeats: records.filter((item) => item.name === "candidate.poll.heartbeat").length,
       progress_checkpoints: records.filter((item) => item.name === "candidate.progress.checkpoint").length,
-      tool_results: records.filter((item) => item.span_kind === "TOOL" && item.record_type === "SPAN_END").length,
+      ...trialToolActivity(trial, experiment, records),
       candidate_events: records.filter((item) =>
         (item.actor === "external-candidate" || item.name === "candidate.raw_event") && isMeaningfulProgressRecord(item)).length,
     },
@@ -133,13 +130,37 @@ export function evaluationRunName(sourceName, mode) {
   return `${runLabel} · ${baseName}`;
 }
 
-export function buildCandidateConnectorSet({ createV4, createV5, connectorOptions, useV5, candidateRuntime }) {
-  const discoveryConnectorsByVersion = {
-    "4.0": createV4(connectorOptions),
-    "5.0": createV5(connectorOptions),
-  };
-  const executionConnector = useV5 ? createV5({ ...connectorOptions,
-    declaredCandidateRuntime: candidateRuntime ?? null }) : discoveryConnectorsByVersion["4.0"];
+export function trialToolActivity(trial, experiment, trace = []) {
+  if (experiment?.manifest?.run_class === "REAL_CANDIDATE") {
+    const value = trial?.usage?.tool_calls;
+    const observed = trial?.usage?.measurement?.observed_dimensions?.includes("tool_calls");
+    return { tool_calls: observed && Number.isInteger(value) && value >= 0 ? value : null,
+      tool_results: null, tool_count_source: observed ? "candidate-public-usage" : "unavailable" };
+  }
+  const count = trace.filter((item) => item.span_kind === "TOOL" && item.record_type === "SPAN_END").length;
+  return { tool_calls: count, tool_results: count, tool_count_source: "engineering-trace" };
+}
+
+export async function checkCandidateReadiness(adapter, preflightInput, presencePreflight) {
+  if (!adapter || typeof adapter.preflight !== "function") throw new Error("真实产品连接器或开考检查未配置");
+  const check = await adapter.preflight(preflightInput);
+  // Readiness and run admission share this proof. Exact allocated Trial binding
+  // is still independently checked before the model starts.
+  const requiresTwin = preflightInput.requiresTwin;
+  const presence = requiresTwin ? await presencePreflight() : null;
+  const twinReady = !requiresTwin || (presence != null && check.twin?.ready !== false);
+  return { ...check, ready: check.ready === true && twinReady,
+    formal_ready: check.formal_ready === true && twinReady, presence,
+    twin: { ...check.twin, ready: twinReady,
+      readiness_source: requiresTwin ? "signed-presence-and-physical-lease" : "not-required" } };
+}
+
+export function buildCandidateConnectorSet({ createV5, connectorOptions, candidateRuntime }) {
+  // One current implementation. Discovery observes reality; execution additionally
+  // enforces the frozen runtime. Historical reports need neither an old connector nor a fallback.
+  const discoveryConnectorsByVersion = { "5.0": createV5(connectorOptions) };
+  const executionConnector = createV5({ ...connectorOptions,
+    declaredCandidateRuntime: candidateRuntime ?? null });
   return { discoveryConnectorsByVersion, executionConnector };
 }
 
@@ -151,17 +172,6 @@ export function candidatePreflightInput(manifest, contestant, { requiresTwin = t
     settlementBudget: trialSettlementBudget(manifest, contestant.ref),
     resourcePolicy: manifest.candidate_resource_contract?.policy ?? null,
   };
-}
-
-export function trustedDeploymentAttestation(value) {
-  if (value?.contract_version !== DEPLOYMENT_ATTESTATION_CONTRACT ||
-      !GIT_REVISION.test(String(value?.source_revision ?? "")) ||
-      !SHA256_DIGEST.test(String(value?.artifact_digest ?? "")) ||
-      !["evalos_trusted_read_only_git_oci", "evalos_trusted_runtime_config"].includes(value?.verification_method) ||
-      typeof value?.verified_evidence_ref !== "string" || !value.verified_evidence_ref) {
-    throw new Error("candidate deployment identity requires an independent EvalOS deployment attestation");
-  }
-  return Object.freeze({ source_revision: value.source_revision, artifact_digest: value.artifact_digest });
 }
 
 export function createApp({
@@ -276,13 +286,13 @@ export function createApp({
       adminToken: process.env.EVALOS_AGENT_HARNESS_ADMIN_TOKEN, tenantId: process.env.EVALOS_AGENT_HARNESS_TENANT_ID,
       sourceRevision: process.env.EVALOS_AGENT_HARNESS_SOURCE_REVISION,
       artifactDigest: process.env.EVALOS_AGENT_HARNESS_ARTIFACT_DIGEST,
-      createV4: createAgentHarnessProductConnector, createV5: createAgentHarnessProductConnectorV5 },
+      createV5: createAgentHarnessProductConnectorV5 },
     { ref: "langgraph-v1", origin: process.env.EVALOS_LANGGRAPH_ORIGIN,
       token: process.env.EVALOS_LANGGRAPH_TOKEN, approvalToken: process.env.EVALOS_LANGGRAPH_APPROVAL_TOKEN,
       adminToken: process.env.EVALOS_LANGGRAPH_ADMIN_TOKEN, tenantId: process.env.EVALOS_LANGGRAPH_TENANT_ID,
       sourceRevision: process.env.EVALOS_LANGGRAPH_SOURCE_REVISION,
       artifactDigest: process.env.EVALOS_LANGGRAPH_ARTIFACT_DIGEST,
-      createV4: createLangGraphProductConnector, createV5: createLangGraphProductConnectorV5 },
+      createV5: createLangGraphProductConnectorV5 },
   ];
   for (const config of connectorConfigs) {
     const frozen = frozenCandidate(config.ref);
@@ -301,20 +311,22 @@ export function createApp({
       candidateConfigurationErrors[config.ref] = String(error?.message ?? error);
       continue;
     }
-    const useV5 = frozen.adapter_contract_version === "5.0";
+    if (frozenM31Manifest.manifest_version !== "8.0" || frozen.adapter_contract_version !== "5.0") {
+      candidateConfigurationErrors[config.ref] = "旧真实产品合同只支持历史读取，不能装载执行连接器";
+      continue;
+    }
     const connectorOptions = { origin: config.origin, token: config.token,
       approvalToken: config.approvalToken, adminToken: config.adminToken, tenantId,
       requestTransport: relayTransport,
       declaredRuntimeLimits: relayCandidates[config.ref]?.evaluation_limits ?? null,
       attestation };
     const { discoveryConnectorsByVersion, executionConnector } = buildCandidateConnectorSet({
-      createV4: config.createV4, createV5: config.createV5, connectorOptions, useV5,
+      createV5: config.createV5, connectorOptions,
       candidateRuntime: frozen.candidate_runtime ?? null });
     Object.assign(candidateDiscoveryConnectors, Object.fromEntries(Object.entries(discoveryConnectorsByVersion)
       .map(([version, connector]) => [`${config.ref}:${version}`, connector])));
     const connector = executionConnector;
-    const adapter = useV5 ? createCandidateAdapterV5({ id: config.ref, connector })
-      : createCandidateAdapterV4({ id: config.ref, connector });
+    const adapter = createCandidateAdapterV5({ id: config.ref, connector });
     realCandidateConnectors[config.ref] = connector;
     for (const lane of adapter.supportedEvaluationLanes) {
       adapters[`${config.ref}:${lane}:${adapter.adapterContractVersion}`] = adapter;
@@ -324,8 +336,11 @@ export function createApp({
   Object.assign(realCandidateConnectors, cleanupConnectorOverrides);
   Object.assign(candidateDiscoveryConnectors, discoveryConnectorOverrides);
   const liveDeepSeekAvailable = Boolean(process.env.DEEPSEEK_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN ?? process.env.ANTHROPIC_API_KEY);
-  const adapterFor = (ref, lane, contractVersion = null) => (contractVersion
-    ? adapters[`${ref}:${lane}:${contractVersion}`] : null) ?? adapters[`${ref}:${lane}`] ?? adapters[ref];
+  const adapterFor = (ref, lane, contractVersion = null) => {
+    const adapter = (contractVersion ? adapters[`${ref}:${lane}:${contractVersion}`] : null)
+      ?? adapters[`${ref}:${lane}`] ?? adapters[ref];
+    return !contractVersion || adapter?.adapterContractVersion === contractVersion ? adapter : null;
+  };
   const twinEnvironmentConfigured = Boolean(process.env.EVALOS_TWIN_HOST && process.env.EVALOS_TWIN_SSH_KEY && process.env.EVALOS_TWIN_KNOWN_HOSTS);
   const twinConfigured = Boolean(twinManagerClientOverride || twinEnvironmentConfigured);
   const twinClient = twinEnvironmentConfigured ? new SshTwinClient() : null;
@@ -346,6 +361,11 @@ export function createApp({
     const expected = presenceExpectation(candidateRef);
     return assertCandidatePreflight({ registry: candidatePresenceRegistry, candidateRef,
       lease: status.physical_lease, labBootId: status.physical_lease.boot_id, ...expected });
+  };
+  const candidateReadinessCheck = async (manifest, contestant, { requiresTwin = true } = {}) => {
+    const adapter = adapterFor(contestant.ref, manifest.evaluation_lane, contestant.adapter_contract_version);
+    return checkCandidateReadiness(adapter, candidatePreflightInput(manifest, contestant, { requiresTwin }),
+      () => candidatePresencePreflight(contestant.ref));
   };
   const verifyCandidatePresenceBinding = async ({ candidateRef, trialId, environmentRef, physicalLease }) => {
     const deadline = Date.now() + 90_000;
@@ -584,7 +604,7 @@ export function createApp({
         ? Math.max(0, new Date(trial.completed_at).getTime() - new Date(trial.started_at).getTime()) : null,
       trace_records: trace.length,
       trace_actors: [...new Set(trace.map((item) => item.actor))],
-      tool_results: trace.filter((item) => item.span_kind === "TOOL" && item.record_type === "SPAN_END").length,
+      ...trialToolActivity(trial, experiment, trace),
       grade: grade ? auditableGraderRunView(grade).result : null,
       analysis_runs: store.listAnalysisRuns(trial.id).map((item) => ({
         id: item.id, status: item.status, mode: item.mode, created_at: item.created_at, completed_at: item.completed_at,
@@ -680,8 +700,7 @@ export function createApp({
       }
       try {
         return { ref: contestant.ref, kind: contestant.kind,
-          ...(await adapter.preflight(candidatePreflightInput(source.manifest, contestant,
-            { requiresTwin: needsTwin }))) };
+          ...(await candidateReadinessCheck(source.manifest, contestant, { requiresTwin: needsTwin })) };
       } catch (error) {
         return { ref: contestant.ref, kind: contestant.kind, ready: false,
           error: String(error?.message ?? error) };
@@ -1157,8 +1176,8 @@ export function createApp({
             continue;
           }
           try {
-            const check = await adapter.preflight(candidatePreflightInput(frozenM31Manifest, frozen));
-            const presence = await candidatePresencePreflight(ref);
+            const check = await candidateReadinessCheck(frozenM31Manifest, frozen);
+            const presence = check.presence;
             const budgetLimited = check.formal_ready !== true;
             items.push({ ref, kind: "REAL_PRODUCT", configured: true, ready: check.ready,
               architecture: check.architecture, source_revision: check.source_revision,
@@ -1185,15 +1204,14 @@ export function createApp({
       if (request.method === "GET" && url.pathname === "/api/candidate-adapters/discover") {
         if (!isAdmin(request)) return json({ error: "authenticated control-plane token required" }, 401, cors);
         const requestedContractVersion = url.searchParams.get("contract_version");
-        if (requestedContractVersion && !new Set(["4.0", "5.0"]).has(requestedContractVersion)) {
-          return json({ error: "candidate adapter discovery contract_version must be 4.0 or 5.0" }, 400, cors);
+        if (requestedContractVersion && requestedContractVersion !== "5.0") {
+          return json({ error: "新真实产品接入仅支持 contract_version 5.0；旧记录仍可查看" }, 400, cors);
         }
         const items = [];
         for (const ref of ["agent-harness-v2", "langgraph-v1"]) {
           const frozen = frozenCandidate(ref);
-          const contractVersion = requestedContractVersion ?? frozen?.adapter_contract_version;
-          const connector = requestedContractVersion
-            ? candidateDiscoveryConnectors[`${ref}:${requestedContractVersion}`] : realCandidateConnectors[ref];
+          const contractVersion = "5.0";
+          const connector = candidateDiscoveryConnectors[`${ref}:${contractVersion}`];
           if (!connector) { items.push({ ref, configured: false, ready: false,
             reason: candidateConfigurationErrors[ref] ?? "connector_not_configured" }); continue; }
           try {
@@ -1518,8 +1536,8 @@ export function createApp({
           core: "Claude Agent SDK + DeepSeek + MCP + Skills + Harness", workflow_graph: null,
           official_score_source: "deterministic_code_grader", ai_analysis_authority: "diagnostic_only",
           candidate_execution: "external-real-products-only",
-          candidate_adapter_contract: frozenM31Manifest.contestants[0]?.adapter_contract_version ?? "4.0",
-          candidate_adapter_contracts_supported: ["4.0", "5.0"],
+          candidate_adapter_contract: "5.0",
+          candidate_adapter_contracts_supported: ["5.0"],
           trace_contract: "4.0", grader_contract: "5.3", formal_480_enabled: false,
         }, counts: { datasets: store.listDatasets().length, cases: store.listCases().length,
           experiments: experiments.length, trials: trials.length, completed_trials: trials.filter((item) => item.status === "COMPLETED").length,
@@ -1613,7 +1631,7 @@ export function createApp({
           efficiency_audit: auditTrialEfficiency(trace, { usage: trial.usage ?? {}, budget: trial.budget ?? {} }),
           evidence: { trace_records: trace.length, trace_hash: trial.trace_hash,
             actors: [...new Set(trace.map((item) => item.actor))],
-            tools: trace.filter((item) => item.span_kind === "TOOL" && item.record_type === "SPAN_END").length,
+            ...trialToolActivity(trial, experiment, trace),
             artifacts: store.listArtifacts(trial.id).map(({ path: _path, ...artifact }) => artifact) },
           graders: store.listGraderRuns(trial.id).map(auditableGraderRunView), judges: store.listJudgeRuns(trial.id).map((item) => ({
             id: item.id, role: item.judge_role, result: item.result, authority: "advisory_only", created_at: item.created_at })),

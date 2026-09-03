@@ -8,6 +8,7 @@ the source it came from without contacting Git or EvalOS.
 
 from __future__ import annotations
 
+import argparse
 import gzip
 import hashlib
 import json
@@ -53,26 +54,37 @@ def canonical_digest(value: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def main() -> int:
-    source_revision = git("rev-parse", "--verify", "HEAD")
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--baseline-ref", help="accepted/prod Twin tag for the first-registration recovery archive only")
+    arguments = parser.parse_args(argv)
+    source_ref = "HEAD"
+    if arguments.baseline_ref:
+        tag = arguments.baseline_ref
+        if not tag.startswith(("accepted-twin-controller-", "prod-twin-")) or any(word in tag for word in ("abandoned", "temporary")):
+            raise RuntimeError("baseline archive requires a readable accepted/prod Twin tag")
+        source_ref = "refs/tags/" + tag
+    source_revision = git("rev-parse", "--verify", source_ref + "^{commit}")
     if len(source_revision) != 40 or any(character not in "0123456789abcdef" for character in source_revision):
         raise RuntimeError("controller release requires a full Git revision")
     if git("status", "--porcelain", "--untracked-files=no"):
         raise RuntimeError("controller release refuses uncommitted tracked changes")
+    if arguments.baseline_ref:
+        git("merge-base", "--is-ancestor", source_revision, "HEAD")
 
-    commit_time = git("show", "-s", "--format=%ct", "HEAD")
-    commit_day = git("show", "-s", "--format=%cd", "--date=format:%Y%m%d", "HEAD")
+    commit_time = git("show", "-s", "--format=%ct", source_revision)
+    commit_day = git("show", "-s", "--format=%cd", "--date=format:%Y%m%d", source_revision)
 
     with tempfile.TemporaryDirectory(prefix="opsmind-twin-controller-") as temporary:
         payload_root = Path(temporary) / "controller"
         payload_root.mkdir(parents=True)
         for relative in RELEASE_FILES:
-            source = TWIN_ROOT / relative
-            if not source.is_file():
-                raise RuntimeError(f"controller release input is missing: {relative}")
+            payload = subprocess.check_output(
+                ["git", "show", f"{source_revision}:infra/twin/{relative}"], cwd=REPOSITORY_ROOT
+            )
             target = payload_root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(source.read_bytes().replace(b"\r\n", b"\n"))
+            target.write_bytes(payload.replace(b"\r\n", b"\n"))
 
         component_manifest_digest = f"sha256:{sha256(payload_root / 'stack.manifest.json')}"
 
@@ -94,6 +106,7 @@ def main() -> int:
             "content_digest": content_digest,
             "component_manifest_digest": component_manifest_digest,
             "built_from_commit_time": int(commit_time),
+            "baseline_archive": arguments.baseline_ref is not None,
             "files": inventory,
         }
         (payload_root / "RELEASE.json").write_text(

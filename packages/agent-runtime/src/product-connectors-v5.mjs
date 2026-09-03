@@ -653,7 +653,7 @@ function recommendationEvaluationView({ product, report, taskResult, projection,
   const hypotheses = (product === "langgraph" ? projection?.hypotheses ?? taskResult?.hypotheses
     : report?.hypotheses) ?? [];
   const leading = leadingReportHypotheses({ hypotheses });
-  const evidence = product === "langgraph" ? projection?.evidence ?? [] : report?.evidence_ids ?? [];
+  const reportEvidence = productReportEvidence({ product, report, taskResult });
   return {
     contract_version: "evalos-recommendation-evaluation-view/1.0",
     readonly: true,
@@ -666,22 +666,28 @@ function recommendationEvaluationView({ product, report, taskResult, projection,
       hypotheses,
       conclusion_status: String(report?.conclusion_status ?? taskResult?.outcome ?? "").toLowerCase(),
     },
-    report_evidence_ids: product === "langgraph" ? evidenceRefs(evidence) : stringList(evidence),
+    report_evidence_ids: reportEvidence.evidence_ids,
+    report_evidence: reportEvidence,
   };
 }
 
-function evidenceRefs(...sources) {
-  const refs = new Set();
-  const visit = (value, depth = 0) => {
-    if (depth > 7 || value === null || value === undefined) return;
-    if (Array.isArray(value)) { for (const item of value) visit(item, depth + 1); return; }
-    if (typeof value !== "object") return;
-    for (const name of ["evidence_ref", "evidence_id", "id"]) stringList(value[name]).forEach((ref) => refs.add(ref));
-    stringList(value.evidence_refs ?? value.evidence_ids ?? value.supporting_evidence_ids).forEach((ref) => refs.add(ref));
-    for (const nested of Object.values(value)) if (nested && typeof nested === "object") visit(nested, depth + 1);
+export function productReportEvidence({ product, report = {}, taskResult = {} }) {
+  // Product citations, lab receipts and canonical grading labels are different facts.
+  // Never guess final citations from collected cards, arbitrary ids or nested receipts.
+  const native = product === "langgraph" ? taskResult.report_evidence : report;
+  const ids = native?.evidence_ids;
+  const available = Array.isArray(ids) && ids.every((id) => typeof id === "string" && id.trim()) &&
+    (product === "agent-harness" || (product === "langgraph" &&
+      native?.contract_version === "opsmind-report-evidence:1.0" && native.valid === true &&
+      native.status === "published"));
+  return {
+    status: available ? "published" : "unavailable",
+    source: product === "langgraph" ? "product_e2e.task_result.report_evidence" : "investigation.report.evidence_ids",
+    evidence_ids: available ? [...new Set(ids)] : [],
+    // Preserve explicitly classified relationships for audit; they are not all root support.
+    hypotheses: available && Array.isArray(native.hypotheses) ? native.hypotheses : [],
+    errors: available ? [] : ["explicit_product_report_citations_unavailable"],
   };
-  for (const source of sources) visit(source);
-  return [...refs];
 }
 
 function authoritativeOutcome({ status, detail = {}, projection = null, events = [], product,
@@ -713,7 +719,7 @@ function authoritativeOutcome({ status, detail = {}, projection = null, events =
     root_cause: rootCauseConfirmed ? publishedRootCause : null,
     confidence: rootCauseConfirmed ? boundedConfidence(projection?.root_cause_confidence ?? taskResult.root_cause_confidence ??
       taskResult.confidence ?? leading?.confidence ?? report.confidence ?? detail.confidence) : 0,
-    evidence_refs: evidenceRefs(projection?.evidence, detail.evidence, report),
+    evidence_refs: recommendationEvaluation.report_evidence_ids,
     exclusions: stringList(taskResult.exclusions ?? report.exclusions),
     tool_failures_recovered: recoveryFailure ? recoverySuccess : null,
     next_checks: stringList(taskResult.next_checks ?? report.next_checks ?? report.missing_evidence ?? report.evidence_gaps),

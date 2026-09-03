@@ -4,10 +4,9 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { buildCandidateConnectorSet, candidatePreflightInput, createApp, evaluationRunName, trialLiveProgressView,
-  trustedDeploymentAttestation } from "../src/app.mjs";
+import { buildCandidateConnectorSet, candidatePreflightInput, createApp, evaluationRunName, trialLiveProgressView } from "../src/app.mjs";
 import { CANDIDATE_PRESENCE_CONTRACT, candidatePresenceSignaturePayload,
-  createTestDouble, freezeSourceSnapshot } from "../../../packages/kernel/src/index.mjs";
+  createTestDouble, freezeSourceSnapshot, trustedDeploymentAttestation } from "../../../packages/kernel/src/index.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "config", "m15-smoke.manifest.json"), "utf8"));
@@ -84,9 +83,11 @@ test("管理员可在不创建Trial或触碰Twin的前提下只读核验Adapter 
     } });
   try {
     assert.equal((await app.handler(new Request("http://local/api/candidate-adapters/discover?contract_version=5.0"))).status, 401);
-    const invalid = await app.handler(new Request("http://local/api/candidate-adapters/discover?contract_version=6.0", {
-      headers: { authorization: "Bearer admin-secret" } }));
-    assert.equal(invalid.status, 400);
+    for (const version of ["4.0", "6.0"]) {
+      const invalid = await app.handler(new Request(`http://local/api/candidate-adapters/discover?contract_version=${version}`, {
+        headers: { authorization: "Bearer admin-secret" } }));
+      assert.equal(invalid.status, 400);
+    }
     const response = await app.handler(new Request("http://local/api/candidate-adapters/discover?contract_version=5.0", {
       headers: { authorization: "Bearer admin-secret" } }));
     const body = await response.json();
@@ -106,16 +107,13 @@ test("管理员可在不创建Trial或触碰Twin的前提下只读核验Adapter 
 });
 
 test("新版候选的只读发现不被旧冻结运行合同阻断，而执行连接器继续严格绑定", () => {
-  const v4Calls = [];
   const v5Calls = [];
-  const createV4 = (options) => { v4Calls.push(options); return { kind: "v4-discovery" }; };
   const createV5 = (options) => { v5Calls.push(options); return { kind: options.declaredCandidateRuntime
     ? "v5-execution" : "v5-discovery" }; };
   const candidateRuntime = { contract_version: "1.0", models: [], versions: { service: "2.3.4" } };
   const connectorOptions = { attestation: { source_revision: "new", artifact_digest: `sha256:${"a".repeat(64)}` } };
-  const built = buildCandidateConnectorSet({ createV4, createV5, connectorOptions,
-    useV5: true, candidateRuntime });
-  assert.equal(v4Calls.length, 1);
+  const built = buildCandidateConnectorSet({ createV5, connectorOptions, candidateRuntime });
+  assert.deepEqual(Object.keys(built.discoveryConnectorsByVersion), ["5.0"]);
   assert.equal(v5Calls.length, 2);
   assert.equal(v5Calls[0].declaredCandidateRuntime, undefined);
   assert.equal(v5Calls[1].declaredCandidateRuntime, candidateRuntime);
@@ -785,6 +783,52 @@ test("M3冻结设计可用于新建评测预检但不能绕过门禁直接启动
         .find((item) => item.contestant_ref === "agent-harness-v2").candidate_resources);
   } finally { app.close(); }
 });
+
+for (const version of ["6.0", "7.0"]) {
+  test(`旧真实产品Manifest ${version}仍可查看，但不能创建新运行或借用新版执行入口`, async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "evalos-legacy-read-only-"));
+    const app = createApp({ databasePath: path.join(root, "control.sqlite"),
+      privateLabelDatabasePath: path.join(root, "private.sqlite"), runtimeRoot: root,
+      apiToken: "control-secret", bootstrapM3Design: true });
+    try {
+      // Persist a historical fixture through the existing store, not by altering production records.
+      const legacy = structuredClone(formalM3Manifest);
+      legacy.manifest_version = version;
+      legacy.milestone = version === "6.0" ? "M3.1" : "M3.2";
+      legacy.budget = structuredClone(manifest.budget);
+      legacy.statistics_policy = structuredClone(manifest.statistics_policy);
+      delete legacy.candidate_resource_contract;
+      if (version === "6.0") for (const candidate of legacy.contestants) {
+        candidate.adapter_contract_version = "4.0";
+        candidate.adapter_version = "candidate-adapter-4.0.0";
+      }
+      const source = app.store.createExperiment(legacy, `history-only-${version}`, { scheduleTrials: false }).experiment;
+      const headers = { authorization: "Bearer control-secret", "content-type": "application/json" };
+      const detail = await app.handler(new Request(`http://local/api/experiments/${source.id}`, { headers }));
+      assert.equal(detail.status, 200);
+      assert.equal((await detail.json()).experiment.manifest.manifest_version, version);
+      const before = { experiments: app.store.listExperiments().length, ledger: app.ledger.entries().length };
+      const selection = { request_kind: "NEW_EVALUATION", evaluation_purpose: "SINGLE_SYSTEM_REGRESSION",
+        mode: "QUICK_VALIDATION", source_experiment_id: source.id, case_refs: [legacy.case_refs[0]],
+        contestant_refs: [legacy.contestants[0].ref], environment_seeds: [legacy.environment_seeds[0]],
+        repetitions: 1, requested_by: "history-regression-test", reason: "旧合同只读保留，不允许重新开考" };
+      const response = await app.handler(new Request("http://local/api/workbench/run-requests", {
+        method: "POST", headers: { ...headers, "idempotency-key": `reject-legacy-${version}` },
+        body: JSON.stringify(selection) }));
+      assert.equal(response.status, 409);
+      const result = await response.json();
+      assert.equal(result.preflight.ready, false);
+      assert.equal(result.preflight.blockers.some((message) => message.includes("必须使用 Manifest 8.0")), true);
+      assert.equal((await app.handler(new Request(`http://local/api/experiments/${source.id}/run`,
+        { method: "POST", headers }))).status, 423);
+      assert.equal(app.store.listTrials().length, 0);
+      assert.equal(app.store.listEvaluationRunRequests().length, 0);
+      assert.equal(app.store.listExperiments().length, before.experiments);
+      assert.equal(app.ledger.entries().length, before.ledger);
+      assert.deepEqual(app.store.getExperiment(source.id).manifest, legacy);
+    } finally { app.close(); }
+  });
+}
 
 test("M3冻结合同变更会新增可审计设计而不会覆盖历史或阻塞服务启动", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "evalos-api-m3-design-upgrade-"));

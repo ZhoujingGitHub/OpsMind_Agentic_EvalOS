@@ -23,37 +23,34 @@ rollback() {
   if [[ $exit_code -eq 0 ]]; then return; fi
   trap - EXIT
   set +e
-  echo "deployment failed; restoring previous EvalOS release" >&2
-  systemctl stop opsmind-evalos-console opsmind-evalos 2>/dev/null || true
-  if [[ -n "$previous_release" && -d "$previous_release" ]]; then
-    ln -sfn "$previous_release" "${current_link}.rollback"
-    mv -Tf "${current_link}.rollback" "$current_link"
+  local recovery_failed=0
+  echo "deployment failed; restoring previous EvalOS application; database unchanged" >&2
+  systemctl stop opsmind-evalos-console opsmind-evalos || recovery_failed=1
+  { ln -sfn "$previous_release" "${current_link}.rollback" &&
+    mv -Tf "${current_link}.rollback" "$current_link"; } || recovery_failed=1
+  cp -f "$unit_backup/opsmind-evalos.service" /etc/systemd/system/opsmind-evalos.service || recovery_failed=1
+  cp -f "$unit_backup/opsmind-evalos-console.service" /etc/systemd/system/opsmind-evalos-console.service || recovery_failed=1
+  cp -f "$unit_backup/opsmind-evalos.conf" "$nginx_config" || recovery_failed=1
+  # Never restore data automatically: the application may have written new records.
+  # Backups are for separately approved recovery, not application rollback.
+  if [[ "$recovery_failed" -eq 0 ]]; then
+    { systemctl daemon-reload && nginx -t &&
+      systemctl start opsmind-evalos opsmind-evalos-console &&
+      systemctl reload nginx; } || recovery_failed=1
   fi
-  if [[ -d "$unit_backup" ]]; then
-    cp -f "$unit_backup/opsmind-evalos.service" /etc/systemd/system/opsmind-evalos.service 2>/dev/null || true
-    cp -f "$unit_backup/opsmind-evalos-console.service" /etc/systemd/system/opsmind-evalos-console.service 2>/dev/null || true
-    if [[ -f "$unit_backup/opsmind-evalos.conf" ]]; then
-      cp -f "$unit_backup/opsmind-evalos.conf" "$nginx_config" 2>/dev/null || true
-    fi
+  if [[ "$recovery_failed" -ne 0 ]]; then
+    echo "application recovery incomplete; manual attention required; database unchanged" >&2
+  else
+    echo "previous EvalOS application restored; database unchanged" >&2
   fi
-  if [[ -f "$backup_root/control/control.sqlite" ]]; then
-    rm -f /var/lib/opsmind-evalos/control/control.sqlite*
-    cp -a "$backup_root/control/." /var/lib/opsmind-evalos/control/
-    chown -R opsmindeval:opsmindeval /var/lib/opsmind-evalos/control
-  fi
-  if [[ -f "$backup_root/private/labels.sqlite" ]]; then
-    rm -f /var/lib/opsmind-evalos/private/labels.sqlite*
-    cp -a "$backup_root/private/." /var/lib/opsmind-evalos/private/
-    chown -R opsmindeval:opsmindeval /var/lib/opsmind-evalos/private
-  fi
-  systemctl daemon-reload 2>/dev/null || true
-  systemctl start opsmind-evalos opsmind-evalos-console 2>/dev/null || true
-  nginx -t >/dev/null 2>&1 && systemctl reload nginx 2>/dev/null || true
   exit "$exit_code"
 }
-trap rollback EXIT
 
 [[ ! -e "$release_root" ]] || { echo "release already exists: $release_root" >&2; exit 2; }
+[[ -n "$previous_release" && -d "$previous_release" ]] || {
+  echo "current EvalOS release is missing; refusing upgrade without an application rollback target" >&2
+  exit 2
+}
 
 # 全量 SQLite 备份只保留最近一代；本次成功后合计两代。防止连续发布把系统盘写满。
 mkdir -p "$backups_root"
@@ -100,6 +97,9 @@ cp -f /etc/systemd/system/opsmind-evalos.service "$unit_backup/opsmind-evalos.se
 cp -f /etc/systemd/system/opsmind-evalos-console.service "$unit_backup/opsmind-evalos-console.service"
 cp -f "$nginx_config" "$unit_backup/opsmind-evalos.conf"
 
+# All preparation and configuration backups must succeed before touching services.
+# Arm recovery before stop: a failed stop may already have stopped one service.
+trap rollback EXIT
 systemctl stop opsmind-evalos-console opsmind-evalos
 for file in /var/lib/opsmind-evalos/control/control.sqlite*; do [[ -e "$file" ]] && cp -a "$file" "$backup_root/control/"; done
 for file in /var/lib/opsmind-evalos/private/labels.sqlite*; do [[ -e "$file" ]] && cp -a "$file" "$backup_root/private/"; done

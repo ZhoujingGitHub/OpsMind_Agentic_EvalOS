@@ -6,6 +6,18 @@ export const CANDIDATE_PRESENCE_CONTRACT = "opsmind-candidate-presence/1.0";
 export const RELEASE_SWITCH_CONTRACT = "opsmind-release-switch/1.0";
 export const CANDIDATE_PRESENCE_PATH = "/api/candidate-presence";
 export const CANDIDATE_PRESENCE_TTL_MS = 180_000;
+export const DEPLOYMENT_ATTESTATION_CONTRACT = "evalos-deployment-attestation/1.0";
+
+export function trustedDeploymentAttestation(value) {
+  if (value?.contract_version !== DEPLOYMENT_ATTESTATION_CONTRACT ||
+      !/^[a-f0-9]{40}$/.test(String(value?.source_revision ?? "")) ||
+      !/^sha256:[a-f0-9]{64}$/.test(String(value?.artifact_digest ?? "")) ||
+      !["evalos_trusted_read_only_git_oci", "evalos_trusted_runtime_config"].includes(value?.verification_method) ||
+      typeof value?.verified_evidence_ref !== "string" || !value.verified_evidence_ref) {
+    throw new Error("candidate deployment identity requires an independent EvalOS deployment attestation");
+  }
+  return Object.freeze({ source_revision: value.source_revision, artifact_digest: value.artifact_digest });
+}
 
 export const USE_MODES = Object.freeze(["langgraph_direct", "agent_harness_direct", "evalos_trial"]);
 export const CANDIDATE_REFS = Object.freeze(["langgraph-v1", "agent-harness-v2"]);

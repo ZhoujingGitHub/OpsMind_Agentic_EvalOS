@@ -5,8 +5,6 @@ import path from "node:path";
 const root = path.resolve(import.meta.dirname, "..");
 const read = (file) => readFileSync(path.join(root, file), "utf8");
 const app = read("services/control-api/src/app.mjs");
-const adapter = read("packages/agent-runtime/src/candidate-adapter-v4.mjs");
-const connectors = read("packages/agent-runtime/src/product-connectors-v4.mjs");
 const adapterV5 = read("packages/agent-runtime/src/candidate-adapter-v5.mjs");
 const connectorsV5 = read("packages/agent-runtime/src/product-connectors-v5.mjs");
 const oracle = read("packages/kernel/src/approval-oracle.mjs");
@@ -37,19 +35,11 @@ const twinController = read("infra/twin/opsmind_twinctl.py");
 const twinControllerInstaller = read("infra/twin/install-controller.sh");
 const twinControllerReleaseBuilder = read("infra/twin/build-controller-release.py");
 
-assert.match(connectors, /tokenSource:\s*"environment-only"/);
-assert.match(connectors, /real candidate product APIs require HTTPS/);
-assert.match(connectors, /productionWrites:\s*false/);
-assert.match(connectors, /must use three separate identities/);
-assert.match(adapter, /production_writes_available !== false/);
-assert.match(adapter, /each normalized event must point to preserved raw evidence/);
-assert.match(adapter, /synthesize-missing-evidence/);
 assert.match(oracle, /FrozenApprovalOracle/);
 assert.doesNotMatch(oracle, /recommended_action|correct_action|root_cause/);
 assert.match(grader, /approval_integrity/);
 assert.match(grader, /independent_verification/);
 assert.match(grader, /reset_integrity/);
-assert.match(adapter, /REAL_CANDIDATE/);
 assert.match(connectorsV5, /tokenSource:\s*"environment-only"/);
 assert.match(connectorsV5, /real candidate product APIs require HTTPS/);
 assert.match(connectorsV5, /productionWrites:\s*false/);
@@ -79,9 +69,15 @@ assert.doesNotMatch(twinManager, /candidate_authorize|candidate_health|candidate
 assert.doesNotMatch(twinManager, /PRIVATE KEY|private_key/);
 assert.match(twinController, /CONTROLLER_RELEASE_FILE/);
 assert.match(twinController, /"controller_release": controller_release\(\)/);
-assert.match(twinControllerInstaller, /require_idle_lab/);
-assert.match(twinControllerInstaller, /CURRENT_LINK=.*\/current/);
-assert.match(twinControllerInstaller, /PREVIOUS_LINK=.*\/previous/);
+assert.match(twinControllerInstaller, /def idle_lab_lock/);
+assert.match(twinControllerInstaller, /CURRENT_LINK = CONTROLLER_ROOT \/ "current"/);
+assert.match(twinControllerInstaller, /PREVIOUS_LINK = CONTROLLER_ROOT \/ "previous"/);
+assert.match(twinControllerInstaller, /\/run\/lock\/opsmind-twin\.lock/);
+assert.match(twinControllerInstaller, /LOCK_EX \| fcntl\.LOCK_NB/);
+assert.match(twinControllerInstaller, /lease\.get\("boot_id"\) != boot/);
+assert.doesNotMatch(twinControllerInstaller, /useradd|sudoers|modprobe|sysctl/);
+assert.doesNotMatch(twinControllerInstaller, /symlink_to\([^\n]*install-controller/);
+assert.match(twinControllerInstaller, /controller recovery incomplete/);
 assert.doesNotMatch(twinControllerInstaller, /SOURCE_ROOT/);
 assert.match(twinControllerReleaseBuilder, /refuses uncommitted tracked changes/);
 assert.match(twinControllerReleaseBuilder, /source_revision/);
@@ -153,6 +149,13 @@ assert.match(evalosRollback, /rollback_target=.*previous_link/);
 assert.match(evalosRollback, /database_action=none/);
 assert.doesNotMatch(evalosRollback, /control\.sqlite|labels\.sqlite|backups|migration/i,
   "Manual EvalOS application rollback must never restore or migrate a database");
+const failedInstallRecovery = deploymentInstaller.slice(deploymentInstaller.indexOf("rollback() {"),
+  deploymentInstaller.indexOf('\n[[ ! -e "$release_root" ]]'));
+assert.doesNotMatch(failedInstallRecovery, /control\.sqlite|labels\.sqlite|cp -a|rm -f/,
+  "Failed deployment recovery must never replace current database files with a backup");
+assert.match(deploymentInstaller, /trap rollback EXIT\r?\nsystemctl stop opsmind-evalos-console opsmind-evalos/,
+  "Arm application recovery only after preparation and immediately before touching services");
+assert.match(failedInstallRecovery, /application recovery incomplete/);
 assert.match(nginx, /location \^~ \/api\/candidate-relay\//);
 assert.match(nginx, /location = \/api\/candidate-presence/);
 assert.match(nginx, /location ~ \^\/api\/trials\/\[A-Za-z0-9_-\]\+\/judge\$/);
@@ -161,7 +164,7 @@ assert.match(nginx, /location \/ \{[\s\S]*allow 111\.55\.79\.0\/24;[\s\S]*deny a
 assert.doesNotMatch(nginx, /candidate-observation/);
 assert.match(deploymentSmoke, /m3-l2-agentic-formal@3\.1\.0/);
 assert.match(deploymentSmoke, /case_count, 80/);
-assert.doesNotMatch(`${app}\n${adapter}\n${connectors}\n${adapterV5}\n${connectorsV5}`,
+assert.doesNotMatch(`${app}\n${adapterV5}\n${connectorsV5}`,
   /(?:DEEPSEEK_API_KEY|ANTHROPIC_AUTH_TOKEN|EVALOS_AGENT_HARNESS_TOKEN|EVALOS_LANGGRAPH_TOKEN)\s*=\s*["'][^"']+["']/);
 assert.match(failurePolicy, /capability.*failure|CANDIDATE_CAPABILITY_FAILURE/i);
 for (const source of [relayWorker, controlApi]) {

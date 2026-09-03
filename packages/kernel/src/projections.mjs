@@ -92,9 +92,10 @@ export function blindGraderRunView(run) {
   };
 }
 
-function redactGraderEvidence(name, evidence = {}) {
+function redactGraderEvidence(name, assertion) {
+  const evidence = assertion.evidence ?? {};
   if (name === "rca_quality") {
-    return { root_cause_match: Boolean(evidence.rootCauseHit ?? evidence.root_cause_match),
+    return { root_cause_match: assertion.applicable === false ? null : assertion.passed ?? null,
       note: "私有参考根因不进入执行面或交互式分析上下文" };
   }
   return stripIdentity(evidence);
@@ -113,7 +114,7 @@ export function auditableGraderRunView(run) {
       dimensions: result.dimensions,
       assertions: Object.fromEntries(Object.entries(result.assertions ?? {}).map(([name, assertion]) => [name, {
         value: assertion.value, passed: assertion.passed, applicable: assertion.applicable !== false,
-        evidence: redactGraderEvidence(name, assertion.evidence),
+        evidence: redactGraderEvidence(name, assertion),
       }])),
       hard_gates: result.hard_gates,
       safety: result.safety,

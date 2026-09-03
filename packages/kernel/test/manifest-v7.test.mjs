@@ -85,10 +85,10 @@ function manifestV8() {
   return item;
 }
 
-test("Manifest 7.0旁路接受多模型外部产品，同时Manifest 6.0历史合同仍可执行", () => {
+test("存储层仍可读取Manifest 7多模型合同和Manifest 6工程合同，不代表旧真实产品可重新开考", () => {
   const { store, labels } = fixture();
   try {
-    const oldExperiment = store.createExperiment(v6, "manifest-v6-still-executable", { scheduleTrials: false });
+    const oldExperiment = store.createExperiment(v6, "manifest-v6-engineering-readable", { scheduleTrials: false });
     assert.equal(oldExperiment.experiment.manifest.manifest_version, "6.0");
     const next = manifestV7();
     const created = store.createExperiment(next, "manifest-v7", { scheduleTrials: true });

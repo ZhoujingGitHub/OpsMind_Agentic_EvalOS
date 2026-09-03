@@ -60,6 +60,43 @@ test("Candidate Adapter 5.0接受真实证据链绑定，且无失败时恢复�
   assert.ok(CANDIDATE_ADAPTER_V5_RUNTIME.forbidden.includes("send-hidden-case-or-seed"));
 });
 
+test("当前Adapter超时后等考生真正终止才释放隔离", async () => {
+  let observations = 0;
+  const emitted = [];
+  const adapter = createCandidateAdapterV5({ id: "candidate", connector: { ...connector(),
+    observe: async ({ runRef }) => ({ run_ref: runRef, status: ++observations >= 3 ? "FAILED" : "RUNNING",
+      raw_events: [], normalized_events: [] }) },
+    pollIntervalMs: 1, timeoutMs: 0, quarantineTimeoutMs: 500 });
+  await assert.rejects(adapter.execute({ executionContract: contract(),
+    emit: async (...args) => emitted.push(args) }), /external candidate run timed out/);
+  assert.ok(emitted.some(([name]) => name === "candidate.run.quarantine_started"));
+  assert.ok(emitted.some(([name]) => name === "candidate.run.quarantine_released"));
+});
+
+test("当前Adapter操作员取消后仍核实真实终态，不提前释放", async () => {
+  let cancelReason = null;
+  const emitted = [];
+  const adapter = createCandidateAdapterV5({ id: "candidate", connector: { ...connector(),
+    observe: async ({ runRef }) => ({ run_ref: runRef, status: "CANCELLED", raw_events: [], normalized_events: [] }),
+    cancel: async ({ reason }) => { cancelReason = reason; return { supported: true }; } },
+    pollIntervalMs: 1, quarantineTimeoutMs: 500 });
+  await assert.rejects(adapter.execute({ executionContract: contract(),
+    shouldCancel: async () => ({ requested: true, reason: "操作员终止" }),
+    emit: async (...args) => emitted.push(args) }),
+  (error) => error.cancelled === true && error.quarantineReleased === true);
+  assert.equal(cancelReason, "evalos_operator_cancellation");
+  assert.ok(emitted.some(([name]) => name === "candidate.run.quarantine_released"));
+});
+
+test("当前Adapter无法确认考生终止时继续封锁考场并停止后续队列", async () => {
+  const adapter = createCandidateAdapterV5({ id: "candidate", connector: { ...connector(),
+    observe: async ({ runRef }) => ({ run_ref: runRef, status: "RUNNING", raw_events: [], normalized_events: [] }) },
+    pollIntervalMs: 1, timeoutMs: 0, quarantineTimeoutMs: 5 });
+  await assert.rejects(adapter.execute({ executionContract: contract(), emit: async () => {} }),
+    (error) => error.name === "CandidateIsolationError" && error.haltQueue === true &&
+      error.keepEnvironmentQuarantined === true && error.runRef === "external:v5");
+});
+
 test("Candidate Adapter 5.0拒绝本地提交回执冒充产品绑定，也执行每考生冻结的强度门槛", async () => {
   const receiptOnly = createCandidateAdapterV5({ id: "candidate", connector: connector("CONTROL_PLANE_RECEIPT"),
     pollIntervalMs: 1 });

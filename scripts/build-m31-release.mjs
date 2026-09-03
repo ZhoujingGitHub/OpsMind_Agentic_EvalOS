@@ -52,6 +52,7 @@ for (const file of files) {
   writeFileSync(file, readFileSync(file, "utf8").replaceAll("\r\n", "\n"));
 }
 const forbidden = [/langgraph_runner\.py$/i, /mock-contestant\.mjs$/i, /product-e2e-adapter\.mjs$/i,
+  /candidate-adapter-v4\.mjs$/i, /product-connectors-v4\.mjs$/i,
   /product-evaluation-adapter-v2/i, /evaluation-adapter-v2/i, /deepseek-claude-adapter\.mjs$/i];
 for (const file of files) {
   const relative = path.relative(payloadRoot, file).replaceAll("\\", "/");

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { BLIND_JUDGE_RUNTIME, CANDIDATE_ADAPTER_V4_RUNTIME, DEEPSEEK_AGENT_RUNTIME, EVALOS_LEAD_RUNTIME, blindJudgePromptMaterial, createCandidateAdapterV4, deepSeekEnvironment, isolatedBashCommand, judgeAttentionDecision, normalizeInvestigatorReport, toMcpToolResult, toolPolicy } from "../src/index.mjs";
+import { BLIND_JUDGE_RUNTIME, DEEPSEEK_AGENT_RUNTIME, EVALOS_LEAD_RUNTIME, blindJudgePromptMaterial, deepSeekEnvironment, isolatedBashCommand, judgeAttentionDecision, normalizeInvestigatorReport, toMcpToolResult, toolPolicy } from "../src/index.mjs";
 import { CASES } from "../../kernel/src/index.mjs";
 
 test("runtime uses Claude Agent SDK over DeepSeek Anthropic endpoint without a graph framework", () => {
@@ -44,174 +44,6 @@ test("investigator accepts natural report variants but freezes one strict canoni
   assert.match(report.methodology_sources[0].url, /^https:\/\/www\.anthropic\.com\//);
 });
 
-test("Candidate Adapter 4.0只做外部提交、事件翻译和证据保全，不代考", async () => {
-  const fingerprints = {
-    source_revision: "abcdef1234567",
-    artifact_digest: `sha256:${"1".repeat(64)}`,
-    runtime_digest: `sha256:${"2".repeat(64)}`,
-    runtime_manifest_digest: `sha256:${"3".repeat(64)}`,
-    capability_contract_digest: `sha256:${"4".repeat(64)}`,
-  };
-  let observed = false;
-  const connector = {
-    kind: "fixture-external-product",
-    discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "CLAUDE_AGENT_SDK_HARNESS",
-      production_writes_available: false, ...fingerprints }),
-    start: async ({ executionContract }) => ({ run_ref: `external:${executionContract.trial.id}`, status: "RUNNING" }),
-    observe: async ({ runRef }) => { observed = true; return { run_ref: runRef, status: "COMPLETED", next_cursor: "1",
-      raw_events: [{ source_ref: "raw:1", source_system: "real-product", recorded_at: new Date().toISOString(),
-        payload: { status: "completed" }, payload_digest: `sha256:${"5".repeat(64)}` }],
-      normalized_events: [{ event_type: "conclusion.recorded", actor: "external-candidate", status: "OK",
-        raw_source_refs: ["raw:1"], payload: { evidence_refs: ["evidence:real"] } }],
-      evaluation_binding: { contract: "evalos-product-run-binding.2", complete: true,
-        binding_strength: "PUBLIC_TASK_CONTEXT", expected_context_digest: `sha256:${"6".repeat(64)}` },
-      candidate_usage: { source: "candidate-public-api", values: { input_tokens: 321, output_tokens: 45, model_calls: 2 },
-        observed_dimensions: ["input_tokens", "output_tokens", "model_calls"], unavailable_dimensions: ["tool_calls"], complete: false },
-      outcome: { status: "resolved", root_cause: "real-product-result", evidence_refs: ["evidence:real"] } }; },
-    cancel: async () => {},
-  };
-  const adapter = createCandidateAdapterV4({ id: "agent-harness-v2", connector, pollIntervalMs: 1, timeoutMs: 1000 });
-  const emitted = [];
-  const captures = [];
-  const outcome = await adapter.execute({ trial: { id: "trial-real-1" }, executionContract: {
-    run_class: "REAL_CANDIDATE", evaluation_lane: "CONTROLLED_CLOSURE", trial: { id: "trial-real-1" },
-    contestant: { ref: "agent-harness-v2", kind: "REAL_PRODUCT", architecture: "CLAUDE_AGENT_SDK_HARNESS", ...fingerprints },
-    budget: { wallclock_ms: 1000 },
-  }, emit: async (...args) => emitted.push(args), captureEnvironment: async (reason) => captures.push(reason) });
-  assert.equal(observed, true);
-  assert.equal(outcome.status, "resolved");
-  assert.equal(outcome.candidate_run_ref, "external:trial-real-1");
-  assert.equal(outcome.evaluation_binding.complete, true);
-  assert.equal(outcome.__evalos_usage.values.input_tokens, 321);
-  assert.deepEqual(outcome.__evalos_usage.observed_dimensions, ["input_tokens", "output_tokens", "model_calls"]);
-  assert.ok(emitted.some(([name]) => name === "candidate.raw_event"));
-  assert.ok(emitted.some(([name]) => name === "candidate.poll.heartbeat"));
-  assert.ok(emitted.some(([name]) => name === "conclusion.recorded"));
-  assert.deepEqual(captures, ["conclusion.recorded"]);
-  assert.deepEqual(CANDIDATE_ADAPTER_V4_RUNTIME.forbidden,
-    ["invoke-candidate-internal-tools", "synthesize-missing-evidence", "change-official-score"]);
-});
-
-test("Candidate Adapter 4.0在开考前校验Twin与候选超时预算", async () => {
-  const fingerprints = {
-    source_revision: "abcdef1234567", artifact_digest: `sha256:${"1".repeat(64)}`,
-    runtime_digest: `sha256:${"2".repeat(64)}`, runtime_manifest_digest: `sha256:${"3".repeat(64)}`,
-    capability_contract_digest: `sha256:${"4".repeat(64)}`,
-  };
-  let twinReady = true;
-  let maxRunMs = 2700000;
-  const connector = {
-    kind: "fixture-external-product",
-    discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "CLAUDE_AGENT_SDK_HARNESS",
-      production_writes_available: false, health: { status: "healthy" }, ...fingerprints }),
-    evaluationReadiness: async () => ({ identities_separated: true, tenant_bound: true, least_privilege: true,
-      isolated_tenant_slots: 1, safe_parallelism: 1, external_twin_ready: twinReady,
-      twin: { configured: twinReady, connected: twinReady, slot_id: "harness-slot-1" },
-      budget_contract: { observable: true, max_run_ms: maxRunMs, cancellation_supported: false,
-        source: "fixture-deployment" } }),
-    start: async () => ({ run_ref: "unused", status: "RUNNING" }),
-    observe: async () => ({ run_ref: "unused", status: "RUNNING", raw_events: [], normalized_events: [] }),
-    cancel: async () => ({ supported: false }),
-  };
-  const contestant = { ref: "agent-harness-v2", kind: "REAL_PRODUCT",
-    architecture: "CLAUDE_AGENT_SDK_HARNESS", ...fingerprints };
-  const adapter = createCandidateAdapterV4({ id: "agent-harness-v2", connector });
-  const ready = await adapter.preflight({ contestant, requiresTwin: true, budget: { wallclock_ms: 3000000 } });
-  assert.equal(ready.ready, true);
-  assert.equal(ready.twin.ready, true);
-  assert.equal(ready.budget.aligned, true);
-  maxRunMs = 3300000;
-  const mismatch = await adapter.preflight({ contestant, requiresTwin: true, budget: { wallclock_ms: 3000000 } });
-  assert.equal(mismatch.ready, false);
-  assert.equal(mismatch.budget.aligned, false);
-  twinReady = false;
-  maxRunMs = 2700000;
-  const disconnected = await adapter.preflight({ contestant, requiresTwin: true, budget: { wallclock_ms: 3000000 } });
-  assert.equal(disconnected.ready, false);
-  assert.equal(disconnected.twin.ready, false);
-});
-
-test("Candidate Adapter超时后等待真实考生终态再释放隔离槽", async () => {
-  const fingerprints = {
-    source_revision: "abcdef1234567", artifact_digest: `sha256:${"1".repeat(64)}`,
-    runtime_digest: `sha256:${"2".repeat(64)}`, runtime_manifest_digest: `sha256:${"3".repeat(64)}`,
-    capability_contract_digest: `sha256:${"4".repeat(64)}`,
-  };
-  let observations = 0;
-  const connector = {
-    kind: "fixture-external-product",
-    discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "CLAUDE_AGENT_SDK_HARNESS",
-      production_writes_available: false, ...fingerprints }),
-    start: async () => ({ run_ref: "external:slow-terminal", status: "RUNNING" }),
-    observe: async ({ runRef }) => ({ run_ref: runRef, status: ++observations >= 3 ? "FAILED" : "RUNNING",
-      raw_events: [], normalized_events: [] }),
-    cancel: async () => ({ supported: false, reason: "candidate_api_has_no_cancel" }),
-  };
-  const emitted = [];
-  const adapter = createCandidateAdapterV4({ id: "agent-harness-v2", connector, pollIntervalMs: 1,
-    timeoutMs: 1, quarantineTimeoutMs: 50 });
-  await assert.rejects(adapter.execute({ trial: { id: "trial-slow-terminal" }, executionContract: {
-    run_class: "REAL_CANDIDATE", evaluation_lane: "CONTROLLED_CLOSURE", trial: { id: "trial-slow-terminal" },
-    contestant: { ref: "agent-harness-v2", kind: "REAL_PRODUCT", architecture: "CLAUDE_AGENT_SDK_HARNESS", ...fingerprints },
-    budget: { wallclock_ms: 1000 },
-  }, emit: async (...args) => emitted.push(args) }), /external candidate run timed out/);
-  assert.ok(emitted.some(([name]) => name === "candidate.run.quarantine_started"));
-  assert.ok(emitted.some(([name]) => name === "candidate.run.quarantine_released"));
-});
-
-test("Candidate Adapter收到操作员取消后等待真实终态再安全释放隔离", async () => {
-  const fingerprints = {
-    source_revision: "abcdef1234567", artifact_digest: `sha256:${"1".repeat(64)}`,
-    runtime_digest: `sha256:${"2".repeat(64)}`, runtime_manifest_digest: `sha256:${"3".repeat(64)}`,
-    capability_contract_digest: `sha256:${"4".repeat(64)}`,
-  };
-  let cancelReason = null;
-  const connector = {
-    kind: "fixture-external-product",
-    discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "CLAUDE_AGENT_SDK_HARNESS",
-      production_writes_available: false, ...fingerprints }),
-    start: async () => ({ run_ref: "external:operator-cancel", status: "RUNNING" }),
-    observe: async ({ runRef }) => ({ run_ref: runRef, status: "CANCELLED", raw_events: [], normalized_events: [] }),
-    cancel: async ({ reason }) => { cancelReason = reason; return { supported: true }; },
-  };
-  const emitted = [];
-  const adapter = createCandidateAdapterV4({ id: "agent-harness-v2", connector, pollIntervalMs: 1,
-    timeoutMs: 1000, quarantineTimeoutMs: 50 });
-  await assert.rejects(adapter.execute({ trial: { id: "trial-operator-cancel" }, executionContract: {
-    run_class: "REAL_CANDIDATE", evaluation_lane: "CONTROLLED_CLOSURE", trial: { id: "trial-operator-cancel" },
-    contestant: { ref: "agent-harness-v2", kind: "REAL_PRODUCT", architecture: "CLAUDE_AGENT_SDK_HARNESS", ...fingerprints },
-    budget: { wallclock_ms: 1000 },
-  }, shouldCancel: async () => ({ requested: true, reason: "操作员终止", requested_at: "2026-08-23T00:00:00Z" }),
-  emit: async (...args) => emitted.push(args) }), (error) => error.name === "TrialCancellationError"
-    && error.cancelled === true && error.quarantineReleased === true);
-  assert.equal(cancelReason, "evalos_operator_cancellation");
-  assert.ok(emitted.some(([name]) => name === "candidate.run.quarantine_started"));
-  assert.ok(emitted.some(([name]) => name === "candidate.run.quarantine_released"));
-});
-test("Candidate Adapter在真实考生始终未终止时封锁环境并要求停止队列", async () => {
-  const fingerprints = {
-    source_revision: "abcdef1234567", artifact_digest: `sha256:${"1".repeat(64)}`,
-    runtime_digest: `sha256:${"2".repeat(64)}`, runtime_manifest_digest: `sha256:${"3".repeat(64)}`,
-    capability_contract_digest: `sha256:${"4".repeat(64)}`,
-  };
-  const connector = {
-    kind: "fixture-external-product",
-    discover: async () => ({ candidate_kind: "REAL_PRODUCT", architecture: "LANGGRAPH_PRODUCT",
-      production_writes_available: false, ...fingerprints }),
-    start: async () => ({ run_ref: "external:never-terminal", status: "RUNNING" }),
-    observe: async ({ runRef }) => ({ run_ref: runRef, status: "RUNNING", raw_events: [], normalized_events: [] }),
-    cancel: async () => ({ supported: false }),
-  };
-  const adapter = createCandidateAdapterV4({ id: "langgraph-v1", connector, pollIntervalMs: 1,
-    timeoutMs: 1, quarantineTimeoutMs: 4 });
-  await assert.rejects(adapter.execute({ trial: { id: "trial-never-terminal" }, executionContract: {
-    run_class: "REAL_CANDIDATE", evaluation_lane: "CONTROLLED_CLOSURE", trial: { id: "trial-never-terminal" },
-    contestant: { ref: "langgraph-v1", kind: "REAL_PRODUCT", architecture: "LANGGRAPH_PRODUCT", ...fingerprints },
-    budget: { wallclock_ms: 1000 },
-  }, emit: async () => {} }), (error) => error.name === "CandidateIsolationError"
-    && error.haltQueue === true && error.keepEnvironmentQuarantined === true
-    && error.runRef === "external:never-terminal");
-});
 test("DeepSeek environment keeps credentials in memory and maps the exact model", () => {
   const env = deepSeekEnvironment({ apiKey: "test-runtime-only", model: "deepseek-v4-flash" });
   assert.equal(env.ANTHROPIC_BASE_URL, "https://api.deepseek.com/anthropic");
@@ -311,11 +143,11 @@ test("Eval Intelligence保持Claude Agent SDK开放式调查，同时严格只�
   assert.match(source, /不能改变正式分数/);
 });
 
-test("Candidate Adapter 4.0强制真实考生指纹、原始证据回指和禁止代考", () => {
-  const source = readFileSync(new URL("../src/candidate-adapter-v4.mjs", import.meta.url), "utf8");
+test("Candidate Adapter 5.0强制真实考生指纹、原始证据回指和禁止代考", () => {
+  const source = readFileSync(new URL("../src/candidate-adapter-v5.mjs", import.meta.url), "utf8");
   assert.match(source, /candidate discovery drift/);
   assert.match(source, /each normalized event must point to preserved raw evidence/);
-  assert.match(source, /Candidate Adapter 4\.0 refuses test doubles/);
+  assert.match(source, /Candidate Adapter 5\.0 refuses test doubles/);
   assert.match(source, /invoke-candidate-internal-tools/);
 });
 

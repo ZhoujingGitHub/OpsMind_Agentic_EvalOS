@@ -12,6 +12,8 @@
     "security:m31": "node scripts/check-m31-security.mjs",
     "capabilities:m31": "node scripts/check-m31-capability-protection.mjs",
     "freeze:sources:m31": "node scripts/freeze-m31-source-snapshots.mjs",
+    "release:check": "node scripts/candidate-release-registration.mjs --check",
+    "release:prepare": "node scripts/candidate-release-registration.mjs --prepare",
     "console:lint": "npm --prefix apps/console run lint",
     "console:build": "npm --prefix apps/console run build",
     "console:test": "npm --prefix apps/console test",

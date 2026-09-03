@@ -1,11 +1,22 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
+import { gradeObservableOutcome } from "../../kernel/src/grader.mjs";
 import { assertCandidateResourceScope, candidateManagedResourceScope,
   createAgentHarnessProductConnectorV5, createLangGraphProductConnectorV5 } from "../src/index.mjs";
 
 const ATTESTATION = Object.freeze({ source_revision: "abcdef1234567890",
   artifact_digest: `sha256:${"a".repeat(64)}` });
+
+test("当前连接器拒绝公网明文、缺失凭据与复用身份", () => {
+  for (const create of [createAgentHarnessProductConnectorV5, createLangGraphProductConnectorV5]) {
+    const options = { origin: "https://example.com", token: "submit", approvalToken: "approve",
+      adminToken: "admin", tenantId: "tenant-test", attestation: ATTESTATION };
+    assert.throws(() => create({ ...options, origin: "http://example.com" }), /HTTPS/);
+    assert.throws(() => create({ ...options, token: "" }), /token/);
+    assert.throws(() => create({ ...options, approvalToken: "submit" }), /separate identities/);
+  }
+});
 
 const OPEN_RESOURCE_POLICY = Object.freeze({ contract_version: "opsmind-open-resource/1.0",
   mode: "open_with_safety_fuses", limits_are_safety_fuses_only: true, usage_affects_score: false,
@@ -184,7 +195,10 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
         recommendation_delivery: { status: "published", self_reviewed: true, notes: "已完成自审" },
         delivery_receipt: { delivery_id: "delivery-ah", status: "accepted" } },
       evidence: [{ evidence_id: "evidence:ah", source_ref: "mcp:probe_sctp_association",
-        raw_value_json: { records: [{ evidence_refs: ["probe:sctp-38412-refused"], accepted: false }] } }] }),
+        raw_value_json: { evidence_ref: "protocol-lab:receipt-1", id: "not-a-report-citation",
+          records: [{ evidence_refs: ["probe:sctp-38412-refused"], accepted: false }] } },
+        { evidence_id: "evidence:uncited", raw_value_json: { id: "artifact-uncited",
+          records: [{ evidence_refs: ["process:uncited-state"] }] } }] }),
     "GET /v2/investigations/run-ah/execution-log": async ({ request }) => {
       const query = new URL(request.url, "http://fixture").searchParams;
       assert.equal(query.get("limit"), "1000");
@@ -272,6 +286,8 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   assert.equal(observation.evaluation_binding.complete, true);
   assert.equal(observation.outcome.root_cause, "ue-route-missing");
   assert.equal(observation.outcome.evidence_gate_passed, true);
+  assert.deepEqual(observation.outcome.evidence_refs, ["evidence:ah"]);
+  assert.deepEqual(observation.outcome.recommendation_evaluation.report_evidence_ids, ["evidence:ah"]);
   assert.equal(observation.outcome.recommendation_evaluation.readonly, true);
   assert.equal(observation.outcome.recommendation_evaluation.native.recommendations[0].recommendation_id, "rec-route");
   assert.equal(observation.outcome.recommendation_evaluation.source_ref,
@@ -288,6 +304,21 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   assert.deepEqual(frozenEvidence.payload.raw_value_json.records[0].evidence_refs,
     ["probe:sctp-38412-refused"]);
   assert.match(frozenEvidence.payload_digest, /^sha256:[a-f0-9]{64}$/);
+  assert.ok(observation.raw_events.some((item) => item.payload.evidence_id === "evidence:uncited"));
+  const gradingCase = { ground_truth: { root_causes: ["ue-route-missing"],
+    required_evidence: ["probe:sctp-38412-refused"] }, tools: {
+    probe: { result: { evidence_refs: ["probe:sctp-38412-refused", "process:uncited-state"] } } } };
+  const trace = observation.raw_events.map((item) => ({ name: "candidate.raw_event", payload: item }));
+  const grade = gradeObservableOutcome(gradingCase, observation.outcome, trace);
+  assert.equal(grade.pass, true);
+  assert.equal(grade.evidencePrecision, 1);
+  assert.equal(grade.preservedEvidenceCount, 2);
+  assert.equal(gradeObservableOutcome(gradingCase,
+    { ...observation.outcome, evidence_refs: [...observation.outcome.evidence_refs, "unknown-card"] }, trace).pass, false);
+  assert.equal(gradeObservableOutcome({ ...gradingCase, ground_truth: { ...gradingCase.ground_truth,
+    required_evidence: ["process:uncited-state"] } }, observation.outcome, trace).pass, false);
+  const withoutLabels = JSON.parse(JSON.stringify(trace).replaceAll("probe:sctp-38412-refused", "no-standard-label"));
+  assert.equal(gradeObservableOutcome(gradingCase, observation.outcome, withoutLabels).pass, false);
   budgetAckOverride = { ...runContext.budget, max_tool_calls: runContext.budget.max_tool_calls + 1 };
   const drifted = await connector.observe({ runRef: started.run_ref, cursor: 0, executionContract: contract });
   assert.equal(drifted.evaluation_binding.binding_strength, "UNBOUND");
@@ -391,7 +422,10 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
       contract_version: "opsmind-controlled-remediation:1.2", trial_id: runContext?.trial_id,
       run_context_digest: runContext?.context_digest, run_contract_version: runContext?.contract_version,
       evaluation_budget: runContext?.budget, task_result: { outcome: "root_cause_confirmed", root_cause: "ue-route-missing",
-        root_cause_confidence: 0.85, summary: "确认UE路由缺失", recommendations: [{
+        root_cause_confidence: 0.85, summary: "确认UE路由缺失",
+        report_evidence: { contract_version: "opsmind-report-evidence:1.0", valid: true, status: "published",
+          evidence_ids: ["evidence:lg"], hypotheses: [{ hypothesis_id: "hyp-route",
+            supporting_evidence_ids: ["evidence:lg"], counter_evidence_ids: [] }] }, recommendations: [{
           recommendation_id: "rec-route", kind: "remediation", target_hypothesis_id: "hyp-route",
           advice: "经授权后恢复当前 Trial 的路由并验证。", evidence_ids: ["evidence:lg"],
           prerequisites: ["确认当前 Trial 动作授权"], uncertainty: "上游触发者尚未确认",
@@ -405,7 +439,9 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
       state_schema_version: "graph-state:5.0.0", mcp_contract_version: "observation+protocol-lab:3.2.0",
       knowledge_version: "knowledge:5.0.0", model_version: "deepseek-v4-flash+deepseek-v4-pro",
       evidence_gate: { status: "confirmed", passed: true }, hypotheses: [{ hypothesis_id: "hyp-route",
-        cause: "ue-route-missing", status: "leading", confidence: 0.85 }], evidence: [{ id: "evidence:lg" }],
+        cause: "ue-route-missing", status: "supported", confidence: 0.85 }], evidence: [
+        { evidence_id: "evidence:lg", records: [{ evidence_refs: ["route:missing"] }] },
+        { evidence_id: "evidence:lg-uncited", records: [{ id: "protocol-lab:receipt-other" }] }],
       budget_usage: { input_tokens: 5000, output_tokens: 820, model_calls: 2, tool_calls: 6,
         result_bytes: 12345, cost_microunits: 200000 }, public_events: publicEvents, archive_reconciled: true,
       archive_artifacts: [{ uri: "oss://langgraph/archive-lg.json" }] }),
@@ -478,6 +514,13 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
   assert.equal(observation.outcome.root_cause, "ue-route-missing");
   assert.equal(observation.outcome.recommendation_evaluation.native.recommendations[0].recommendation_id, "rec-route");
   assert.equal(observation.outcome.recommendation_evaluation.source_ref, "langgraph:product-e2e:run-lg");
+  assert.deepEqual(observation.outcome.evidence_refs, ["evidence:lg"]);
+  const lgTrace = observation.raw_events.map((item) => ({ name: "candidate.raw_event", payload: item }));
+  const lgGrade = gradeObservableOutcome({ ground_truth: { root_causes: ["ue-route-missing"],
+    required_evidence: ["route:missing"] }, tools: { route: { result: { evidence_refs: ["route:missing"] } } } },
+  observation.outcome, lgTrace);
+  assert.equal(lgGrade.pass, true);
+  assert.equal(lgGrade.preservedEvidenceCount, 2);
   assert.equal(observation.candidate_usage.complete, true);
   assert.equal(observation.candidate_usage.by_model["deepseek-v4-flash"].input_tokens, 1000);
   assert.equal(observation.candidate_usage.by_model["deepseek-v4-pro"].output_tokens, 700);
