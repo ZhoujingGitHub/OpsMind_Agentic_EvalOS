@@ -821,6 +821,24 @@ function discovery(attestation, architecture, capability, runtime, health, candi
     usage_observability: { complete: usageComplete, policy: "reported_with_explicit_unknowns" } };
 }
 
+function publicTaskGoal(caseSpec) {
+  const task = caseSpec.visible.task_contract ?? {};
+  let goal = caseSpec.goal;
+  // Copy only the public task instructions; never serialize evaluation internals.
+  for (const instruction of [task.description, task.mode_instruction]) {
+    if (typeof instruction === "string" && instruction.trim() && !goal.includes(instruction.trim())) {
+      goal += "\n\n" + instruction.trim();
+    }
+  }
+  if (task.recommendation_required === true) {
+    goal += "\n\n请在最终报告中提供基于本次证据的建议，说明前置条件、不确定性和验证方法。";
+  }
+  if ([...goal].length > 4000) {
+    throw new Error("Candidate public task goal exceeds the 4000-character product limit");
+  }
+  return goal;
+}
+
 function agentHarnessSubmission(executionContract, nativeContract) {
   const context = candidateEvaluationContext(executionContract);
   const scope = executionContract.case.visible.scope ?? {};
@@ -848,7 +866,7 @@ function agentHarnessSubmission(executionContract, nativeContract) {
   const runtimeVersion = candidateRuntime?.versions?.service;
   if (!runtimeVersion) throw new Error("Agent+Harness public service version is required for native run context");
   const managedScope = candidateManagedResourceScope(executionContract);
-  return { goal: executionContract.case.goal, trigger_type: "natural_language",
+  return { goal: publicTaskGoal(executionContract.case), trigger_type: "natural_language",
     source_ref: `evalos:${executionContract.trial.id}:${context.context_digest.slice(-16)}`, priority: 70,
     scope_hint: { customer_id: scope.customer_id, service_id: scope.service_id, site_id: scope.site_id,
       namespace: managedScope.namespace, resource_refs: managedScope.resource_refs,
@@ -886,7 +904,7 @@ function langGraphSubmission(executionContract, nativeContract = null) {
     "knowledge_version", "model_version", "product_e2e_contract_version", "public_event_schema_version"]);
   const runtimeVersions = Object.fromEntries(Object.entries(executionContract.contestant.candidate_runtime?.versions ?? {})
     .filter(([name]) => allowedVersionNames.has(name)));
-  return { goal: executionContract.case.goal, trigger_type: "user", title: `EvalOS ${executionContract.trial.id}`,
+  return { goal: publicTaskGoal(executionContract.case), trigger_type: "user", title: `EvalOS ${executionContract.trial.id}`,
     recommendation_required: executionContract.case.visible.task_contract?.recommendation_required === true,
     resource_ids: scope.resource_ids ?? scope.entity_ids ?? [],
     service_ids: scope.service_ids ?? (scope.service_id ? [scope.service_id] : []),

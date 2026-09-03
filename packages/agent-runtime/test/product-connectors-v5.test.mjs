@@ -98,7 +98,10 @@ function executionContract(id, candidateRuntime) {
     contestant: { ref: id.includes("-ah-") ? "agent-harness-v2" : "langgraph-v1",
       candidate_runtime: candidateRuntime },
     case: { goal: "普通运维用户看到业务访问失败，请调查", visible: { operating_mode: "diagnosis_only",
-      task_contract: { recommendation_required: true }, time_window: "trial-relative",
+      task_contract: { recommendation_required: true,
+        description: "根据现场证据调查；证据不足或相互冲突时，必须停止且不得变更。",
+        mode_instruction: "本次只允许只读调查。",
+        private_fixture: "HIDDEN-TASK-ANSWER" }, time_window: "trial-relative",
       scope: { resource_ids: ["ue-1"], service_ids: ["mec-public-1"] } } } };
 }
 
@@ -269,6 +272,20 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   const started = await connector.start({ executionContract: contract });
   const submitted = fixture.requests.find((item) => item.method === "POST" &&
     item.url === "/v2/investigation-candidates").body;
+  assert.equal(submitted.goal, contract.case.goal + "\n\n" +
+    contract.case.visible.task_contract.description + "\n\n" +
+    contract.case.visible.task_contract.mode_instruction +
+    "\n\n请在最终报告中提供基于本次证据的建议，说明前置条件、不确定性和验证方法。");
+  for (const hidden of ["HIDDEN-CASE", "918273", "HIDDEN-TASK-ANSWER"]) {
+    assert.equal(JSON.stringify(submitted).includes(hidden), false);
+  }
+  const longGoal = structuredClone(contract);
+  longGoal.trial.id += "-long-goal";
+  longGoal.case.goal = "调查".repeat(2000);
+  const requestsBefore = fixture.requests.length;
+  await assert.rejects(connector.start({ executionContract: longGoal }),
+    /public task goal exceeds the 4000-character product limit/);
+  assert.equal(fixture.requests.length, requestsBefore);
   assert.equal(submitted.scope_hint.namespace, "ah-evalos-ah-1");
   assert.deepEqual(submitted.scope_hint.resource_refs, [{ identifier_domain: "opsmind-twin",
     namespace: "ah-evalos-ah-1", resource_type: "workload", resource_id: "ue-1" }]);
@@ -496,6 +513,20 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
   assert.equal(Object.hasOwn(runContext, "case_id"), false);
   const submittedCandidate = fixture.requests.find((item) => item.method === "POST" &&
     item.url === "/api/v1/candidates").body;
+  assert.equal(submittedCandidate.goal, contract.case.goal + "\n\n" +
+    contract.case.visible.task_contract.description + "\n\n" +
+    contract.case.visible.task_contract.mode_instruction +
+    "\n\n请在最终报告中提供基于本次证据的建议，说明前置条件、不确定性和验证方法。");
+  for (const hidden of ["HIDDEN-CASE", "918273", "HIDDEN-TASK-ANSWER"]) {
+    assert.equal(JSON.stringify(submittedCandidate).includes(hidden), false);
+  }
+  const longGoal = structuredClone(contract);
+  longGoal.trial.id += "-long-goal";
+  longGoal.case.goal = "调查".repeat(2000);
+  const requestsBefore = fixture.requests.length;
+  await assert.rejects(connector.start({ executionContract: longGoal }),
+    /public task goal exceeds the 4000-character product limit/);
+  assert.equal(fixture.requests.length, requestsBefore);
   assert.deepEqual(submittedCandidate.namespace_ids, ["lg-evalos-lg-1"]);
   assert.equal(Object.hasOwn(runContext, "seed"), false);
   assert.equal(submittedCandidate.recommendation_required, true);
