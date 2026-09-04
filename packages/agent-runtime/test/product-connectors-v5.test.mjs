@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { generateKeyPairSync } from "node:crypto";
+import { mkdtempSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { CandidateRelayBroker, EvalStore, EvaluationLedger } from "../../kernel/src/index.mjs";
+import { CANDIDATE_RELAY_PATHS } from "../../../services/control-api/src/app.mjs";
 import test from "node:test";
 import { gradeObservableOutcome } from "../../kernel/src/grader.mjs";
 import { assertCandidateResourceScope, candidateManagedResourceScope,
@@ -88,6 +94,40 @@ async function fixtureServer(routes) {
     close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())) };
 }
 
+// Exercise the real broker and production path policy; only the remote product is a fixture.
+function relayedFixture(t, origin) {
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-ah-contract-"));
+  const migrationRoot = path.resolve(import.meta.dirname, "../../../infra/migrations/sqlite");
+  const store = new EvalStore({ databasePath: path.join(root, "control.sqlite"), runtimeRoot: root,
+    migrationPath: path.join(migrationRoot, "001_m15.sql"),
+    migrationPaths: ["002_m25_workbench.sql", "003_m26_run_control.sql", "004_m31_candidate_relay.sql"]
+      .map((name) => path.join(migrationRoot, name)) });
+  t.after(() => store.close());
+  const { publicKey } = generateKeyPairSync("ed25519");
+  const ref = "agent-harness-v2";
+  const broker = new CandidateRelayBroker({ store, ledger: new EvaluationLedger(store), pollIntervalMs: 5,
+    candidates: { [ref]: { public_key_pem: publicKey.export({ type: "spki", format: "pem" }),
+      allowed_paths: CANDIDATE_RELAY_PATHS[ref] } } });
+  const tokens = { candidate_submitter: "submitter", approval_oracle: "approver", mode_administrator: "administrator" };
+  const transport = broker.transport(ref);
+  return { broker, transport: { ...transport, async request(role, pathname, options) {
+    const pending = transport.request(role, pathname, options);
+    const claimed = broker.claim(ref, { worker_id: "fixture-worker" });
+    if (!claimed) return pending; // Includes requests rejected before queuing.
+    try {
+      const response = await fetch(new URL(claimed.pathname, origin), { method: claimed.method,
+        headers: { ...claimed.headers, "content-type": "application/json",
+          authorization: "Bearer " + tokens[claimed.credential_role] },
+        body: claimed.body === null ? undefined : JSON.stringify(claimed.body) });
+      broker.complete(ref, claimed.id, { worker_id: "fixture-worker",
+        response_status: response.status, response_body: await response.json() });
+    } catch (error) {
+      broker.complete(ref, claimed.id, { worker_id: "fixture-worker", error: error.message });
+    }
+    return pending;
+  } } };
+}
+
 function executionContract(id, candidateRuntime) {
   return { execution_mode: "controlled_simulation", evaluation_lane: "PRODUCT_RELIABILITY",
     model: { provider: "deepseek", id: "deepseek-v4-flash", sdk: "@anthropic-ai/claude-agent-sdk" },
@@ -121,6 +161,7 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   let candidateObservationState = AGENT_HARNESS_CANDIDATE_OBSERVATION;
   let sourceRef = null;
   let actionDetail = null;
+  let evaluationPatch = {};
   let repairDeliveryContract = "opsmind-repair-delivery/1.0";
   let runContext = null;
   let budgetAckOverride = null;
@@ -222,7 +263,15 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
       return { next_sequence: items.at(-1).sequence, items };
     },
     "GET /v2/actions": async () => ({ items: actionDetail ? [actionDetail] : [] }),
-    "GET /v2/actions/action-ah": async () => actionDetail,
+    "GET /v2/evaluation/actions/action-ah": async () => ({
+      contract_version: "1.0", action_id: actionDetail.action_id, tenant_id: actionDetail.tenant_id,
+      trial_id: actionDetail.trial_id, investigation_id: actionDetail.investigation_id,
+      operating_mode: "human_collaboration",
+      proposal: { action_type: "network.restore_policy", target_entity_id: actionDetail.target_entity_id,
+        parameters: {}, scope: actionDetail.scope_json, proposal_digest: actionDetail.proposal_digest },
+      environment_snapshot: actionDetail.environment_snapshot, policy_decision: { decision: "REQUIRE_HUMAN" },
+      public_events: actionDetail.events, final_status: actionDetail.status, ...evaluationPatch,
+    }),
     "POST /v2/actions/action-ah/approval": async ({ body }) => {
       assert.deepEqual(body, { decision: "approved", comment: "approved by fixture",
         proposal_digest: "a".repeat(64), snapshot_digest: "b".repeat(64), continue_execution: true });
@@ -237,8 +286,11 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
     "POST /v2/investigations/run-ah/protocol-lab/reset": async () => ({ ok: true, clean: true }),
   });
   t.after(fixture.close);
-  const connector = createAgentHarnessProductConnectorV5({ origin: fixture.origin, token: "submitter",
-    approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-ah", attestation: ATTESTATION });
+  const relay = relayedFixture(t, fixture.origin);
+  await assert.rejects(relay.broker.request("agent-harness-v2", "candidate_submitter",
+    "/v2/actions/action-ah"), /not allowlisted/);
+  const connector = createAgentHarnessProductConnectorV5({ requestTransport: relay.transport,
+    tenantId: "tenant-ah", attestation: ATTESTATION });
   const discovery = await connector.discover();
   candidateObservationState = { ...AGENT_HARNESS_CANDIDATE_OBSERVATION,
     binding_status: "blocked", external_dependency: "short_session_expired",
@@ -372,6 +424,18 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   assert.equal(waiting.approval_requests.length, 1);
   assert.equal(waiting.approval_requests[0].scope.tenant_id, "eval-tenant");
   assert.equal(waiting.approval_requests[0].source_scope.tenant_id, "tenant-ah");
+  assert.equal(waiting.approval_requests[0].proposal.action_type, "network.restore_policy");
+  assert.equal(waiting.approval_requests[0].proposal_digest, "a".repeat(64));
+  assert.ok(fixture.requests.some((row) => row.url === "/v2/evaluation/actions/action-ah"));
+  assert.equal(fixture.requests.some((row) => row.url === "/v2/actions/action-ah"), false);
+  for (const patch of [{ action_id: "another-action" }, { trial_id: "another-trial" },
+    { public_events: undefined }, { public_events: [{ action_id: "another-action" }] },
+    { proposal: { scope: {} } }]) {
+    evaluationPatch = patch;
+    await assert.rejects(connector.observe({ runRef: started.run_ref, cursor: 0,
+      executionContract: repairContract }), /binding mismatch|BINDING_MISMATCH|public events/);
+  }
+  evaluationPatch = {};
   assert.equal((await connector.probeRun({ runRef: started.run_ref })).terminal, false);
   await assert.rejects(connector.finalize({ runRef: started.run_ref }), /must remain isolated/);
   await connector.respondApproval({ request: waiting.approval_requests[0],

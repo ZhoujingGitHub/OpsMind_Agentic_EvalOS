@@ -22,7 +22,7 @@ import { ExternalProductTwinEnvironment, ProtocolTwinEnvironment, SshTwinClient,
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const ANALYSIS_BUDGET = Object.freeze({ wallclock_ms: 300000, cost_usd: 2, max_turns: 32, max_tool_calls: 24 });
 
-const CANDIDATE_RELAY_PATHS = Object.freeze({
+export const CANDIDATE_RELAY_PATHS = Object.freeze({
   "agent-harness-v2": [
     "^/health$", "^/v2/capabilities$", "^/v2/model-profile$",
     "^/v2/auth/me$", "^/v2/evaluation/controlled-remediation-contract$", "^/v2/investigation-runtime$",

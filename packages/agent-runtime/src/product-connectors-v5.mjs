@@ -1112,23 +1112,28 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
       const translated = translate(events, "agent-harness-product",
         (event, index) => `agent-harness:${event.sequence ?? Number(cursor) + index + 1}`,
         (event) => event.event_type ?? event.name ?? event.action);
-      const actionDetails = await Promise.all(actions.map((item) => api.request(`/v2/actions/${encodeURIComponent(item.action_id)}`)));
-      for (const item of actionDetails) {
-        if (item.tenant_id !== tenantId || item.investigation_id !== runRef || item.trial_id !== executionContract.trial.id) {
+      const actionDetails = await Promise.all(actions.map((item) =>
+        api.request("/v2/evaluation/actions/" + encodeURIComponent(item.action_id))));
+      for (const [index, item] of actionDetails.entries()) {
+        if (item.action_id !== actions[index].action_id || item.tenant_id !== tenantId ||
+            item.investigation_id !== runRef || item.trial_id !== executionContract.trial.id) {
           throw new Error("Action detail binding mismatch");
         }
+        if (!Array.isArray(item.public_events)) throw new Error("Action public events are missing");
+        for (const event of item.public_events) {
+          if (event.tenant_id !== tenantId || event.investigation_id !== runRef ||
+              event.trial_id !== executionContract.trial.id || event.action_id !== item.action_id) {
+            throw new Error("Action event binding mismatch");
+          }
+        }
       }
-      const actionEvents = actionDetails.flatMap((item) => item.events ?? []);
-      for (const event of actionEvents) {
-        if (event.tenant_id !== tenantId || event.investigation_id !== runRef || event.trial_id !== executionContract.trial.id ||
-            !actions.some((item) => item.action_id === event.action_id)) throw new Error("Action event binding mismatch");
-      }
+      const actionEvents = actionDetails.flatMap((item) => item.public_events);
       const actionTrace = translate(actionEvents, "agent-harness-product",
         (event) => `agent-harness:action-event:${event.action_id}:${event.event_id}`,
         (event) => event.event_type);
       translated.raw.push(...actionTrace.raw);
       translated.normalized.push(...actionTrace.normalized);
-      const approvalRequests = actionDetails.filter((item) => item.status === "human_required")
+      const approvalRequests = actionDetails.filter((item) => item.final_status === "human_required")
         .map((item) => boundActionApproval(item, { tenantId, evaluationTenant: executionContract.case.visible.tenant,
           trialId: executionContract.trial.id, runRef, resourceScope: candidateManagedResourceScope(executionContract) }));
       const fallbackRequest = runs.has(runRef) ? null : agentHarnessSubmission(executionContract, latestNativeContract);

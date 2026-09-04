@@ -36,15 +36,27 @@ test("approval maps identities only after verifying exact product ownership and 
   const options = { tenantId: "product-tenant", evaluationTenant: "eval-tenant", trialId: "eval-trial", runRef: "inv-a",
     resourceScope: { namespace: "ns-a", resource_refs: [ref] } };
   const item = { action_id: "action-a", tenant_id: "product-tenant", trial_id: "eval-trial", investigation_id: "inv-a",
-    target_entity_id: "exact-ref", proposal_digest: "a".repeat(64), environment_snapshot: { snapshot_digest: "b".repeat(64) },
-    scope: { tenant_id: "product-tenant", entity_ids: ["exact-ref"], resource_ref: ref } };
+    proposal: { action_type: "network.restore_policy", target_entity_id: "exact-ref", proposal_digest: "a".repeat(64),
+      scope: { tenant_id: "product-tenant", entity_ids: ["exact-ref"], resource_ref: ref } },
+    environment_snapshot: { snapshot_digest: "b".repeat(64), shared_resource: false } };
   const request = boundActionApproval(item, options);
   assert.equal(request.scope.tenant_id, "eval-tenant");
   assert.equal(request.source_scope.tenant_id, "product-tenant");
-  assert.deepEqual(item.scope, request.source_scope);
+  assert.deepEqual(item.proposal, request.proposal);
+  assert.deepEqual(item.proposal.scope, request.source_scope);
+  assert.equal(request.scope.shared_resource, false);
+  assert.equal(boundActionApproval({ ...item,
+    environment_snapshot: { ...item.environment_snapshot, shared_resource: true } }, options).scope.shared_resource, true);
   for (const patch of [{ tenant_id: "foreign" }, { trial_id: "foreign" }, { investigation_id: "foreign" },
-    { target_entity_id: "foreign" }, { environment_snapshot: {} }, { proposal_digest: "short" },
-    { scope: { ...item.scope, resource_ref: { ...ref, namespace: "foreign" } } }]) {
+    { environment_snapshot: {} }, { proposal: undefined },
+    { proposal: { ...item.proposal, target_entity_id: "foreign" } },
+    { proposal: { ...item.proposal, proposal_digest: "short" } },
+    { proposal: { ...item.proposal, scope: { ...item.proposal.scope, tenant_id: "foreign" } } },
+    { proposal: { ...item.proposal, scope: { ...item.proposal.scope,
+      resource_ref: { ...ref, namespace: "foreign" } } } }]) {
     assert.throws(() => boundActionApproval({ ...item, ...patch }, options), /BINDING_MISMATCH/);
   }
+  // Internal action rows must not silently act as the public evaluation contract.
+  const { proposal, ...identity } = item;
+  assert.throws(() => boundActionApproval({ ...identity, ...proposal }, options), /BINDING_MISMATCH/);
 });

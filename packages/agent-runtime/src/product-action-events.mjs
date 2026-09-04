@@ -26,22 +26,24 @@ export function hasPendingProductActions(actions) {
 }
 
 export function boundActionApproval(item, { tenantId, evaluationTenant, trialId, runRef, resourceScope }) {
-  const scope = item.scope_json ?? item.scope;
+  const proposal = item.proposal;
+  const scope = proposal?.scope;
   const ref = scope?.resource_ref;
   const keys = ["identifier_domain", "namespace", "resource_type", "resource_id"];
   if (!evaluationTenant || item.tenant_id !== tenantId || item.trial_id !== trialId ||
       item.investigation_id !== runRef || scope?.tenant_id !== tenantId ||
       ref?.namespace !== resourceScope.namespace || Object.keys(ref ?? {}).length !== keys.length ||
       !resourceScope.resource_refs.some((allowed) => keys.every((key) => allowed[key] === ref?.[key])) ||
-      !Array.isArray(scope.entity_ids) || scope.entity_ids.length !== 1 || scope.entity_ids[0] !== item.target_entity_id ||
-      !/^[0-9a-f]{64}$/.test(item.proposal_digest ?? "") ||
+      !Array.isArray(scope.entity_ids) || scope.entity_ids.length !== 1 || scope.entity_ids[0] !== proposal?.target_entity_id ||
+      !/^[0-9a-f]{64}$/.test(proposal?.proposal_digest ?? "") ||
       !/^[0-9a-f]{64}$/.test(item.environment_snapshot?.snapshot_digest ?? "")) {
     throw new Error("APPROVAL_RESOURCE_BINDING_MISMATCH");
   }
-  return { request_ref: `agent-harness-approval:${item.action_id}:${item.proposal_digest}`,
-    action_id: item.action_id, proposal: item, proposal_digest: item.proposal_digest,
+  return { request_ref: `agent-harness-approval:${item.action_id}:${proposal.proposal_digest}`,
+    action_id: item.action_id, proposal, proposal_digest: proposal.proposal_digest,
     environment_snapshot_digest: item.environment_snapshot.snapshot_digest,
-    source_scope: structuredClone(scope), scope: { ...scope, tenant_id: evaluationTenant },
+    source_scope: structuredClone(scope), scope: { ...scope, tenant_id: evaluationTenant,
+      shared_resource: scope.shared_resource === true || item.environment_snapshot.shared_resource === true },
     identity_binding: { contract_version: "opsmind-approval-scope/1.0", product_tenant: tenantId,
       evaluation_tenant: evaluationTenant, trial_id: trialId, investigation_id: runRef, resource_ref: { ...ref } },
     policy_decision: item.policy_decision };
