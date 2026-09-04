@@ -8,5 +8,5 @@ AH 产品客户端、Claude Agent SDK 单 Agent、MCP 和自主调查循环仍�
 此次源码搬迁与随后的网络行为、发布入口改造分提交。仅此搬迁提交不是已经完成的发布版本。
 AH 原 install-protocol-lab.sh 和 install_harness_protocol_lab.ps1 随对应 AH 迁移提交退役。
 最终交付使用本目录 build-controller-release.py / install-controller.sh 管理完整实验室组件与两代回退；
-安装和身份配置由该唯一入口负责，不能重新部署退役脚本或保留第二份生效实现。
+版本安装由该唯一入口负责；现有身份和权限继续由主机安全配置管理，升级不创建账号或改权限。不能重新部署退役脚本或保留第二份生效实现。
 现有身份、绑定秘密、密钥、运行证据不随源码迁移，不写入本清单或 Git。

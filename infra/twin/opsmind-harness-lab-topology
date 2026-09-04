@@ -5,9 +5,19 @@ STATE_ROOT=/run/opsmind-harness-lab
 HTTP_PID="$STATE_ROOT/http.pid"
 MQTT_PID="$STATE_ROOT/mqtt.pid"
 DNS_PID="$STATE_ROOT/dns.pid"
-MEC_IP=10.47.0.80
-DNS_IP=10.47.0.53
-SERVICE_NET=10.47.0.0/24
+command=${1:-}
+scenario=${2:-}
+network=$(python3 - <<'PY'
+import ipaddress, json
+from pathlib import Path
+n = json.loads(Path("/etc/opsmind-twin/stack.manifest.json").read_text())["harness_network"]
+print(ipaddress.ip_address(n["mec_address"]), ipaddress.ip_address(n["dns_address"]),
+      ipaddress.ip_network(n["service_network"]), ipaddress.ip_network(n["ue_network"]))
+PY
+)
+read -r MEC_IP DNS_IP SERVICE_NET UE_NET <<EOF
+$network
+EOF
 
 stop_pid() {
   path="$1"
@@ -22,26 +32,27 @@ delete_rule() {
   while iptables -C "$@" >/dev/null 2>&1; do iptables -D "$@"; done
 }
 
-restore_base_route() {
-  if ip link show opsminddn0 >/dev/null 2>&1; then
-    ip route replace "$SERVICE_NET" dev opsminddn0 src 10.47.0.1
-  else
-    ip route del "$SERVICE_NET" 2>/dev/null || true
-  fi
-}
-
 reset_topology() {
   stop_pid "$HTTP_PID"
   stop_pid "$MQTT_PID"
   stop_pid "$DNS_PID"
-  ip route del "$SERVICE_NET" 2>/dev/null || true
+  ip route del "$SERVICE_NET" dev ah-host-a 2>/dev/null || true
+  # Remove the former erroneous fallback only when its exact owner/interface matches.
+  ip route del "$SERVICE_NET" dev opsminddn0 2>/dev/null || true
+  delete_rule -t nat POSTROUTING -s "$UE_NET" -d "$SERVICE_NET" -o ah-host-a -j ACCEPT
   delete_rule FORWARD -i ogstun -o ah-host-a -j ACCEPT
   delete_rule FORWARD -i ah-host-a -o ogstun -j ACCEPT
   for ns in opsmind-ah-mec opsmind-ah-c opsmind-ah-b opsmind-ah-a; do
     ip netns del "$ns" 2>/dev/null || true
   done
   ip link del ah-host-a 2>/dev/null || true
-  restore_base_route
+  # Check actual cleanup before the owning controller can release its lease.
+  iptables -t nat -S POSTROUTING >/dev/null
+  for ns in opsmind-ah-mec opsmind-ah-c opsmind-ah-b opsmind-ah-a; do
+    if ip netns list | cut -d' ' -f1 | grep -qx "$ns"; then return 1; fi
+  done
+  if ip link show ah-host-a >/dev/null 2>&1; then return 1; fi
+  if iptables -t nat -C POSTROUTING -s "$UE_NET" -d "$SERVICE_NET" -o ah-host-a -j ACCEPT >/dev/null 2>&1; then return 1; fi
 }
 
 up_all() {
@@ -87,22 +98,22 @@ up_all() {
   ip -n opsmind-ah-a route add "$SERVICE_NET" via 10.61.0.6 dev ah-a-b
   ip -n opsmind-ah-b route add "$SERVICE_NET" via 10.61.0.10 dev ah-b-c
   ip -n opsmind-ah-c route add "$SERVICE_NET" via 10.61.0.14 dev ah-c-mec
-  ip -n opsmind-ah-mec route add 10.45.0.0/16 via 10.61.0.13 dev ah-mec-c
-  ip -n opsmind-ah-c route add 10.45.0.0/16 via 10.61.0.9 dev ah-c-b
-  ip -n opsmind-ah-b route add 10.45.0.0/16 via 10.61.0.5 dev ah-b-a
-  ip -n opsmind-ah-a route add 10.45.0.0/16 via 10.61.0.1 dev ah-a-host
+  ip -n opsmind-ah-mec route add "$UE_NET" via 10.61.0.13 dev ah-mec-c
+  ip -n opsmind-ah-c route add "$UE_NET" via 10.61.0.9 dev ah-c-b
+  ip -n opsmind-ah-b route add "$UE_NET" via 10.61.0.5 dev ah-b-a
+  ip -n opsmind-ah-a route add "$UE_NET" via 10.61.0.1 dev ah-a-host
   ip route replace "$SERVICE_NET" via 10.61.0.2 dev ah-host-a
 
-  iptables -C FORWARD -i ogstun -o ah-host-a -j ACCEPT >/dev/null 2>&1 || \
-    iptables -I FORWARD 1 -i ogstun -o ah-host-a -j ACCEPT
-  iptables -C FORWARD -i ah-host-a -o ogstun -j ACCEPT >/dev/null 2>&1 || \
-    iptables -I FORWARD 1 -i ah-host-a -o ogstun -j ACCEPT
+  # Preserve UE source addresses only on the dedicated MEC path.
+  # Filter-table fault gates still run before this NAT-table exception.
+  iptables -t nat -I POSTROUTING 1 -s "$UE_NET" -d "$SERVICE_NET" -o ah-host-a -j ACCEPT
+
 }
 
 start_services() {
   mkdir -p "$STATE_ROOT"
   ip netns exec opsmind-ah-mec python3 /usr/local/libexec/opsmind-harness-mec-http.py \
-    >>/var/log/opsmind-harness-mec-http.log 2>&1 &
+    >>/var/log/opsmind-harness-mec-http-process.log 2>&1 &
   echo $! >"$HTTP_PID"
   ip netns exec opsmind-ah-mec mosquitto -c /etc/opsmind-harness-lab/mosquitto.conf \
     >>/var/log/opsmind-harness-mec-mqtt.log 2>&1 &
@@ -126,10 +137,8 @@ status() {
     "$ready" "$route_present" "$SERVICE_NET" "$MEC_IP" "$DNS_IP"
 }
 
-command=${1:-}
 case "$command" in
   prepare)
-    scenario=${2:-}
     reset_topology
     up_all
     start_services

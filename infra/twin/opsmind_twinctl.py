@@ -395,6 +395,11 @@ def ensure_forwarding() -> None:
         run(["iptables", "-N", chain], check=True)
     while run(["iptables", "-C", "FORWARD", "-j", chain]).returncode == 0:
         run(["iptables", "-D", "FORWARD", "-j", chain], check=True)
+    fault_chain = "OPSMIND_TWIN_FWD"
+    if run(["iptables", "-L", fault_chain, "-n"]).returncode != 0:
+        run(["iptables", "-N", fault_chain], check=True)
+    delete_rule(["FORWARD", "-j", fault_chain])
+    run(["iptables", "-I", "FORWARD", "1", "-j", fault_chain], check=True)
     run(["iptables", "-I", "FORWARD", "2", "-j", chain], check=True)
     run(["iptables", "-F", chain], check=True)
     run(["iptables", "-A", chain, "-s", "10.45.0.0/16", "-j", "ACCEPT"], check=True)
@@ -444,8 +449,9 @@ def ensure_fault_chains() -> None:
         prefix = ["iptables"] if table == "filter" else ["iptables", "-t", table]
         if run(prefix + ["-L", chain, "-n"]).returncode != 0:
             run(prefix + ["-N", chain], check=True)
-        if run(prefix + ["-C", parent, "-j", chain]).returncode != 0:
-            run(prefix + ["-I", parent, "1", "-j", chain], check=True)
+        while run(prefix + ["-C", parent, "-j", chain]).returncode == 0:
+            run(prefix + ["-D", parent, "-j", chain], check=True)
+        run(prefix + ["-I", parent, "1", "-j", chain], check=True)
         run(prefix + ["-F", chain], check=True)
 
 

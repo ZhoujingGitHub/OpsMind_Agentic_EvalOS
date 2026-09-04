@@ -22,7 +22,7 @@ TWIN_ROOT = Path(__file__).resolve().parent
 REPOSITORY_ROOT = TWIN_ROOT.parents[1]
 DEPLOY_ROOT = REPOSITORY_ROOT / ".deploy" / "twin-controller"
 CONTRACT = "opsmind-twin-controller-release/1.0"
-RELEASE_FILES = (
+BASE_RELEASE_FILES = (
     "install-controller.sh",
     "opsmind_twinctl.py",
     "opsmind_eval_manager.py",
@@ -33,6 +33,13 @@ RELEASE_FILES = (
     "config/gnb.yaml",
     "config/ue.yaml",
 )
+
+HARNESS_RELEASE_FILES = (
+    "opsmind_harness_labctl.py", "opsmind-harness-lab-topology",
+    "opsmind-harness-ssh-shim", "opsmind-harness-mec-http.py",
+    "harness-source-lineage.json",
+)
+RELEASE_FILES = BASE_RELEASE_FILES + HARNESS_RELEASE_FILES + ("harness_probes.py",)
 
 
 def git(*arguments: str) -> str:
@@ -57,28 +64,42 @@ def canonical_digest(value: object) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline-ref", help="accepted/prod Twin tag for the first-registration recovery archive only")
+    parser.add_argument("--adoption-ref", help="exact remote migration commit for byte-identical AH adoption")
     arguments = parser.parse_args(argv)
+    if arguments.baseline_ref and arguments.adoption_ref:
+        raise RuntimeError("choose only one recovery source")
     source_ref = "HEAD"
+    release_files = RELEASE_FILES
+    if arguments.adoption_ref:
+        ref = arguments.adoption_ref
+        if len(ref) != 40 or any(c not in "0123456789abcdef" for c in ref):
+            raise RuntimeError("adoption requires an exact migration commit")
+        source_ref = ref
+        release_files = BASE_RELEASE_FILES + HARNESS_RELEASE_FILES
     if arguments.baseline_ref:
         tag = arguments.baseline_ref
         if not tag.startswith(("accepted-twin-controller-", "prod-twin-")) or any(word in tag for word in ("abandoned", "temporary")):
             raise RuntimeError("baseline archive requires a readable accepted/prod Twin tag")
         source_ref = "refs/tags/" + tag
+        release_files = BASE_RELEASE_FILES
     source_revision = git("rev-parse", "--verify", source_ref + "^{commit}")
     if len(source_revision) != 40 or any(character not in "0123456789abcdef" for character in source_revision):
         raise RuntimeError("controller release requires a full Git revision")
     if git("status", "--porcelain", "--untracked-files=no"):
         raise RuntimeError("controller release refuses uncommitted tracked changes")
-    if arguments.baseline_ref:
+    if arguments.baseline_ref or arguments.adoption_ref:
         git("merge-base", "--is-ancestor", source_revision, "HEAD")
+    if arguments.adoption_ref and not git("branch", "-r", "--contains", source_revision):
+        raise RuntimeError("adoption source is not on a remote branch")
 
     commit_time = git("show", "-s", "--format=%ct", source_revision)
     commit_day = git("show", "-s", "--format=%cd", "--date=format:%Y%m%d", source_revision)
 
-    with tempfile.TemporaryDirectory(prefix="opsmind-twin-controller-") as temporary:
+    DEPLOY_ROOT.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="staging-", dir=DEPLOY_ROOT) as temporary:
         payload_root = Path(temporary) / "controller"
         payload_root.mkdir(parents=True)
-        for relative in RELEASE_FILES:
+        for relative in release_files:
             payload = subprocess.check_output(
                 ["git", "show", f"{source_revision}:infra/twin/{relative}"], cwd=REPOSITORY_ROOT
             )
@@ -94,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
                 "bytes": (payload_root / relative).stat().st_size,
                 "sha256": sha256(payload_root / relative),
             }
-            for relative in RELEASE_FILES
+            for relative in release_files
         ]
         inventory.sort(key=lambda item: item["path"])
         content_digest = f"sha256:{canonical_digest(inventory)}"
@@ -107,13 +128,13 @@ def main(argv: list[str] | None = None) -> int:
             "component_manifest_digest": component_manifest_digest,
             "built_from_commit_time": int(commit_time),
             "baseline_archive": arguments.baseline_ref is not None,
+            "adoption_archive": arguments.adoption_ref is not None,
             "files": inventory,
         }
         (payload_root / "RELEASE.json").write_text(
             json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n"
         )
 
-        DEPLOY_ROOT.mkdir(parents=True, exist_ok=True)
         archive = DEPLOY_ROOT / f"{release_id}.tar.gz"
         with archive.open("wb") as raw_stream:
             with gzip.GzipFile(filename="", mode="wb", fileobj=raw_stream, mtime=int(commit_time)) as gzip_stream:

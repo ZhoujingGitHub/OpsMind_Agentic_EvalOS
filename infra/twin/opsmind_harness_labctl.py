@@ -25,6 +25,10 @@ from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 
+# Resolve the immutable release directory when invoked via the fixed symlink.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import harness_probes
+
 BASE = Path("/usr/local/sbin/opsmind-twinctl")
 BASE_MODULE = Path("/usr/local/sbin/opsmind-twinctl")
 TOPOLOGY = Path("/usr/local/sbin/opsmind-harness-lab-topology")
@@ -273,6 +277,12 @@ def validate_request(request: dict) -> None:
             raise PermissionError("active Trial belongs to another tenant or investigation")
         if operation != "snapshot" and not isinstance(claimed, dict):
             raise PermissionError("active Trial must be bound by a signed snapshot first")
+    if request.get("purpose") is not None:
+        if operation != "snapshot" or request.get("identity_role") != "verifier":
+            raise PermissionError("verification purpose requires the verifier identity")
+        if request["purpose"] not in {"pre_action_snapshot", "post_action_verification",
+                                     "post_rollback_verification"}:
+            raise ValueError("invalid verification purpose")
     if operation == "observe" and request.get("capability") not in CAPABILITIES:
         raise ValueError("unsupported diagnostic capability")
     if operation in {"act", "status"} and not ID_RE.fullmatch(
@@ -296,15 +306,20 @@ def prepare(request: dict) -> dict:
     )
     if not base.get("ok"):
         return base
-    topology = run([str(TOPOLOGY), "prepare", str(request["scenario_id"])], timeout=90)
-    if topology.returncode != 0:
-        base_call({"operation": "reset", "trial_id": request["trial_id"]})
-        return error("prepare", "MEC_TOPOLOGY_FAILED", (topology.stdout or "")[-400:])
-    topology_view = topology_status()
     slot_lease_id = str(base.get("lease_id") or "")
     if not slot_lease_id:
         base_call({"operation": "reset", "trial_id": request["trial_id"]})
         return error("prepare", "PHYSICAL_LEASE_MISSING", "base Twin did not issue the physical lease")
+    try:
+        topology = run([str(TOPOLOGY), "prepare", str(request["scenario_id"])], timeout=90)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        cleanup = reset(request)
+        return {**error("prepare", "MEC_TOPOLOGY_FAILED", str(exc)), "cleanup": cleanup}
+    if topology.returncode != 0:
+        cleanup = reset(request)
+        return {**error("prepare", "MEC_TOPOLOGY_FAILED", (topology.stdout or "")[-400:]),
+                "cleanup": cleanup}
+    topology_view = topology_status()
     clear_active_binding(str(request["trial_id"]))
     fingerprint = digest(
         {
@@ -335,12 +350,12 @@ def observe(request: dict) -> dict:
     parameters = dict(request.get("parameters") or {})
     evidence_refs: list[str] = []
     records = {
-        "ip_reachability": lambda: probe_ip(parameters),
-        "network_path": lambda: trace_path(parameters),
-        "tcp_port": lambda: probe_tcp(parameters),
+        "ip_reachability": lambda: [harness_probes.probe("ip", parameters, resource_scope)],
+        "network_path": lambda: [harness_probes.probe("trace", parameters, resource_scope)],
+        "tcp_port": lambda: [harness_probes.probe("tcp", parameters, resource_scope)],
         "sctp_association": probe_sctp,
-        "dns": lambda: probe_dns(parameters),
-        "http_service": lambda: probe_http(parameters),
+        "dns": lambda: [harness_probes.probe("dns", parameters, resource_scope)],
+        "http_service": lambda: [harness_probes.probe("http", parameters, resource_scope)],
         "routes": lambda: query_routes(parameters),
         "interfaces": lambda: query_interfaces(parameters),
         "sockets": lambda: query_sockets(parameters),
@@ -503,108 +518,10 @@ def query_resource_observation(
     return records, list(dict.fromkeys(matched_evidence_refs))
 
 
-def probe_ip(parameters: dict) -> list[dict]:
-    profile = parameters.get("target_profile", "mec")
-    target = {"mec": MEC_IP, "dns": DNS_IP, "core": "10.45.0.1"}.get(profile)
-    if target is None:
-        raise ValueError("invalid target_profile")
-    result = run(
-        ["ip", "netns", "exec", "opsmind-ue", "ping", "-c", "3", "-W", "2", target], timeout=12
-    )
-    return [
-        {
-            "target_profile": profile,
-            "reachable": result.returncode == 0,
-            "summary": last_lines(result.stdout, 4),
-        }
-    ]
-
-
-def trace_path(parameters: dict) -> list[dict]:
-    profile = parameters.get("target_profile", "mec")
-    target = {"mec": MEC_IP, "dns": DNS_IP}.get(profile)
-    if target is None:
-        raise ValueError("invalid target_profile")
-    result = run(
-        ["ip", "netns", "exec", "opsmind-ue", "tracepath", "-n", "-m", "10", target], timeout=15
-    )
-    hops = [line.strip()[:300] for line in (result.stdout or "").splitlines() if line.strip()]
-    return [
-        {
-            "target_profile": profile,
-            "complete": result.returncode == 0,
-            "hops": hops[:12],
-            "hop_count": len(hops),
-        }
-    ]
-
-
-def probe_tcp(parameters: dict) -> list[dict]:
-    profile = parameters.get("service_profile", "mec-http")
-    target = {
-        "mec-http": (MEC_IP, "8080"),
-        "mec-mqtt": (MEC_IP, "1883"),
-        "dns-tcp": (DNS_IP, "53"),
-    }.get(profile)
-    if target is None:
-        raise ValueError("invalid service_profile")
-    result = run(["ip", "netns", "exec", "opsmind-ue", "nc", "-z", "-w", "3", *target], timeout=8)
-    return [
-        {
-            "service_profile": profile,
-            "connected": result.returncode == 0,
-            "target": f"{target[0]}:{target[1]}",
-        }
-    ]
-
-
 def probe_sctp() -> list[dict]:
     result = run(["ss", "-H", "-n", "-A", "sctp"], timeout=8)
     lines = [line[:500] for line in (result.stdout or "").splitlines() if line.strip()]
     return [{"association_count": len(lines), "associations": lines[:30]}]
-
-
-def probe_dns(parameters: dict) -> list[dict]:
-    if parameters.get("query_profile", "mec-service") != "mec-service":
-        raise ValueError("invalid query_profile")
-    result = run(
-        ["ip", "netns", "exec", "opsmind-ue", "dig", "+short", f"@{DNS_IP}", "opsmind-mec.lab"],
-        timeout=8,
-    )
-    answers = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
-    return [
-        {
-            "query_profile": "mec-service",
-            "resolved": result.returncode == 0 and bool(answers),
-            "answers": answers[:10],
-        }
-    ]
-
-
-def probe_http(parameters: dict) -> list[dict]:
-    if parameters.get("service_profile", "mec-http") != "mec-http":
-        raise ValueError("invalid service_profile")
-    result = run(
-        [
-            "ip",
-            "netns",
-            "exec",
-            "opsmind-ue",
-            "curl",
-            "-fsS",
-            "--max-time",
-            "5",
-            f"http://{MEC_IP}:8080/health",
-        ],
-        timeout=8,
-    )
-    return [
-        {
-            "service_profile": "mec-http",
-            "healthy": result.returncode == 0,
-            "response": (result.stdout or "")[:1000],
-        }
-    ]
 
 
 def query_routes(parameters: dict) -> list[dict]:
@@ -837,20 +754,26 @@ def snapshot(request: dict) -> dict:
     if not response.get("ok"):
         return response
     value = dict(response.get("snapshot") or {})
-    recovery = dict(value.get("recovery") or {})
-    value.update(
-        topology=topology_status(),
-        task_success=recovery.get("task_success"),
-        healthy=recovery.get("task_success"),
-        production_network=False,
-    )
+    value.update(topology=topology_status(), production_network=False)
+    if request.get("purpose") in {"pre_action_snapshot", "post_action_verification",
+                                  "post_rollback_verification"}:
+        verification = harness_probes.business_verification(dict(value.get("resource_scope") or {}))
+        value["business_verification"] = verification
+        outcomes = (verification["passed"], dict(value.get("recovery") or {}).get("task_success"))
+        value["task_success"] = (False if any(result is False for result in outcomes) else
+                                 True if all(result is True for result in outcomes) else None)
+        value["healthy"] = value["task_success"]
     return {**response, "snapshot": value}
 
 
 def reset(request: dict) -> dict:
-    response = base_call({"operation": "reset", "trial_id": request["trial_id"]})
+    # Check ownership before touching MEC; release the base lease only after cleanup.
+    active_snapshot(str(request["trial_id"]))
     topology = run([str(TOPOLOGY), "reset"], timeout=60)
-    clean = bool(response.get("clean")) and topology.returncode == 0
+    if topology.returncode != 0:
+        return error("reset", "MEC_CLEANUP_FAILED", "MEC resources remain; physical lease was not released")
+    response = base_call({"operation": "reset", "trial_id": request["trial_id"]})
+    clean = bool(response.get("clean"))
     reset_hash = digest(
         {"base": response.get("reset_hash"), "topology_clean": topology.returncode == 0}
     )

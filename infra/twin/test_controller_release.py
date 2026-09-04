@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from contextlib import redirect_stdout
-import fcntl
+try:
+    import fcntl
+except ModuleNotFoundError:
+    fcntl = None
 import hashlib
 import importlib.util
 import io
@@ -20,6 +23,7 @@ SCRIPT = Path(__file__).with_name("install-controller.sh")
 SOURCE = SCRIPT.read_text().split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
 
 
+@unittest.skipIf(fcntl is None, "installer tests require Linux file locks and symbolic links")
 class ControllerReleaseTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="twin-release-test-")
@@ -54,10 +58,11 @@ class ControllerReleaseTest(unittest.TestCase):
             path.chmod(0o750 if name.endswith((".py", ".sh")) else 0o640)
         self.original = {p: m.snapshot(p) for p in m.LIVE_FILES.values()}
 
-    def make_archive(self, label, files=None, extra=None):
+    def make_archive(self, label, files=None, extra=None, names=None, payloads=None):
         m = self.module
         if files is None:
-            files = {name: (label + "-" + name + "\n").encode() for name in m.PAYLOAD_FILES}
+            files = {name: (payloads[name] if payloads is not None else (label + "-" + name + "\n").encode())
+                     for name in (m.PAYLOAD_FILES if names is None else names)}
             inventory = sorted([{"path": name, "bytes": len(body), "sha256": m.digest(body)}
                                 for name, body in files.items()], key=lambda item: item["path"])
             content = m.digest(m.canonical(inventory))
@@ -366,6 +371,122 @@ class ControllerReleaseTest(unittest.TestCase):
                 self.module.main([str(self.entry), "rollback"])
             self.assert_version(self.old, self.new)
 
+    def legacy_archives(self, registered=True):
+        m = self.module
+        old_files, _ = m.read_archive(*self.old)
+        legacy = self.make_archive("legacy", names=m.LEGACY_PAYLOAD_FILES, payloads=old_files)
+        adoption = self.make_archive("adoption", names=m.ADOPTION_PAYLOAD_FILES, payloads=old_files)
+        if registered:
+            target = m.preserve_release(*m.read_archive(*legacy))
+            m.atomic_replace(m.CURRENT_LINK, target=target)
+            for name, path in m.LIVE_FILES.items():
+                if name in m.LEGACY_PAYLOAD_FILES:
+                    m.atomic_replace(path, target=m.CURRENT_LINK / name)
+        return legacy, adoption
+
+    def test_existing_legacy_upgrade_requires_complete_explicit_adoption(self):
+        m = self.module
+        legacy, adoption = self.legacy_archives()
+        with self.assertRaisesRegex(ValueError, "explicit harness adoption"):
+            m.install_release(*self.new)
+        self.assertEqual(m.release_target(m.CURRENT_LINK).name, legacy[1])
+        m.install_release(*self.new, adoption=adoption)
+        self.assert_version(self.new, adoption)
+        m.rollback_release()
+        self.assert_version(adoption, self.new)
+        m.install_release(*self.third)
+        self.assert_version(self.third, adoption)
+
+    def test_first_legacy_registration_preserves_both_base_and_harness(self):
+        m = self.module
+        legacy, adoption = self.legacy_archives(registered=False)
+        with self.assertRaisesRegex(ValueError, "explicit harness adoption"):
+            m.install_release(*self.new, baseline=legacy)
+        self.assert_original()
+        m.install_release(*self.new, baseline=legacy, adoption=adoption)
+        self.assert_version(self.new, adoption)
+        m.rollback_release()
+        self.assert_version(adoption, self.new)
+
+    def test_adoption_rejects_unmatched_unmanaged_harness_without_pointer_changes(self):
+        m = self.module
+        legacy, adoption = self.legacy_archives()
+        m.LIVE_FILES["opsmind_harness_labctl.py"].write_bytes(b"unapproved-harness")
+        with self.assertRaisesRegex(ValueError, "adoption differs from installed"):
+            m.install_release(*self.new, adoption=adoption)
+        self.assertEqual(m.release_target(m.CURRENT_LINK).name, legacy[1])
+        self.assertFalse(m.PREVIOUS_LINK.exists())
+
+    def test_adoption_refuses_partial_inventory_and_full_release_re_adoption(self):
+        m = self.module
+        legacy, adoption = self.legacy_archives()
+        with self.assertRaisesRegex(ValueError, "complete unchanged harness inventory"):
+            m.install_release(*self.new, adoption=legacy)
+        m.install_release(*self.new, adoption=adoption)
+        with self.assertRaisesRegex(ValueError, "requires legacy files"):
+            m.install_release(*self.third, adoption=adoption)
+        self.assert_version(self.new, adoption)
+
+    def test_adoption_failure_restores_existing_legacy_pointer(self):
+        m = self.module
+        legacy, adoption = self.legacy_archives()
+        original = m.atomic_replace
+        failed = False
+        def interrupted(path, **kwargs):
+            nonlocal failed
+            original(path, **kwargs)
+            if path == m.PREVIOUS_LINK and not failed:
+                failed = True
+                raise OSError("adoption pointer failure")
+        with mock.patch.object(m, "atomic_replace", side_effect=interrupted):
+            with self.assertRaisesRegex(OSError, "adoption pointer failure"):
+                m.install_release(*self.new, adoption=adoption)
+        self.assertEqual(m.release_target(m.CURRENT_LINK).name, legacy[1])
+        self.assertFalse(m.PREVIOUS_LINK.exists())
+        m.verify_live_files(m.CURRENT_LINK.resolve())
+
+    def test_interrupted_adoption_resumes_same_command_without_partial_rollback(self):
+        m = self.module
+        legacy, adoption = self.legacy_archives()
+        m.atomic_replace(m.PREVIOUS_LINK, target=m.CURRENT_LINK.resolve())
+        original = m.atomic_replace
+        def abrupt_exit(path, **kwargs):
+            original(path, **kwargs)
+            if path == m.CURRENT_LINK:
+                raise KeyboardInterrupt("adoption process death")
+        with mock.patch.object(m, "atomic_replace", side_effect=abrupt_exit):
+            with self.assertRaises(KeyboardInterrupt):
+                m.install_release(*self.new, adoption=adoption)
+        m.verify_live_files(m.CURRENT_LINK.resolve())
+        with redirect_stdout(io.StringIO()) as output:
+            m.show_status(self.entry)
+        self.assertFalse(json.loads(output.getvalue())["rollback_ready"])
+        with self.assertRaisesRegex(ValueError, "complete harness ownership"):
+            m.rollback_release()
+        m.install_release(*self.new, adoption=adoption)
+        self.assert_version(self.new, adoption)
+
+    def test_interrupted_adoption_can_resume_without_repeating_adoption_option(self):
+        m = self.module
+        _, adoption = self.legacy_archives()
+        original = m.atomic_replace
+        def abrupt_exit(path, **kwargs):
+            original(path, **kwargs)
+            if path == m.CURRENT_LINK:
+                raise KeyboardInterrupt("adoption process death")
+        with mock.patch.object(m, "atomic_replace", side_effect=abrupt_exit):
+            with self.assertRaises(KeyboardInterrupt):
+                m.install_release(*self.new, adoption=adoption)
+        m.install_release(*self.new)
+        self.assert_version(self.new, adoption)
+
+    def test_unknown_or_non_string_inventory_cannot_read_release_paths(self):
+        m = self.module
+        for inventory in [[{"path": "../outside"}], [{"path": []}], [{"path": None}], []]:
+            with self.subTest(inventory=inventory):
+                with self.assertRaisesRegex(ValueError, "inventory mismatch"):
+                    m.payload_names({"files": inventory})
+
 
 class ControllerBuilderTest(unittest.TestCase):
     def setUp(self):
@@ -421,6 +542,45 @@ class ControllerBuilderTest(unittest.TestCase):
                 payload = archive.extractfile("controller/opsmind_twinctl.py").read()
                 self.assertNotIn(b"\r\n", payload)
                 self.assertTrue(payload.startswith(b"accepted-"))
+
+    def test_adoption_source_requires_exact_revision_and_remote_ancestry(self):
+        for revision in ["main", "a" * 39, "G" * 40]:
+            with self.subTest(revision=revision):
+                with self.assertRaisesRegex(RuntimeError, "exact migration commit"):
+                    self.module.main(["--adoption-ref", revision])
+        with mock.patch.object(self.module, "git", side_effect=["a" * 40, "", "", ""]):
+            with self.assertRaisesRegex(RuntimeError, "not on a remote branch"):
+                self.module.main(["--adoption-ref", "a" * 40])
+
+    def test_adoption_archive_uses_unchanged_migration_files_without_new_probe_module(self):
+        revision = "a" * 40
+        def git(*args):
+            if args[0] == "rev-parse":
+                self.assertEqual(args[-1], revision + "^{commit}")
+                return revision
+            if args[0] in {"status", "merge-base"}:
+                return ""
+            if args[0] == "branch":
+                self.assertEqual(args, ("branch", "-r", "--contains", revision))
+                return "origin/codex/evalos-feature-controlled-repair-contract-20260904"
+            return "1788400800" if "--format=%ct" in args else "20260903"
+        def read_source(command, **_):
+            self.assertTrue(command[2].startswith(revision + ":infra/twin/"))
+            return ("unchanged-" + command[2] + "\n").encode()
+        with tempfile.TemporaryDirectory(prefix="twin-adoption-builder-test-") as directory:
+            with (mock.patch.object(self.module, "DEPLOY_ROOT", Path(directory)),
+                  mock.patch.object(self.module, "git", side_effect=git),
+                  mock.patch.object(self.module.subprocess, "check_output", side_effect=read_source),
+                  redirect_stdout(io.StringIO()) as output):
+                self.module.main(["--adoption-ref", revision])
+            result = json.loads(output.getvalue())
+            with tarfile.open(result["archive"]) as archive:
+                metadata = json.loads(archive.extractfile("controller/RELEASE.json").read())
+                names = {item["path"] for item in metadata["files"]}
+                self.assertEqual(names, set(self.module.BASE_RELEASE_FILES + self.module.HARNESS_RELEASE_FILES))
+                self.assertTrue(metadata["adoption_archive"])
+                self.assertFalse(metadata["baseline_archive"])
+                self.assertNotIn("harness_probes.py", names)
 
 
 if __name__ == "__main__":

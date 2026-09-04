@@ -36,7 +36,27 @@ LIVE_FILES = {
     "config/gnb.yaml": Path("/srv/opsmind-twin/config/baseline/gnb.yaml"),
     "config/ue.yaml": Path("/srv/opsmind-twin/config/baseline/ue.yaml"),
 }
-PAYLOAD_FILES = set(LIVE_FILES) | {"install-controller.sh"}
+LEGACY_PAYLOAD_FILES = set(LIVE_FILES) | {"install-controller.sh"}
+LIVE_FILES.update({
+    "opsmind_harness_labctl.py": Path("/usr/local/sbin/opsmind-harness-labctl"),
+    "opsmind-harness-lab-topology": Path("/usr/local/sbin/opsmind-harness-lab-topology"),
+    "opsmind-harness-ssh-shim": Path("/usr/local/sbin/opsmind-harness-ssh-shim"),
+    "opsmind-harness-mec-http.py": Path("/usr/local/libexec/opsmind-harness-mec-http.py"),
+})
+ADOPTION_PAYLOAD_FILES = set(LIVE_FILES) | {"install-controller.sh", "harness-source-lineage.json"}
+PAYLOAD_FILES = ADOPTION_PAYLOAD_FILES | {"harness_probes.py"}
+
+
+def payload_names(metadata):
+    inventory = metadata.get("files")
+    if not isinstance(inventory, list) or any(
+            not isinstance(item, dict) or not isinstance(item.get("path"), str) for item in inventory):
+        raise ValueError("controller release inventory mismatch")
+    names = {item.get("path") for item in inventory}
+    if len(inventory) != len(names) or names not in (LEGACY_PAYLOAD_FILES, ADOPTION_PAYLOAD_FILES, PAYLOAD_FILES):
+        raise ValueError("controller release inventory mismatch")
+    return names
+
 RELEASE_ID = re.compile(r"twin-controller-[0-9]{8}-[a-f0-9]{10}")
 SHA256 = re.compile(r"[a-f0-9]{64}")
 
@@ -50,18 +70,15 @@ def canonical(value):
 
 
 def validate_payload(files, expected_id):
-    if not RELEASE_ID.fullmatch(expected_id) or set(files) != PAYLOAD_FILES | {"RELEASE.json"}:
-        raise ValueError("controller release file list or id mismatch")
     metadata = json.loads(files["RELEASE.json"])
+    names = payload_names(metadata)
+    if not RELEASE_ID.fullmatch(expected_id) or set(files) != names | {"RELEASE.json"}:
+        raise ValueError("controller release file list or id mismatch")
     if metadata.get("contract") != "opsmind-twin-controller-release/1.0" or metadata.get("release_id") != expected_id:
         raise ValueError("controller release contract or identity mismatch")
     if not re.fullmatch(r"[a-f0-9]{40}", str(metadata.get("source_revision", ""))):
         raise ValueError("invalid controller source revision")
-    inventory = metadata.get("files")
-    if (not isinstance(inventory, list) or len(inventory) != len(PAYLOAD_FILES)
-            or any(not isinstance(item, dict) for item in inventory)
-            or {item.get("path") for item in inventory} != PAYLOAD_FILES):
-        raise ValueError("controller release inventory mismatch")
+    inventory = metadata["files"]
     for item in inventory:
         payload = files[item["path"]]
         if digest(payload) != item.get("sha256") or len(payload) != item.get("bytes"):
@@ -99,7 +116,11 @@ def read_archive(archive, expected_id, expected_hash):
 
 def release_files(root):
     files = {}
-    for name in PAYLOAD_FILES | {"RELEASE.json"}:
+    metadata_path = root / "RELEASE.json"
+    if metadata_path.is_symlink() or not metadata_path.is_file():
+        raise ValueError("controller release metadata missing or linked")
+    names = payload_names(json.loads(metadata_path.read_bytes()))
+    for name in names | {"RELEASE.json"}:
         file = root / name
         if file.is_symlink() or not file.is_file():
             raise ValueError("controller release file missing or linked: " + name)
@@ -164,7 +185,9 @@ def preserve_release(files, metadata):
         for name, payload in files.items():
             file = staging / name
             file.parent.mkdir(parents=True, exist_ok=True)
-            mode = 0o755 if name in {"install-controller.sh", "ssh_gateway.sh"} else 0o750 if name.endswith(".py") else 0o640
+            mode = 0o755 if name in {"install-controller.sh", "ssh_gateway.sh",
+                                     "opsmind-harness-ssh-shim"} else 0o750 if (
+                name.endswith(".py") or name == "opsmind-harness-lab-topology") else 0o640
             atomic_replace(file, payload=payload, mode=mode)
         os.replace(staging, target)
         fsync_directory(RELEASES_ROOT)
@@ -194,7 +217,10 @@ def idle_lab_lock():
 
 
 def verify_live_files(release):
+    names = payload_names(json.loads((release / "RELEASE.json").read_bytes()))
     for name, path in LIVE_FILES.items():
+        if name not in names:
+            continue
         if not path.is_file() or digest(path.read_bytes()) != digest((release / name).read_bytes()):
             raise ValueError("installed controller differs from approved baseline: " + name)
 
@@ -210,13 +236,16 @@ def snapshot(path):
 
 
 def switch_release(target, old_current):
-    # First bind all eight entries to the exact old bytes. Only then switch current.
+    # Bind the reviewed entries to one immutable release, then switch current.
     paths = [CURRENT_LINK, *LIVE_FILES.values(), PREVIOUS_LINK]
     before = {path: snapshot(path) for path in paths}
     try:
         if not CURRENT_LINK.is_symlink():
             atomic_replace(CURRENT_LINK, target=old_current)
+        target_names = payload_names(json.loads((target / "RELEASE.json").read_bytes()))
         for name, path in LIVE_FILES.items():
+            if name not in target_names:
+                continue
             expected = CURRENT_LINK / name
             if not path.is_symlink() or Path(os.readlink(path)) != expected:
                 atomic_replace(path, target=expected)
@@ -225,28 +254,59 @@ def switch_release(target, old_current):
             atomic_replace(CURRENT_LINK, target=target)
         verify_live_files(target)
     except Exception as original:
-        failed = []
-        for path, (kind, value, mode) in before.items():
-            try:
-                if snapshot(path) == (kind, value, mode):
-                    continue
-                if kind == "absent":
-                    path.unlink(missing_ok=True)
-                    fsync_directory(path.parent)
-                elif kind == "link":
-                    atomic_replace(path, target=Path(value))
-                else:
-                    atomic_replace(path, payload=value, mode=mode)
-            except Exception:
-                failed.append(str(path))
-        if failed:
-            raise RuntimeError("controller recovery incomplete; manual attention required: " + ", ".join(failed)) from original
+        restore_paths(before, original)
         raise
 
 
-def install_release(archive, release_id, archive_hash, baseline=None):
+def restore_paths(before, original):
+    failed = []
+    for path, (kind, value, mode) in before.items():
+        try:
+            if snapshot(path) == (kind, value, mode):
+                continue
+            if kind == "absent":
+                path.unlink(missing_ok=True)
+                fsync_directory(path.parent)
+            elif kind == "link":
+                atomic_replace(path, target=Path(value))
+            else:
+                atomic_replace(path, payload=value, mode=mode)
+        except Exception:
+            failed.append(str(path))
+    if failed:
+        raise RuntimeError("controller recovery incomplete; manual attention required: " + ", ".join(failed)) from original
+
+
+
+def adopt_harness_release(current, adoption_payload):
+    files, metadata = adoption_payload
+    if payload_names(metadata) != ADOPTION_PAYLOAD_FILES:
+        raise ValueError("adoption requires the complete unchanged harness inventory")
+    current_files = release_files(current)
+    current_names = payload_names(json.loads(current_files["RELEASE.json"]))
+    if current_names != LEGACY_PAYLOAD_FILES and current_files != files:
+        raise ValueError("harness adoption requires legacy files or the same interrupted adoption")
+    # Verify all base and formerly unmanaged AH bytes before adopting their identity.
+    for name, path in LIVE_FILES.items():
+        if not path.is_file() or digest(path.read_bytes()) != digest(files[name]):
+            raise ValueError("adoption differs from installed component: " + name)
+    adopted = preserve_release(files, metadata)
+    pointers = {p: snapshot(p) for p in (CURRENT_LINK, PREVIOUS_LINK)}
+    try:
+        atomic_replace(CURRENT_LINK, target=adopted)
+        atomic_replace(PREVIOUS_LINK, target=adopted)
+    except Exception as original:
+        restore_paths(pointers, original)
+        raise
+    return adopted
+
+
+def install_release(archive, release_id, archive_hash, baseline=None, adoption=None):
     files, metadata = read_archive(archive, release_id, archive_hash)
     baseline_payload = read_archive(*baseline) if baseline else None
+    adoption_payload = read_archive(*adoption) if adoption else None
+    if payload_names(metadata) != PAYLOAD_FILES:
+        raise ValueError("new installation requires the full current controller inventory")
     with idle_lab_lock():
         current = release_target(CURRENT_LINK)
         previous = release_target(PREVIOUS_LINK)
@@ -254,13 +314,22 @@ def install_release(archive, release_id, archive_hash, baseline=None):
             if previous is not None or baseline_payload is None:
                 raise ValueError("first registration requires an explicit approved baseline archive")
             baseline_files, baseline_metadata = baseline_payload
+            baseline_names = payload_names(baseline_metadata)
+            if baseline_names == LEGACY_PAYLOAD_FILES and adoption_payload is None:
+                raise ValueError("legacy installation requires explicit harness adoption")
             for name, path in LIVE_FILES.items():
+                if name not in baseline_names:
+                    continue
                 if path.is_symlink() or not path.is_file() or digest(path.read_bytes()) != digest(baseline_files[name]):
                     raise ValueError("installed controller differs from approved baseline: " + name)
             current = preserve_release(baseline_files, baseline_metadata)
         elif baseline is not None:
             raise ValueError("baseline option is only allowed for first registration")
         verify_live_files(current)
+        if adoption_payload:
+            current = adopt_harness_release(current, adoption_payload)
+        elif payload_names(json.loads((current / "RELEASE.json").read_bytes())) == LEGACY_PAYLOAD_FILES:
+            raise ValueError("legacy installation requires explicit harness adoption")
         target = preserve_release(files, metadata)
         switch_release(target, current)
 
@@ -272,18 +341,25 @@ def rollback_release():
         if current is None or previous is None or current == previous:
             raise ValueError("two distinct verified controller versions are required")
         verify_live_files(current)
+        if any(payload_names(json.loads((release / "RELEASE.json").read_bytes())) == LEGACY_PAYLOAD_FILES
+               for release in (current, previous)):
+            raise ValueError("rollback requires complete harness ownership in both versions")
         switch_release(previous, current)
 
 
 def show_status(entry):
     result = {}
+    complete_versions = True
     for name, link in (("current", CURRENT_LINK), ("previous", PREVIOUS_LINK)):
         target = release_target(link)
         if name == "current" and target:
             verify_live_files(target)
         metadata = json.loads((target / "RELEASE.json").read_text()) if target else None
+        if metadata and payload_names(metadata) == LEGACY_PAYLOAD_FILES:
+            complete_versions = False
         result[name] = ({key: metadata[key] for key in ("release_id", "source_revision", "content_digest", "component_manifest_digest")} if metadata else None)
-    result["rollback_ready"] = bool(result["current"] and result["previous"] and result["current"] != result["previous"])
+    result["rollback_ready"] = bool(complete_versions and result["current"] and result["previous"]
+                                    and result["current"] != result["previous"])
     result["installer_sha256"] = digest(entry.read_bytes())
     print(json.dumps(result, separators=(",", ":")))
 
@@ -300,9 +376,10 @@ def main(argv):
     install.add_argument("release_id")
     install.add_argument("archive_hash")
     install.add_argument("--baseline", nargs=3, metavar=("ARCHIVE", "RELEASE_ID", "SHA256"))
+    install.add_argument("--adopt-harness", nargs=3, metavar=("ARCHIVE", "RELEASE_ID", "SHA256"))
     args = parser.parse_args(argv[1:])
     if args.command == "install":
-        install_release(args.archive, args.release_id, args.archive_hash, args.baseline)
+        install_release(args.archive, args.release_id, args.archive_hash, args.baseline, args.adopt_harness)
     elif args.command == "rollback":
         rollback_release()
     show_status(Path(argv[0]))

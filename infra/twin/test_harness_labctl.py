@@ -5,9 +5,12 @@ import types
 import pytest
 
 if sys.platform == "win32":
-    sys.modules.setdefault("fcntl", types.SimpleNamespace(LOCK_EX=1, flock=lambda *_args: None))
-
-import opsmind_harness_labctl as labctl
+    from unittest.mock import patch
+    # Control semantics use mocked external calls; do not fake Linux lock tests.
+    with patch.dict(sys.modules, {"fcntl": types.SimpleNamespace(LOCK_EX=1, flock=lambda *_: None)}):
+        import opsmind_harness_labctl as labctl
+else:
+    import opsmind_harness_labctl as labctl
 
 
 def test_leased_lab_runtime_observation_resolves_amf_without_cross_scope_fallback(
@@ -177,3 +180,85 @@ def test_protocol_lab_controller_uses_the_single_base_physical_lease() -> None:
     assert '"candidate_ref": "agent-harness-v2"' in controller
     assert "ACTIVE_LEASE" not in controller
     assert "save_active_lease" not in controller
+
+
+def test_regular_snapshot_does_not_claim_business_recovery_or_run_probes(monkeypatch):
+    monkeypatch.setattr(labctl, "claim_active_lease", lambda _: None)
+    monkeypatch.setattr(labctl, "base_call", lambda _: {"ok": True, "snapshot": {
+        "recovery": {"task_success": True}, "resource_scope": {}}})
+    monkeypatch.setattr(labctl, "topology_status", lambda: {})
+    monkeypatch.setattr(labctl.harness_probes, "business_verification",
+                        lambda _: pytest.fail("ordinary snapshot must not probe business"))
+    result = labctl.snapshot({"trial_id": "ah-test"})["snapshot"]
+    assert "healthy" not in result and "task_success" not in result
+
+
+@pytest.mark.parametrize("business,base,expected", [(False, True, False), (True, True, True),
+                                                  (None, True, None), (True, False, False),
+                                                  (None, False, False), (True, None, None)])
+@pytest.mark.parametrize("purpose", ["pre_action_snapshot", "post_action_verification",
+                                    "post_rollback_verification"])
+def test_verifier_cannot_expand_registration_success_into_business_recovery(monkeypatch, business, base, expected, purpose):
+    monkeypatch.setattr(labctl, "claim_active_lease", lambda _: None)
+    monkeypatch.setattr(labctl, "base_call", lambda _: {"ok": True, "snapshot": {
+        "recovery": {"task_success": base}, "resource_scope": {"namespace": "ah-test"}}})
+    monkeypatch.setattr(labctl, "topology_status", lambda: {})
+    calls = []
+    def verify(scope):
+        calls.append(scope)
+        return {"passed": business}
+    monkeypatch.setattr(labctl.harness_probes, "business_verification", verify)
+    result = labctl.snapshot({"trial_id": "ah-test", "purpose": purpose})["snapshot"]
+    assert result["healthy"] is expected
+    assert result["business_verification"]["passed"] is business
+    assert calls == [{"namespace": "ah-test"}]
+
+
+def test_failed_mec_cleanup_does_not_release_the_base_lease(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(labctl, "active_snapshot", lambda _: {})
+    monkeypatch.setattr(labctl, "run", lambda *a, **k: SimpleNamespace(returncode=1))
+    monkeypatch.setattr(labctl, "base_call", lambda _: pytest.fail("lease must remain owned"))
+    assert labctl.reset({"trial_id": "ah-test"})["error"]["code"] == "MEC_CLEANUP_FAILED"
+
+
+def test_cleanup_checks_trial_ownership_before_mutating_topology(monkeypatch):
+    def changed_trial(_):
+        raise PermissionError("another Trial owns the lease")
+    monkeypatch.setattr(labctl, "active_snapshot", changed_trial)
+    monkeypatch.setattr(labctl, "run", lambda *a, **k: pytest.fail("no topology mutations allowed"))
+    with pytest.raises(PermissionError):
+        labctl.reset({"trial_id": "ah-old"})
+
+
+def test_cleanup_precedes_base_lease_release(monkeypatch):
+    from types import SimpleNamespace
+    calls = []
+    monkeypatch.setattr(labctl, "active_snapshot", lambda _: calls.append("check"))
+    monkeypatch.setattr(labctl, "run", lambda *a, **k: calls.append("cleanup") or SimpleNamespace(returncode=0))
+    monkeypatch.setattr(labctl, "base_call", lambda _: calls.append("release") or {"ok": True, "clean": True})
+    monkeypatch.setattr(labctl, "clear_active_binding", lambda _: calls.append("unbind"))
+    assert labctl.reset({"trial_id": "ah-test"})["clean"] is True
+    assert calls == ["check", "cleanup", "release", "unbind"]
+
+def test_prepare_checks_physical_lease_before_creating_mec_resources(monkeypatch):
+    calls = []
+    monkeypatch.setattr(labctl, "base_call", lambda r: calls.append(r["operation"]) or {"ok": True})
+    monkeypatch.setattr(labctl, "run", lambda *a, **k: pytest.fail("no MEC creation without a lease"))
+    result = labctl.prepare({"trial_id": "ah-test", "scenario_id": "sctp-blocked", "owner_mode": "agent_harness_direct"})
+    assert result["error"]["code"] == "PHYSICAL_LEASE_MISSING"
+    assert calls == ["prepare", "reset"]
+
+
+def test_prepare_timeout_uses_the_same_owned_cleanup_path(monkeypatch):
+    import subprocess
+    monkeypatch.setattr(labctl, "base_call", lambda _: {"ok": True, "lease_id": "lease-test"})
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired("topology prepare", 90)
+    monkeypatch.setattr(labctl, "run", timeout)
+    cleaned = []
+    monkeypatch.setattr(labctl, "reset", lambda request: cleaned.append(request["trial_id"]) or {"clean": True})
+    result = labctl.prepare({"trial_id": "ah-test", "scenario_id": "sctp-blocked", "owner_mode": "agent_harness_direct"})
+    assert result["error"]["code"] == "MEC_TOPOLOGY_FAILED"
+    assert result["cleanup"]["clean"] is True
+    assert cleaned == ["ah-test"]
