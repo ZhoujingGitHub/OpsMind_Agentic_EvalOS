@@ -29,7 +29,9 @@ stop_pid() {
 }
 
 delete_rule() {
-  while iptables -C "$@" >/dev/null 2>&1; do iptables -D "$@"; done
+  table="$1"
+  shift
+  while iptables -t "$table" -C "$@" >/dev/null 2>&1; do iptables -t "$table" -D "$@"; done
 }
 
 reset_topology() {
@@ -39,9 +41,9 @@ reset_topology() {
   ip route del "$SERVICE_NET" dev ah-host-a 2>/dev/null || true
   # Remove the former erroneous fallback only when its exact owner/interface matches.
   ip route del "$SERVICE_NET" dev opsminddn0 2>/dev/null || true
-  delete_rule -t nat POSTROUTING -s "$UE_NET" -d "$SERVICE_NET" -o ah-host-a -j ACCEPT
-  delete_rule FORWARD -i ogstun -o ah-host-a -j ACCEPT
-  delete_rule FORWARD -i ah-host-a -o ogstun -j ACCEPT
+  delete_rule nat POSTROUTING -s "$UE_NET" -d "$SERVICE_NET" -o ah-host-a -j ACCEPT
+  delete_rule filter FORWARD -i ogstun -o ah-host-a -j ACCEPT
+  delete_rule filter FORWARD -i ah-host-a -o ogstun -j ACCEPT
   for ns in opsmind-ah-mec opsmind-ah-c opsmind-ah-b opsmind-ah-a; do
     ip netns del "$ns" 2>/dev/null || true
   done
