@@ -5,10 +5,10 @@
       "tenant_id": "tenant-ctyun-ops-demo",
       "deployment_attestation": {
         "contract_version": "evalos-deployment-attestation/1.0",
-        "source_revision": "ccda64e035f3467a152185b4c452034c53297ff7",
-        "artifact_digest": "sha256:efc6d41f2b242457eddbc076714ccb80a7ac577858c8f70ff05f35479d9ca681",
+        "source_revision": "e98b145ccef7dd032583f96fe0228797dee5ce20",
+        "artifact_digest": "sha256:a3568db22cee866514440fecc0fe5357cdc52f0ec4632ced2257b6948234a1d3",
         "verification_method": "evalos_trusted_read_only_git_oci",
-        "verified_evidence_ref": "controlled-repair-acceptance-20260904:products-public-contracts:agent-harness-v2:ccda64e035f3"
+        "verified_evidence_ref": "controlled-repair-acceptance-20260904:products-public-contracts:agent-harness-v2:e98b145ccef7"
       },
       "evaluation_limits": {
         "max_run_ms": 7200000,
