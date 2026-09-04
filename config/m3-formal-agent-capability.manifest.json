@@ -206,11 +206,11 @@
       "architecture": "CLAUDE_AGENT_SDK_HARNESS",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "7426bbf1f59dadfdaf91d4116d427121ad30e9fe",
-      "artifact_digest": "sha256:0f12b3573f8aa99d7e82fcba321789d5402f6ac7c6132eb439b74cb5b9d70c67",
-      "runtime_digest": "sha256:d6e2504f82f65efd41f058f32bc421d300c4f82941ce7a03595aced2a05b6531",
-      "runtime_manifest_digest": "sha256:6593855f68a363c303812edae532aac61ddc78d6b53c4ad063e2000aeae89eeb",
-      "capability_contract_digest": "sha256:f49bc9b0122694db33c06ca0792d4e419790bf5a53e53a8ad8be7ae7dd303cc1",
+      "source_revision": "327645fd2d78665a08554c67fcd8910a258cc338",
+      "artifact_digest": "sha256:1900fccaa0de6e66f232386d16339a43a2cb99cbc2cad9db4001d2e45e270a9a",
+      "runtime_digest": "sha256:bdf24b26675f2ded102e8b96d0496724fc3b1656f48baed6a0560ed31ef1bcc7",
+      "runtime_manifest_digest": "sha256:527da9a9b550e2cb812b89b7dc8d653b149c3973cf7167c6ed0bcefc3a1a497b",
+      "capability_contract_digest": "sha256:dfe8ab3a695485b395642a5a1d49bf753b2470d075fddaf36cbfc75df5a0a2ec",
       "binding_requirement": "PRODUCT_NATIVE_ACK",
       "candidate_runtime": {
         "contract_version": "1.0",
@@ -236,6 +236,7 @@
           "candidate_observation": "opsmind-candidate-observation/1.0",
           "model_visible_result": "opsmind-model-visible-result/1.0",
           "run_context": "opsmind-run-context/1.0",
+          "repair_delivery": "opsmind-repair-delivery/1.0",
           "run_budget": "opsmind-run-budget/2.0",
           "run_usage": "opsmind-run-usage/1.0"
         }
@@ -387,9 +388,9 @@
         "provenance": {
           "status": "product_public_maximum",
           "method": "candidate_public_runtime_contract",
-          "source_revision": "7426bbf1f59dadfdaf91d4116d427121ad30e9fe",
-          "artifact_digest": "sha256:0f12b3573f8aa99d7e82fcba321789d5402f6ac7c6132eb439b74cb5b9d70c67",
-          "evidence_ref": "three-chain-acceptance-20260904:observed-public-contract:agent-harness-v2:7426bbf1f59d"
+          "source_revision": "327645fd2d78665a08554c67fcd8910a258cc338",
+          "artifact_digest": "sha256:1900fccaa0de6e66f232386d16339a43a2cb99cbc2cad9db4001d2e45e270a9a",
+          "evidence_ref": "controlled-repair-acceptance-20260904:observed-public-contract:agent-harness-v2:327645fd2d78"
         }
       },
       {
