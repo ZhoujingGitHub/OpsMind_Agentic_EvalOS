@@ -4,7 +4,7 @@
     "agent-harness-v2": {
       "key_id": "agent-presence-20260901",
       "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAQmS0e1HiQGX0g7CxcD4b+rknDBZyO68MKz8JVHRR02c=\n-----END PUBLIC KEY-----\n",
-      "expected_release_id": "e98b145ccef7",
+      "expected_release_id": "b48a42cddc74",
       "expected_database_revision": "017_native_run_context_budget",
       "required_capabilities": [
         "investigation",
