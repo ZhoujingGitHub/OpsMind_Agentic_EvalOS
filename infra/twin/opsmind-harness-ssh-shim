@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+prefix='sudo /usr/local/sbin/opsmind-harness-labctl request '
+case "${SSH_ORIGINAL_COMMAND:-}" in
+  "$prefix"*) encoded=${SSH_ORIGINAL_COMMAND#"$prefix"} ;;
+  *) echo '{"ok":false,"error":{"code":"COMMAND_DENIED","message":"fixed request command required"}}'; exit 4 ;;
+esac
+
+case "$encoded" in
+  *[!A-Za-z0-9_=-]*) echo '{"ok":false,"error":{"code":"ENVELOPE_DENIED","message":"invalid envelope"}}'; exit 4 ;;
+esac
+
+exec sudo -n /usr/local/sbin/opsmind-harness-labctl request "$encoded"

@@ -1,0 +1,37 @@
+{
+  "source_repository": "ZhoujingGitHub/OpsMind",
+  "source_revision": "ccda64e035f3467a152185b4c452034c53297ff7",
+  "destination_repository": "ZhoujingGitHub/OpsMind_Agentic_EvalOS",
+  "files": [
+    {
+      "source_path": "deploy/protocol_lab/opsmind_harness_labctl.py",
+      "destination_path": "infra/twin/opsmind_harness_labctl.py",
+      "sha256": "9091f19d66a134095c737cee9ec6dff06f78b74658735c441c499e7b71ab915a"
+    },
+    {
+      "source_path": "deploy/protocol_lab/opsmind-harness-lab-topology",
+      "destination_path": "infra/twin/opsmind-harness-lab-topology",
+      "sha256": "cb59f9b504b025dd12d33c02c1e729cff32e61f3b1f565ee7b626f693630dbbb"
+    },
+    {
+      "source_path": "deploy/protocol_lab/opsmind-harness-ssh-shim",
+      "destination_path": "infra/twin/opsmind-harness-ssh-shim",
+      "sha256": "c69e352f9b4b78d1d832e3bccb79af94574a127772a2ffe0ad1099946a64545f"
+    },
+    {
+      "source_path": "deploy/protocol_lab/opsmind-harness-mec-http.py",
+      "destination_path": "infra/twin/opsmind-harness-mec-http.py",
+      "sha256": "e9cde4d4f2678a26eb8ea5d46fd57b5d4c68272acf36d80b3b9322fa2083fd71"
+    }
+  ],
+  "test_migration": {
+    "source_path": "services/agent-service/tests/test_protocol_lab.py",
+    "destination_path": "infra/twin/test_harness_labctl.py",
+    "tests": [
+      "test_leased_lab_runtime_observation_resolves_amf_without_cross_scope_fallback",
+      "test_real_lab_lease_is_claimed_by_one_signed_tenant_and_investigation",
+      "test_observation_is_denied_until_snapshot_claims_the_real_trial",
+      "test_protocol_lab_controller_uses_the_single_base_physical_lease"
+    ]
+  }
+}

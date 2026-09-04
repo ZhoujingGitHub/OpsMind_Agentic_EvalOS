@@ -1,0 +1,160 @@
+#!/bin/sh
+set -eu
+
+STATE_ROOT=/run/opsmind-harness-lab
+HTTP_PID="$STATE_ROOT/http.pid"
+MQTT_PID="$STATE_ROOT/mqtt.pid"
+DNS_PID="$STATE_ROOT/dns.pid"
+MEC_IP=10.47.0.80
+DNS_IP=10.47.0.53
+SERVICE_NET=10.47.0.0/24
+
+stop_pid() {
+  path="$1"
+  if [ -f "$path" ]; then
+    pid=$(cat "$path" 2>/dev/null || true)
+    if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; fi
+    rm -f "$path"
+  fi
+}
+
+delete_rule() {
+  while iptables -C "$@" >/dev/null 2>&1; do iptables -D "$@"; done
+}
+
+restore_base_route() {
+  if ip link show opsminddn0 >/dev/null 2>&1; then
+    ip route replace "$SERVICE_NET" dev opsminddn0 src 10.47.0.1
+  else
+    ip route del "$SERVICE_NET" 2>/dev/null || true
+  fi
+}
+
+reset_topology() {
+  stop_pid "$HTTP_PID"
+  stop_pid "$MQTT_PID"
+  stop_pid "$DNS_PID"
+  ip route del "$SERVICE_NET" 2>/dev/null || true
+  delete_rule FORWARD -i ogstun -o ah-host-a -j ACCEPT
+  delete_rule FORWARD -i ah-host-a -o ogstun -j ACCEPT
+  for ns in opsmind-ah-mec opsmind-ah-c opsmind-ah-b opsmind-ah-a; do
+    ip netns del "$ns" 2>/dev/null || true
+  done
+  ip link del ah-host-a 2>/dev/null || true
+  restore_base_route
+}
+
+up_all() {
+  for ns in opsmind-ah-a opsmind-ah-b opsmind-ah-c opsmind-ah-mec; do
+    ip netns add "$ns"
+    ip -n "$ns" link set lo up
+    ip netns exec "$ns" sysctl -q -w net.ipv4.ip_forward=1
+  done
+
+  ip link add ah-host-a type veth peer name ah-a-host
+  ip link set ah-a-host netns opsmind-ah-a
+  ip addr add 10.61.0.1/30 dev ah-host-a
+  ip link set ah-host-a up
+  ip -n opsmind-ah-a addr add 10.61.0.2/30 dev ah-a-host
+  ip -n opsmind-ah-a link set ah-a-host up
+
+  ip link add ah-a-b type veth peer name ah-b-a
+  ip link set ah-a-b netns opsmind-ah-a
+  ip link set ah-b-a netns opsmind-ah-b
+  ip -n opsmind-ah-a addr add 10.61.0.5/30 dev ah-a-b
+  ip -n opsmind-ah-b addr add 10.61.0.6/30 dev ah-b-a
+  ip -n opsmind-ah-a link set ah-a-b up
+  ip -n opsmind-ah-b link set ah-b-a up
+
+  ip link add ah-b-c type veth peer name ah-c-b
+  ip link set ah-b-c netns opsmind-ah-b
+  ip link set ah-c-b netns opsmind-ah-c
+  ip -n opsmind-ah-b addr add 10.61.0.9/30 dev ah-b-c
+  ip -n opsmind-ah-c addr add 10.61.0.10/30 dev ah-c-b
+  ip -n opsmind-ah-b link set ah-b-c up
+  ip -n opsmind-ah-c link set ah-c-b up
+
+  ip link add ah-c-mec type veth peer name ah-mec-c
+  ip link set ah-c-mec netns opsmind-ah-c
+  ip link set ah-mec-c netns opsmind-ah-mec
+  ip -n opsmind-ah-c addr add 10.61.0.13/30 dev ah-c-mec
+  ip -n opsmind-ah-mec addr add 10.61.0.14/30 dev ah-mec-c
+  ip -n opsmind-ah-c link set ah-c-mec up
+  ip -n opsmind-ah-mec link set ah-mec-c up
+  ip -n opsmind-ah-mec addr add "$MEC_IP/32" dev lo
+  ip -n opsmind-ah-mec addr add "$DNS_IP/32" dev lo
+
+  ip -n opsmind-ah-a route add "$SERVICE_NET" via 10.61.0.6 dev ah-a-b
+  ip -n opsmind-ah-b route add "$SERVICE_NET" via 10.61.0.10 dev ah-b-c
+  ip -n opsmind-ah-c route add "$SERVICE_NET" via 10.61.0.14 dev ah-c-mec
+  ip -n opsmind-ah-mec route add 10.45.0.0/16 via 10.61.0.13 dev ah-mec-c
+  ip -n opsmind-ah-c route add 10.45.0.0/16 via 10.61.0.9 dev ah-c-b
+  ip -n opsmind-ah-b route add 10.45.0.0/16 via 10.61.0.5 dev ah-b-a
+  ip -n opsmind-ah-a route add 10.45.0.0/16 via 10.61.0.1 dev ah-a-host
+  ip route replace "$SERVICE_NET" via 10.61.0.2 dev ah-host-a
+
+  iptables -C FORWARD -i ogstun -o ah-host-a -j ACCEPT >/dev/null 2>&1 || \
+    iptables -I FORWARD 1 -i ogstun -o ah-host-a -j ACCEPT
+  iptables -C FORWARD -i ah-host-a -o ogstun -j ACCEPT >/dev/null 2>&1 || \
+    iptables -I FORWARD 1 -i ah-host-a -o ogstun -j ACCEPT
+}
+
+start_services() {
+  mkdir -p "$STATE_ROOT"
+  ip netns exec opsmind-ah-mec python3 /usr/local/libexec/opsmind-harness-mec-http.py \
+    >>/var/log/opsmind-harness-mec-http.log 2>&1 &
+  echo $! >"$HTTP_PID"
+  ip netns exec opsmind-ah-mec mosquitto -c /etc/opsmind-harness-lab/mosquitto.conf \
+    >>/var/log/opsmind-harness-mec-mqtt.log 2>&1 &
+  echo $! >"$MQTT_PID"
+  ip netns exec opsmind-ah-mec dnsmasq -C /etc/opsmind-harness-lab/dnsmasq.conf \
+    >>/var/log/opsmind-harness-mec-dns.log 2>&1 &
+  echo $! >"$DNS_PID"
+}
+
+status() {
+  ready=false
+  if ip netns exec opsmind-ah-mec curl -fsS --max-time 2 "http://$MEC_IP:8080/health" >/dev/null 2>&1 && \
+     ip netns exec opsmind-ah-mec mosquitto_pub -h "$MEC_IP" -p 1883 \
+       -t opsmind/health -m ok -q 1 >/dev/null 2>&1 && \
+     ip netns exec opsmind-ah-mec dig +time=1 +tries=1 +short @"$DNS_IP" opsmind-mec.lab A | grep -qx "$MEC_IP"; then
+    ready=true
+  fi
+  route_present=false
+  if ip route show "$SERVICE_NET" | grep -q ah-host-a; then route_present=true; fi
+  printf '{"ready":%s,"route_present":%s,"service_network":"%s","mec_ip":"%s","dns_ip":"%s","transport_hops":3,"http":8080,"mqtt":1883,"dns":53,"runtime_isolated":true}\n' \
+    "$ready" "$route_present" "$SERVICE_NET" "$MEC_IP" "$DNS_IP"
+}
+
+command=${1:-}
+case "$command" in
+  prepare)
+    scenario=${2:-}
+    reset_topology
+    up_all
+    start_services
+    if [ "$scenario" = "n6-route-missing" ]; then
+      ip route del "$SERVICE_NET" 2>/dev/null || true
+    fi
+    status
+    ;;
+  route)
+    ip route replace "$SERVICE_NET" via 10.61.0.2 dev ah-host-a
+    status
+    ;;
+  fault-route)
+    ip route del "$SERVICE_NET" 2>/dev/null || true
+    status
+    ;;
+  status)
+    status
+    ;;
+  reset)
+    reset_topology
+    printf '{"clean":true}\n'
+    ;;
+  *)
+    echo "unsupported fixed topology operation" >&2
+    exit 2
+    ;;
+esac
