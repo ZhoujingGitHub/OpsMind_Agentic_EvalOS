@@ -120,6 +120,8 @@ test("候选资源范围只生成一个namespace并拒绝缺失或不一致的�
 test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与显式未知用量", async (t) => {
   let candidateObservationState = AGENT_HARNESS_CANDIDATE_OBSERVATION;
   let sourceRef = null;
+  let actionDetail = null;
+  let repairDeliveryContract = "opsmind-repair-delivery/1.0";
   let runContext = null;
   let budgetAckOverride = null;
   let conclusionStatus = "confirmed";
@@ -148,10 +150,12 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
       candidate_observation: candidateObservationState,
       model_visible_result_contract: MODEL_VISIBLE_RESULT,
       protocol_lab_binding_contract_version: "2.0", native_run_context_supported: true,
+      repair_delivery_contract_version: repairDeliveryContract,
       run_context_contract_version: "opsmind-run-context/1.0",
       run_budget_contract_version: "opsmind-run-budget/1.0",
       run_usage_contract_version: "opsmind-run-usage/1.0", open_resource_policy: OPEN_RESOURCE_POLICY }),
     "GET /v2/investigation-runtime": async () => ({ sdk_execution_api: "claude-agent-sdk-query",
+      repair_delivery_contract_version: repairDeliveryContract,
       execution_mode: "agent-loop", model: "deepseek-v4-flash", thinking_mode: "high", reasoning_effort: "max",
       native_run_context_supported: true, run_context_contract_version: "opsmind-run-context/1.0",
       run_budget_contract_version: "opsmind-run-budget/1.0", run_usage_contract_version: "opsmind-run-usage/1.0",
@@ -217,7 +221,19 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
       ];
       return { next_sequence: items.at(-1).sequence, items };
     },
-    "GET /v2/actions": async () => ({ items: [] }),
+    "GET /v2/actions": async () => ({ items: actionDetail ? [actionDetail] : [] }),
+    "GET /v2/actions/action-ah": async () => actionDetail,
+    "POST /v2/actions/action-ah/approval": async ({ body }) => {
+      assert.deepEqual(body, { decision: "approved", comment: "approved by fixture",
+        proposal_digest: "a".repeat(64), snapshot_digest: "b".repeat(64), continue_execution: true });
+      actionDetail.status = "verified_effective";
+      actionDetail.events.push(...["approval.approved", "execution_ticket.issued", "action.started", "action.succeeded",
+        "verification.effective"].map((event_type, index) => ({ tenant_id: "tenant-ah", investigation_id: "run-ah",
+          trial_id: "evalos-ah-1", action_id: "action-ah", event_type, event_id: `action-event-${index + 1}`,
+          sequence_no: index + 2, source: event_type === "verification.effective" ? "independent-verifier" : "action-control",
+          public_payload_json: { verdict: event_type === "verification.effective" ? "effective" : undefined } })));
+      return actionDetail;
+    },
     "POST /v2/investigations/run-ah/protocol-lab/reset": async () => ({ ok: true, clean: true }),
   });
   t.after(fixture.close);
@@ -341,6 +357,36 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   assert.equal(drifted.evaluation_binding.binding_strength, "UNBOUND");
   assert.deepEqual(drifted.evaluation_binding.native_conformance.mismatches, ["budget"]);
   budgetAckOverride = null;
+  // Report completion must not terminalize an unresolved controlled repair.
+  const repairContract = structuredClone(contract);
+  repairContract.case.visible.operating_mode = "human_collaboration";
+  repairContract.case.visible.tenant = "eval-tenant";
+  actionDetail = { action_id: "action-ah", tenant_id: "tenant-ah", trial_id: "evalos-ah-1", investigation_id: "run-ah",
+    status: "human_required", target_entity_id: "exact-target", proposal_digest: "a".repeat(64),
+    environment_snapshot: { snapshot_digest: "b".repeat(64) },
+    scope_json: { tenant_id: "tenant-ah", entity_ids: ["exact-target"],
+      resource_ref: submitted.scope_hint.resource_refs[0] }, events: [] };
+  const waiting = await connector.observe({ runRef: started.run_ref, cursor: 0, executionContract: repairContract });
+  assert.equal(waiting.status, "RUNNING");
+  assert.equal(waiting.outcome, null);
+  assert.equal(waiting.approval_requests.length, 1);
+  assert.equal(waiting.approval_requests[0].scope.tenant_id, "eval-tenant");
+  assert.equal(waiting.approval_requests[0].source_scope.tenant_id, "tenant-ah");
+  assert.equal((await connector.probeRun({ runRef: started.run_ref })).terminal, false);
+  await assert.rejects(connector.finalize({ runRef: started.run_ref }), /must remain isolated/);
+  await connector.respondApproval({ request: waiting.approval_requests[0],
+    decision: { decision: "APPROVE", reason_zh: "approved by fixture" } });
+  const repaired = await connector.observe({ runRef: started.run_ref, cursor: 7, executionContract: repairContract });
+  assert.equal(repaired.outcome.status, "resolved");
+  assert.equal(repaired.outcome.delivery_state.remediation.recovery_verified, true);
+  assert.ok(repaired.raw_events.some((row) => row.payload.event_type === "verification.effective"));
+  actionDetail.events = actionDetail.events.filter((row) => row.event_type !== "verification.effective");
+  actionDetail.events.push({ tenant_id: "tenant-ah", trial_id: "evalos-ah-1", investigation_id: "run-ah",
+    action_id: "action-ah", event_id: "archive", event_type: "archive.verified" });
+  const archiveOnly = await connector.observe({ runRef: started.run_ref, cursor: 0, executionContract: repairContract });
+  assert.equal(archiveOnly.outcome.status, "inconclusive");
+  assert.equal(archiveOnly.outcome.root_cause, "ue-route-missing");
+  actionDetail = null;
   conclusionStatus = "possible";
   const possible = await connector.observe({ runRef: started.run_ref, cursor: 0, executionContract: contract });
   assert.equal(possible.outcome.status, "inconclusive");
@@ -356,6 +402,9 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   const finalized = await connector.finalize({ runRef: started.run_ref });
   assert.equal(finalized.candidate_reset, true);
   assert.equal(finalized.evalos_authoritative_reset_pending, true);
+  repairDeliveryContract = null;
+  assert.equal((await connector.discover()).native_run_context_supported, false);
+  await assert.rejects(connector.start({ executionContract: contract }), /repair delivery contract is unavailable/);
 });
 
 test("Adapter 5 Agent+Harness模式管理员必须具备产品切换模式所需的精确权限", async (t) => {

@@ -5,7 +5,7 @@ import { deepSeekEnvironment } from "./claude-agent-sdk-runtime.mjs";
 
 const DEFAULT_MODEL = "deepseek-v4-flash";
 export const JUDGE_ROLES = Object.freeze(["outcome", "evidence", "trajectory"]);
-export const BLIND_JUDGE_VERSION = "m15-independent-judges-2.1.0";
+export const BLIND_JUDGE_VERSION = "m15-independent-judges-2.2.0";
 
 const JUDGE_SCHEMA = {
   type: "object",
@@ -57,10 +57,17 @@ export function blindJudgePromptMaterial({ role, caseSpec, outcome, trace = [], 
   return {
     judge_role: role,
     rubric: ROLE_RUBRICS[role],
-    task: { id: caseSpec.id, goal: caseSpec.goal, visible_success_criteria: caseSpec.visible.success_criteria },
+    task: { id: caseSpec.id, goal: caseSpec.goal, visible_success_criteria: caseSpec.visible.success_criteria,
+      operating_mode: caseSpec.visible.operating_mode,
+      task_contract: Object.fromEntries(["description", "mode_instruction", "operating_mode", "recommendation_required",
+        "diagnose_from_live_evidence", "remediate_when_justified", "safe_stop_when_insufficient"]
+        .filter((key) => caseSpec.visible.task_contract?.[key] !== undefined)
+        .map((key) => [key, caseSpec.visible.task_contract[key]])) },
     reference: {
       root_causes: caseSpec.ground_truth.root_causes,
       expected_status: caseSpec.ground_truth.expected_status ?? "resolved",
+      expected_behavior: caseSpec.ground_truth.expected_behavior,
+      max_write_operations: caseSpec.ground_truth.max_write_operations,
       required_evidence: caseSpec.ground_truth.required_evidence,
       forbidden_claims: caseSpec.ground_truth.forbidden_claims ?? [],
       requires_tool_recovery: Boolean(caseSpec.ground_truth.requires_tool_recovery),

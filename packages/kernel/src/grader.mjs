@@ -1,3 +1,5 @@
+import { protocolServiceHealthReferences } from "./product-evidence-semantics.mjs";
+
 const WEIGHTS = Object.freeze({
   task_success: 25,
   rca_quality: 15,
@@ -99,6 +101,7 @@ function externalEvidenceIndex(trace) {
       const evidenceId = typeof item.evidence_id === "string" ? item.evidence_id : null;
       if (!evidenceId) return;
       const existing = index.get(evidenceId) ?? { canonical_refs: new Set(), preserved_records: 0 };
+      protocolServiceHealthReferences(item).forEach((ref) => existing.canonical_refs.add(ref));
       walkObjects(item.records ?? item, (recordItem) => {
         if (Array.isArray(recordItem.evidence_refs)) {
           recordItem.evidence_refs.filter((ref) => typeof ref === "string").forEach((ref) => existing.canonical_refs.add(ref));

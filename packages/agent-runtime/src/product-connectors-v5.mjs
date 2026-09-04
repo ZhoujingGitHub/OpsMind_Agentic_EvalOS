@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { boundActionApproval, evidenceBoundExclusions, hasPendingProductActions,
+  productActionEventType, productRepairProgress } from "./product-action-events.mjs";
 
 const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const USAGE_DIMENSIONS = Object.freeze(["input_tokens", "output_tokens", "model_calls", "tool_calls", "storage_bytes", "cost_usd"]);
@@ -306,6 +308,8 @@ function agentHarnessNativeContract(capability, runtime) {
     NATIVE_BUDGET_KEYS.every((name) => Number.isFinite(Number(limits[name])) && Number(limits[name]) > 0)
     ? Object.fromEntries(NATIVE_BUDGET_KEYS.map((name) => [name, Math.floor(Number(limits[name]))])) : null;
   const versions = {
+    repair_delivery: capability?.repair_delivery_contract_version === runtime?.repair_delivery_contract_version
+      ? capability?.repair_delivery_contract_version : null,
     run_context: capability?.run_context_contract_version ?? runtime?.run_context_contract_version,
     run_budget: capability?.run_budget_contract_version ?? runtime?.run_budget_contract_version,
     run_usage: capability?.run_usage_contract_version ?? runtime?.run_usage_contract_version,
@@ -315,7 +319,8 @@ function agentHarnessNativeContract(capability, runtime) {
     [capability?.run_usage_contract_version, runtime?.run_usage_contract_version]]
     .every(([left, right]) => Boolean(left) && Boolean(right) && String(left) === String(right));
   return Object.freeze({ supported: capability?.native_run_context_supported === true &&
-      runtime?.native_run_context_supported === true && versionsAgree && budgetLimits !== null,
+      runtime?.native_run_context_supported === true && versionsAgree && budgetLimits !== null &&
+      versions.repair_delivery === "opsmind-repair-delivery/1.0",
     versions, budget_limits: budgetLimits });
 }
 
@@ -327,21 +332,19 @@ function rawEvent(sourceSystem, ref, payload) {
 
 function normalizedType(value) {
   const name = String(value ?? "").toLowerCase();
+  const actionEvent = productActionEventType(name);
+  if (actionEvent) return actionEvent;
+  // Unknown safety lifecycle events stay in the raw journal. A keyword is not
+  // evidence of approval, execution, ticket issuance or successful verification.
+  if (/^(?:action|proposal|approval|ticket|execution_ticket|verification|archive|rollback)\./.test(name)) return null;
   if (/candidate|job.accept|task.receive|investigation.create/.test(name)) return "task.received";
   if (/investigation.start|run.start|worker.start/.test(name)) return "investigation.started";
   if (/tool.*fail|post_tool_failure|observation.*fail/.test(name)) return "candidate.tool.failed";
   if (/retry|recover|resume/.test(name)) return "candidate.recovery.observed";
   if (/tool|evidence|observation|metric|log|alarm|probe/.test(name)) return "evidence.collected";
   if (/conclusion|report|finalize|completed/.test(name)) return "conclusion.recorded";
-  if (/proposal/.test(name)) return "action.proposed";
   if (/policy/.test(name)) return "policy.decided";
-  if (/approval|approved|rejected/.test(name)) return "approval.decided";
-  if (/ticket/.test(name)) return "ticket.issued";
   if (/lease/.test(name)) return "lease.acquired";
-  if (/rollback.*verif/.test(name)) return "rollback.verified";
-  if (/rollback/.test(name)) return "rollback.executed";
-  if (/verif/.test(name)) return "verification.completed";
-  if (/execut|action\.(?:started|succeeded|failed|unknown)|action.result/.test(name)) return "action.executed";
   if (/circuit/.test(name)) return "circuit_breaker.opened";
   if (/kill|emergency.stop/.test(name)) return "emergency_stop.activated";
   if (/takeover|human.*required|escalat/.test(name)) return "human_takeover.requested";
@@ -351,13 +354,14 @@ function normalizedType(value) {
 
 function semanticPayload(event, eventName, sourceRef) {
   const nested = event?.payload && typeof event.payload === "object" && !Array.isArray(event.payload) ? event.payload : {};
-  const publicPayload = event?.public_payload && typeof event.public_payload === "object" && !Array.isArray(event.public_payload)
-    ? event.public_payload : {};
+  const publicValue = event?.public_payload ?? event?.public_payload_json;
+  const publicPayload = publicValue && typeof publicValue === "object" && !Array.isArray(publicValue) ? publicValue : {};
   const source = { ...event, ...publicPayload, ...nested };
   const allowed = ["decision", "decision_code", "reason_code", "authorization_source", "risk_level", "action_id",
     "proposal_digest", "policy_decision_id", "ticket_id", "execution_id", "state_changed", "production_execution",
     "verdict", "effective", "rolled_back", "status", "ok", "retryable", "attempt", "error_code",
-    "scope_digest", "runtime_manifest_digest", "model_id", "stage", "stop_reason", "response_format"];
+    "scope_digest", "runtime_manifest_digest", "model_id", "stage", "stop_reason", "response_format",
+    "trial_id", "investigation_id", "snapshot_digest", "verification_id"];
   return Object.fromEntries([["event_name", eventName], ["source_ref", sourceRef],
     ...allowed.filter((key) => source[key] !== undefined).map((key) => [key, source[key]])]);
 }
@@ -690,7 +694,7 @@ export function productReportEvidence({ product, report = {}, taskResult = {} })
   };
 }
 
-function authoritativeOutcome({ status, detail = {}, projection = null, events = [], product,
+function authoritativeOutcome({ status, detail = {}, projection = null, events = [], product, operatingMode = "diagnosis_only",
   recommendationRequired = false, recommendationSourceRef = null }) {
   const report = detail.report ?? {};
   const taskResult = projection?.task_result ?? detail.task_result ?? report.task_result ?? {};
@@ -715,12 +719,20 @@ function authoritativeOutcome({ status, detail = {}, projection = null, events =
     events.some((event) => /retry|recover|resume/.test(String(event?.event_type ?? event?.name ?? "").toLowerCase())));
   const recommendationEvaluation = recommendationEvaluationView({ product, report, taskResult, projection,
     required: recommendationRequired, sourceRef: recommendationSourceRef });
-  return { status: rootCauseConfirmed ? "resolved" : "inconclusive",
+  const repair = productRepairProgress(translate(events, product, (_, index) => `result:${index}`,
+    (event) => event.event_type ?? event.name ?? event.action).normalized);
+  const taskResolved = rootCauseConfirmed && (operatingMode === "diagnosis_only" || repair.recovery_verified);
+  return { status: taskResolved ? "resolved" : "inconclusive",
+    delivery_state: { contract_version: "opsmind-task-delivery/1.0", investigation: String(status),
+      diagnosis: rootCauseConfirmed ? gateConclusion || "confirmed" : "inconclusive",
+      operating_mode: operatingMode, remediation: repair },
     root_cause: rootCauseConfirmed ? publishedRootCause : null,
     confidence: rootCauseConfirmed ? boundedConfidence(projection?.root_cause_confidence ?? taskResult.root_cause_confidence ??
       taskResult.confidence ?? leading?.confidence ?? report.confidence ?? detail.confidence) : 0,
     evidence_refs: recommendationEvaluation.report_evidence_ids,
-    exclusions: stringList(taskResult.exclusions ?? report.exclusions),
+    exclusions: [...new Set([...stringList(taskResult.exclusions ?? report.exclusions),
+      ...evidenceBoundExclusions(recommendationEvaluation.hypothesis_context.hypotheses,
+        recommendationEvaluation.report_evidence_ids, product)])],
     tool_failures_recovered: recoveryFailure ? recoverySuccess : null,
     next_checks: stringList(taskResult.next_checks ?? report.next_checks ?? report.missing_evidence ?? report.evidence_gaps),
     summary: taskResult.summary ?? report.summary ?? detail.summary ?? detail.conclusion ?? "",
@@ -792,16 +804,10 @@ function productEvidence({ events, raw, artifactRefs = [], projectionRef = null,
 function projectionEvidence(sourceSystem, sourceRef, projection) {
   if (!projection || typeof projection !== "object") return { raw: [], normalized: [] };
   const raw = [rawEvent(sourceSystem, sourceRef, projection)];
-  const lifecycle = projection.action_lifecycle ?? {};
-  const candidates = [["policy.decided", lifecycle.policy_decision], ["approval.decided", lifecycle.approval],
-    ["ticket.issued", lifecycle.execution_ticket ?? lifecycle.ticket],
-    ["action.executed", lifecycle.action_result ?? lifecycle.attempt],
-    ["verification.completed", lifecycle.independent_verification ?? lifecycle.verification],
-    ["rollback.executed", lifecycle.rollback], ["archive.reconciled", lifecycle.archive]];
-  const normalized = candidates.flatMap(([eventType, item]) => item ? [{ event_type: eventType,
-    actor: sourceSystem, status: item.status ?? "RECORDED", raw_source_refs: [sourceRef],
-    payload: semanticPayload(item, eventType, sourceRef) }] : []);
-  return { raw, normalized };
+  // Preserve the projection, but lifecycle existence (including a failed
+  // attempt or pending verification) is not a successful event. The ordered
+  // product journal is the authority for normalized action events.
+  return { raw, normalized: [] };
 }
 
 function discovery(attestation, architecture, capability, runtime, health, candidateRuntime,
@@ -873,7 +879,8 @@ function agentHarnessSubmission(executionContract, nativeContract) {
       source_page: `/evalos/trials/${executionContract.trial.id}` },
     time_window: timeWindow(executionContract.case.visible.time_window), seed_evidence_refs: [], freshness: "fresh",
     run_context: { trial_id: executionContract.trial.id, context_digest: context.context_digest.replace(/^sha256:/, ""),
-      environment_ref: context.environment_ref, runtime_version: runtimeVersion, budget } };
+      environment_ref: context.environment_ref, runtime_version: runtimeVersion, budget,
+      cleanup_owner: "external_controller" } };
 }
 
 function langGraphSubmission(executionContract, nativeContract = null) {
@@ -1003,6 +1010,7 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
       const [capability, runtime, modelProfile, health, safety] = await Promise.all([
         api.request("/v2/capabilities"), api.request("/v2/investigation-runtime"),
         api.request("/v2/model-profile"), api.request("/health"), api.request("/v2/remediation/context")]);
+      latestNativeContract = agentHarnessNativeContract(capability, runtime);
       const observedCandidateRuntime = { contract_version: "1.0", models: [{
         provider: modelProfile.provider ?? health.provider ?? "deepseek",
         id: modelProfile.model ?? modelProfile.model_id ?? runtime.model ?? health.model,
@@ -1029,13 +1037,13 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
           model_visible_result: String(capability.model_visible_result_contract.contract_version),
         } : {}),
         run_context: String(capability.run_context_contract_version ?? runtime.run_context_contract_version ?? "unknown"),
+        repair_delivery: String(latestNativeContract.versions.repair_delivery ?? "unavailable"),
         run_budget: String(capability.run_budget_contract_version ?? runtime.run_budget_contract_version ?? "unknown"),
         run_usage: String(capability.run_usage_contract_version ?? runtime.run_usage_contract_version ?? "unknown") } };
       if (declaredCandidateRuntime && !sameValue(declaredCandidateRuntime, observedCandidateRuntime)) {
         throw new Error("candidate discovery drift: declared Agent+Harness candidate_runtime");
       }
       const candidateRuntime = declaredCandidateRuntime ?? observedCandidateRuntime;
-      latestNativeContract = agentHarnessNativeContract(capability, runtime);
       const stableRuntime = { execution_api: runtime.sdk_execution_api, execution_mode: runtime.execution_mode,
         thinking_mode: runtime.thinking_mode, reasoning_effort: runtime.reasoning_effort,
         concurrency_limit: runtime.concurrency_limit, queue_policy: runtime.queue_policy,
@@ -1046,6 +1054,7 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         run_budget_contract_version: latestNativeContract.versions.run_budget,
         run_usage_contract_version: latestNativeContract.versions.run_usage,
         product_budget_limits: latestNativeContract.budget_limits,
+        repair_delivery_contract_version: latestNativeContract.versions.repair_delivery,
         candidate_observation: publicCandidateObservation(capability.candidate_observation),
         model_visible_result: publicModelVisibleResult(capability.model_visible_result_contract),
         capability_versions: candidateRuntime.versions, production_writes_available: false };
@@ -1062,6 +1071,9 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         execution_mode: executionContract.execution_mode, production_writes_available: false };
     },
     async start({ executionContract }) {
+      if (latestNativeContract?.versions.repair_delivery !== "opsmind-repair-delivery/1.0") {
+        throw new Error("Agent+Harness repair delivery contract is unavailable; update the product before starting a Trial");
+      }
       const requestBody = agentHarnessSubmission(executionContract, latestNativeContract);
       const result = await api.request("/v2/investigation-candidates", { method: "POST", body: requestBody });
       const candidate = result.candidate ?? result;
@@ -1071,7 +1083,7 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         context_digest: requestBody.run_context.context_digest,
         environment_ref: requestBody.run_context.environment_ref,
         runtime_version: requestBody.run_context.runtime_version,
-        budget: requestBody.run_context.budget, native: true,
+        budget: requestBody.run_context.budget, native: true, cleanup_owner: requestBody.run_context.cleanup_owner,
         run_context_contract_version: latestNativeContract.versions.run_context,
         run_budget_contract_version: latestNativeContract.versions.run_budget,
         run_usage_contract_version: latestNativeContract.versions.run_usage };
@@ -1085,25 +1097,47 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
       const [detail, log, actionPage, candidatePage] = await Promise.all([
         api.request(`/v2/investigations/${encodeURIComponent(runRef)}`),
         api.request(`${logPath}?after_sequence=${Number(cursor) || 0}&limit=1000`),
-        api.request("/v2/actions?limit=500"), api.request("/v2/investigation-candidates")]);
+        api.request(`/v2/actions?limit=500&investigation_id=${encodeURIComponent(runRef)}`), api.request("/v2/investigation-candidates")]);
       const state = String(detail.status ?? "").toLowerCase();
-      const terminal = ["resolved", "inconclusive", "insufficient_evidence", "failed", "cancelled", "budget_exhausted"].includes(state);
+      const actions = listItems(actionPage).filter((item) => item.investigation_id === runRef);
+      if (listItems(actionPage).length >= 500) throw new Error("Action journal page is full; completeness cannot be proven");
+      for (const item of actions) {
+        if (item.trial_id !== executionContract.trial.id) throw new Error("Action belongs to a different or unbound Trial");
+      }
+      const pendingAction = hasPendingProductActions(actions);
+      const terminal = !pendingAction && ["resolved", "inconclusive", "insufficient_evidence", "failed", "cancelled", "budget_exhausted"].includes(state);
       const events = terminal ? await readCursorPages({ api, pathname: logPath, cursorParam: "after_sequence",
         nextField: "next_sequence", itemCursorField: "sequence", initialCursor: 0,
         firstPage: Number(cursor) === 0 ? log : null }) : listItems(log);
       const translated = translate(events, "agent-harness-product",
         (event, index) => `agent-harness:${event.sequence ?? Number(cursor) + index + 1}`,
         (event) => event.event_type ?? event.name ?? event.action);
-      const actions = listItems(actionPage).filter((item) => item.investigation_id === runRef);
-      const approvalRequests = actions.filter((item) => ["awaiting_approval", "human_approval_required", "prechecked"].includes(item.status))
-        .map((item) => ({ request_ref: `agent-harness-approval:${item.action_id}`, action_id: item.action_id,
-          proposal: item, proposal_digest: item.proposal_digest, scope: item.scope, policy_decision: item.policy_decision }));
+      const actionDetails = await Promise.all(actions.map((item) => api.request(`/v2/actions/${encodeURIComponent(item.action_id)}`)));
+      for (const item of actionDetails) {
+        if (item.tenant_id !== tenantId || item.investigation_id !== runRef || item.trial_id !== executionContract.trial.id) {
+          throw new Error("Action detail binding mismatch");
+        }
+      }
+      const actionEvents = actionDetails.flatMap((item) => item.events ?? []);
+      for (const event of actionEvents) {
+        if (event.tenant_id !== tenantId || event.investigation_id !== runRef || event.trial_id !== executionContract.trial.id ||
+            !actions.some((item) => item.action_id === event.action_id)) throw new Error("Action event binding mismatch");
+      }
+      const actionTrace = translate(actionEvents, "agent-harness-product",
+        (event) => `agent-harness:action-event:${event.action_id}:${event.event_id}`,
+        (event) => event.event_type);
+      translated.raw.push(...actionTrace.raw);
+      translated.normalized.push(...actionTrace.normalized);
+      const approvalRequests = actionDetails.filter((item) => item.status === "human_required")
+        .map((item) => boundActionApproval(item, { tenantId, evaluationTenant: executionContract.case.visible.tenant,
+          trialId: executionContract.trial.id, runRef, resourceScope: candidateManagedResourceScope(executionContract) }));
       const fallbackRequest = runs.has(runRef) ? null : agentHarnessSubmission(executionContract, latestNativeContract);
       const run = runs.get(runRef) ?? { expected: { trial_id: fallbackRequest.run_context.trial_id,
         context_digest: fallbackRequest.run_context.context_digest,
         environment_ref: fallbackRequest.run_context.environment_ref,
         runtime_version: fallbackRequest.run_context.runtime_version, budget: fallbackRequest.run_context.budget,
-        native: true, run_context_contract_version: latestNativeContract.versions.run_context,
+        native: true, cleanup_owner: fallbackRequest.run_context.cleanup_owner,
+        run_context_contract_version: latestNativeContract.versions.run_context,
         run_budget_contract_version: latestNativeContract.versions.run_budget,
         run_usage_contract_version: latestNativeContract.versions.run_usage },
         requestBody: fallbackRequest, candidate_id: detail.candidate_id ?? null };
@@ -1124,14 +1158,27 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
       }
       const nativeContext = detail.run_context ?? candidateRecord?.run_context ?? {};
       const nativeAck = detail.run_context_ack ?? candidateRecord?.run_context_ack ?? {};
+      if (terminal) {
+        const allowed = candidateManagedResourceScope(executionContract);
+        for (const evidence of detail.evidence ?? []) {
+          if (evidence?.source_type !== "protocol_lab_resource_observation") continue;
+          const scope = evidence.scope_json;
+          if (evidence.tenant_id !== tenantId || evidence.investigation_id !== runRef ||
+              evidence.protocol_trial_id !== allowed.namespace || scope?.namespace !== allowed.namespace ||
+              !Array.isArray(scope.resource_refs) || !scope.resource_refs.every((ref) =>
+                allowed.resource_refs.some((target) => ["identifier_domain", "namespace", "resource_type", "resource_id"]
+                  .every((key) => target[key] === ref[key])))) throw new Error("Product evidence binding mismatch");
+        }
+      }
       const nativeFields = { trial_id: nativeContext.trial_id, context_digest: nativeContext.context_digest,
         environment_ref: nativeContext.environment_ref, runtime_version: nativeContext.runtime_version,
+        cleanup_owner: nativeContext.cleanup_owner,
         budget: nativeAck.actual_budget ?? nativeContext.budget, native: nativeAck.native,
         run_context_contract_version: nativeAck.contract_version,
         run_budget_contract_version: nativeAck.budget_contract_version,
         run_usage_contract_version: nativeAck.usage_contract_version ?? detail.usage?.contract_version };
       const evaluationBinding = terminal ? binding({ runRef, expected: run.expected, nativeFields,
-        nativeRequired: ["trial_id", "context_digest", "environment_ref", "runtime_version", "budget", "native",
+        nativeRequired: ["trial_id", "context_digest", "environment_ref", "runtime_version", "budget", "native", "cleanup_owner",
           "run_context_contract_version", "run_budget_contract_version", "run_usage_contract_version"] }) : null;
       const bindingRaw = terminal && candidateRecord
         ? [rawEvent("agent-harness-product", `agent-harness:candidate:${candidateRecord.candidate_id}`, candidateRecord)] : [];
@@ -1150,7 +1197,8 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         : ["inconclusive", "insufficient_evidence", "budget_exhausted"].includes(state) ? "INCONCLUSIVE" : "COMPLETED" : "RUNNING";
       return { run_ref: runRef, status, next_cursor: log.next_sequence ?? cursor, raw_events: allRaw,
         normalized_events: translated.normalized, approval_requests: approvalRequests,
-        outcome: terminal ? authoritativeOutcome({ status: state, detail, events, product: "agent-harness",
+        outcome: terminal ? authoritativeOutcome({ status: state, detail, events: [...events, ...actionEvents], product: "agent-harness",
+          operatingMode: executionContract.case.visible.operating_mode,
           recommendationRequired: executionContract.case.visible.task_contract?.recommendation_required === true,
           recommendationSourceRef: detail.report?.delivery_receipt?.delivery_id
             ? `agent-harness:report-delivery:${detail.report.delivery_receipt.delivery_id}` : reportRef }) : null,
@@ -1167,10 +1215,17 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
     },
     async respondApproval({ request, decision }) {
       return approvalApi.request(`/v2/actions/${encodeURIComponent(request.action_id)}/approval`, { method: "POST",
-        body: { decision: decision.decision === "APPROVE" ? "approved" : "rejected", comment: decision.reason_zh } });
+        body: { decision: decision.decision === "APPROVE" ? "approved" : "rejected", comment: decision.reason_zh,
+          proposal_digest: request.proposal_digest, snapshot_digest: request.environment_snapshot_digest,
+          continue_execution: decision.decision === "APPROVE" } });
     },
     async probeRun({ runRef }) {
       const detail = await api.request(`/v2/investigations/${encodeURIComponent(runRef)}`);
+      const actionPage = await api.request(`/v2/actions?limit=500&investigation_id=${encodeURIComponent(runRef)}`);
+      if (listItems(actionPage).length >= 500 || hasPendingProductActions(
+        listItems(actionPage).filter((item) => item.investigation_id === runRef))) {
+        return { run_ref: runRef, status: "RUNNING", terminal: false, raw_status: "repair_pending" };
+      }
       const rawStatus = String(detail.status ?? "").toLowerCase();
       const status = rawStatus === "resolved" ? "COMPLETED"
         : ["inconclusive", "insufficient_evidence", "budget_exhausted"].includes(rawStatus) ? "INCONCLUSIVE"
@@ -1178,6 +1233,11 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
       return { run_ref: runRef, status, terminal: status !== "RUNNING", raw_status: rawStatus };
     },
     async finalize({ runRef }) {
+      const actionPage = await api.request(`/v2/actions?limit=500&investigation_id=${encodeURIComponent(runRef)}`);
+      if (listItems(actionPage).length >= 500 || hasPendingProductActions(
+        listItems(actionPage).filter((item) => item.investigation_id === runRef))) {
+        throw new Error("Repair is pending; the laboratory must remain isolated");
+      }
       try {
         const result = await api.request(`/v2/investigations/${encodeURIComponent(runRef)}/protocol-lab/reset`, {
           method: "POST", body: {} });
@@ -1432,6 +1492,7 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         normalized_events: [...translated.normalized, ...projected.normalized], approval_requests: approvalRequests,
         outcome: terminalReady && !failureTerminal
           ? authoritativeOutcome({ status: detailState, detail, projection, events: allEvents, product: "langgraph",
+            operatingMode: executionContract.case.visible.operating_mode,
             recommendationRequired: executionContract.case.visible.task_contract?.recommendation_required === true,
             recommendationSourceRef: `langgraph:product-e2e:${runRef}` }) : null,
         product_evidence: terminalReady && !failureTerminal ? productEvidence({ events: allEvents,
