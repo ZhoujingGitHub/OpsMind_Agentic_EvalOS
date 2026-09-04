@@ -168,6 +168,7 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   let conclusionStatus = "confirmed";
   let investigationStatus = "resolved";
   let usageExhausted = [];
+  let additionalEvidence = [];
   const fixture = await fixtureServer({
     "GET /v2/auth/me": async ({ request }) => request.headers.authorization === "Bearer submitter"
       ? { user_id: "submitter", tenant_id: "tenant-ah", permissions: { investigate: true } }
@@ -246,7 +247,7 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
         raw_value_json: { evidence_ref: "protocol-lab:receipt-1", id: "not-a-report-citation",
           records: [{ evidence_refs: ["probe:sctp-38412-refused"], accepted: false }] } },
         { evidence_id: "evidence:uncited", raw_value_json: { id: "artifact-uncited",
-          records: [{ evidence_refs: ["process:uncited-state"] }] } }] }),
+          records: [{ evidence_refs: ["process:uncited-state"] }] } }, ...additionalEvidence] }),
     "GET /v2/investigations/run-ah/execution-log": async ({ request }) => {
       const query = new URL(request.url, "http://fixture").searchParams;
       assert.equal(query.get("limit"), "1000");
@@ -390,6 +391,25 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
     ["probe:sctp-38412-refused"]);
   assert.match(frozenEvidence.payload_digest, /^sha256:[a-f0-9]{64}$/);
   assert.ok(observation.raw_events.some((item) => item.payload.evidence_id === "evidence:uncited"));
+  // A real collector failure remains in the immutable evidence export without
+  // claiming a successful laboratory response or stopping an otherwise valid run.
+  const failedAttempt = { evidence_id: "failed-diagnostic", tenant_id: "tenant-ah", investigation_id: "run-ah",
+    source_type: "protocol_lab_resource_observation", source_ref: "mcp:run_sandboxed_readonly_diagnostic",
+    scope_json: { tenant_id: "tenant-ah", namespace: submitted.scope_hint.namespace,
+      resource_refs: submitted.scope_hint.resource_refs }, protocol_trial_id: null, substantive: 0,
+    quality: "unknown", freshness: "unknown", completeness: "partial", raw_value_json: {},
+    derived_value_json: { error: { code: "PROTOCOL_LAB_OBSERVATION_FAILED",
+      message: "unsupported readonly diagnostic profile" } } };
+  additionalEvidence = [failedAttempt];
+  const recovered = await connector.observe({ runRef: started.run_ref, cursor: 7, executionContract: contract });
+  assert.equal(recovered.status, "COMPLETED");
+  assert.equal(recovered.evaluation_binding.complete, true);
+  assert.deepEqual(recovered.raw_events.find((row) =>
+    row.payload.evidence_id === "failed-diagnostic").payload, failedAttempt);
+  additionalEvidence = [{ ...failedAttempt, protocol_trial_id: "another-trial" }];
+  await assert.rejects(connector.observe({ runRef: started.run_ref, cursor: 0, executionContract: contract }),
+    /binding mismatch/);
+  additionalEvidence = [];
   const gradingCase = { ground_truth: { root_causes: ["ue-route-missing"],
     required_evidence: ["probe:sctp-38412-refused"] }, tools: {
     probe: { result: { evidence_refs: ["probe:sctp-38412-refused", "process:uncited-state"] } } } };

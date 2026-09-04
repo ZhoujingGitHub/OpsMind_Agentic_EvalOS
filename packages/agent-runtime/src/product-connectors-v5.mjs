@@ -1,3 +1,4 @@
+import { assertProductResourceEvidence } from "./product-resource-evidence.mjs";
 import { createHash } from "node:crypto";
 import { boundActionApproval, evidenceBoundExclusions, hasPendingProductActions,
   productActionEventType, productRepairProgress } from "./product-action-events.mjs";
@@ -1167,12 +1168,7 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         const allowed = candidateManagedResourceScope(executionContract);
         for (const evidence of detail.evidence ?? []) {
           if (evidence?.source_type !== "protocol_lab_resource_observation") continue;
-          const scope = evidence.scope_json;
-          if (evidence.tenant_id !== tenantId || evidence.investigation_id !== runRef ||
-              evidence.protocol_trial_id !== allowed.namespace || scope?.namespace !== allowed.namespace ||
-              !Array.isArray(scope.resource_refs) || !scope.resource_refs.every((ref) =>
-                allowed.resource_refs.some((target) => ["identifier_domain", "namespace", "resource_type", "resource_id"]
-                  .every((key) => target[key] === ref[key])))) throw new Error("Product evidence binding mismatch");
+          assertProductResourceEvidence(evidence, { tenantId, runRef, allowed });
         }
       }
       const nativeFields = { trial_id: nativeContext.trial_id, context_digest: nativeContext.context_digest,
