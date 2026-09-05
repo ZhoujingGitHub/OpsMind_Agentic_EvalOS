@@ -476,7 +476,11 @@ def query_resource_observation(
         capability == "sandboxed_readonly_diagnostic"
         and diagnostic_profile not in READONLY_DIAGNOSTIC_PROFILES
     ):
-        raise ValueError("unsupported readonly diagnostic profile")
+        raise ValueError(
+            "unsupported readonly diagnostic profile; supported profiles: "
+            + ", ".join(sorted(READONLY_DIAGNOSTIC_PROFILES))
+            + ". No diagnostic was executed."
+        )
     if "line_limit" in options and (
         capability != "sandboxed_readonly_diagnostic" or diagnostic_profile != "bounded_log_tail"
         or type(options["line_limit"]) is not int or not 1 <= options["line_limit"] <= 1000

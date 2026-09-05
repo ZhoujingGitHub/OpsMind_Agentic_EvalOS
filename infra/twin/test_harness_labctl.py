@@ -378,6 +378,9 @@ def test_log_tail_honors_mcp_parameters_and_reports_historical_coverage(monkeypa
             labctl.query_resource_observation("ah-current", parameters, "sandboxed_readonly_diagnostic", scope)
     parameters["parameters"] = {}
     parameters["diagnostic_profile"] = "container_state"
-    with pytest.raises(ValueError, match="unsupported readonly"):
+    with pytest.raises(ValueError, match="unsupported readonly") as rejected:
         labctl.query_resource_observation("ah-current", parameters, "sandboxed_readonly_diagnostic", scope)
+    for profile in labctl.READONLY_DIAGNOSTIC_PROFILES:
+        assert profile in str(rejected.value)
+    assert "No diagnostic was executed." in str(rejected.value)
     assert calls == ["processes", "logs"]
