@@ -5,11 +5,16 @@ export function protocolServiceHealthReferences(item) {
   const scope = item?.scope_json;
   if (item?.source_type !== "protocol_lab_resource_observation" ||
       item.source_lineage !== "lab.resource_observation.service_health" ||
-      item.quality !== "verified" || item.freshness !== "live" || item.completeness !== "complete" ||
-      ![true, 1].includes(item.substantive) || raw?.partial !== false || raw.production_network !== false ||
+      item.quality !== "verified" || item.freshness !== "live" ||
+      !["complete", "partial"].includes(item.completeness) ||
+      ![true, 1].includes(item.substantive) ||
+      raw?.partial !== (item.completeness === "partial") || raw.production_network !== false ||
       raw.source_lineage !== item.source_lineage || !scope?.namespace ||
       item.protocol_trial_id !== scope.namespace || raw.trial_id !== scope.namespace ||
       !Array.isArray(scope.resource_refs) || !Array.isArray(raw.records)) return [];
+  // Batch coverage and an individual object's verified health are independent.
+  // Unknown neighbours do not erase complete facts; every credited row still
+  // needs its own authorized identity, process and owned-listener proof.
   return [...new Set(raw.records.flatMap((record) => {
     const authorized = scope.resource_refs.some((ref) => ref.identifier_domain === "opsmind-twin" &&
       ref.namespace === scope.namespace && ref.resource_type === "service" && ref.resource_id === record.resource_id);

@@ -29,6 +29,24 @@ test("health semantics are generic, traceable and credited only when cited", () 
   assert.equal(JSON.stringify(item).includes("process:service-z-healthy"), false);
 });
 
+test("a partial batch preserves complete healthy objects without crediting unknown neighbours", () => {
+  const item = evidence("service-a");
+  item.completeness = "partial";
+  item.raw_value_json.partial = true;
+  item.scope_json.resource_refs.push({ identifier_domain: "opsmind-twin", namespace: "trial-test",
+    resource_type: "workload", resource_id: "workload-b" });
+  item.raw_value_json.records.push({ namespace_id: "trial-test", resource_type: "workload",
+    resource_id: "workload-b", resolution: "resolved", read_only: true, active: true,
+    ready: null, health: "unknown", health_scope: "local_process_listener",
+    checks: { process_active: true, owned_protocol_listener: null } });
+  const before = JSON.stringify(item);
+  assert.deepEqual(protocolServiceHealthReferences(item), ["process:service-a-healthy"]);
+  item.raw_value_json.records[0].checks.owned_protocol_listener = null;
+  assert.deepEqual(protocolServiceHealthReferences(item), []);
+  item.raw_value_json.records[0].checks.owned_protocol_listener = true;
+  assert.equal(JSON.stringify(item), before);
+});
+
 test("running, partial, stale, cross-trial and unready observations cannot prove health", () => {
   for (const mutate of [
     (x) => { delete x.raw_value_json.records[0].health; x.raw_value_json.records[0].runtime_state = "running"; },
