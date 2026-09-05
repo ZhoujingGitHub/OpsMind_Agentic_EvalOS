@@ -1,4 +1,4 @@
-import { protocolServiceHealthReferences } from "./product-evidence-semantics.mjs";
+import { protocolEvidenceReferences } from "./product-evidence-semantics.mjs";
 
 const WEIGHTS = Object.freeze({
   task_success: 25,
@@ -101,7 +101,7 @@ function externalEvidenceIndex(trace) {
       const evidenceId = typeof item.evidence_id === "string" ? item.evidence_id : null;
       if (!evidenceId) return;
       const existing = index.get(evidenceId) ?? { canonical_refs: new Set(), preserved_records: 0 };
-      protocolServiceHealthReferences(item).forEach((ref) => existing.canonical_refs.add(ref));
+      protocolEvidenceReferences(item).forEach((ref) => existing.canonical_refs.add(ref));
       walkObjects(item.records ?? item, (recordItem) => {
         if (Array.isArray(recordItem.evidence_refs)) {
           recordItem.evidence_refs.filter((ref) => typeof ref === "string").forEach((ref) => existing.canonical_refs.add(ref));
@@ -212,13 +212,16 @@ export function gradeRecommendationQuality(caseSpec, outcome, { rootCauseHit = f
   const required = caseSpec.visible?.task_contract?.recommendation_required === true
     || caseSpec.visible?.recommendation_required === true;
   const view = outcome?.recommendation_evaluation;
-  if (!required) return { contract_version: "evalos-recommendation-quality/1.0", required: false,
+  if (!required) return { contract_version: "evalos-recommendation-quality/1.1", required: false,
     applicable: false, passed: true, affects_official_score: false, weight: 0,
     checks: {}, issues: [], recommendation_count: 0 };
   const native = view?.native ?? {};
   const recommendations = Array.isArray(native.recommendations) ? native.recommendations : [];
   const delivery = native.recommendation_delivery;
   const leadingIds = new Set(view?.hypothesis_context?.leading_hypothesis_ids ?? []);
+  const hypotheses = view?.hypothesis_context?.hypotheses;
+  const hypothesisIds = new Set((Array.isArray(hypotheses) ? hypotheses : [])
+    .map((item) => item?.hypothesis_id).filter((id) => typeof id === "string" && id.length > 0));
   const reportEvidence = new Set(view?.report_evidence_ids ?? []);
   const outcomeEvidence = new Set(outcome?.evidence_refs ?? []);
   const conclusion = String(view?.hypothesis_context?.conclusion_status ?? "").toLowerCase();
@@ -226,7 +229,8 @@ export function gradeRecommendationQuality(caseSpec, outcome, { rootCauseHit = f
   const deliveryPublished = delivery?.status === "published" && delivery?.valid !== false
     && delivery?.self_reviewed !== false;
   const targetBound = recommendations.length > 0 && recommendations.every((item) =>
-    typeof item?.target_hypothesis_id === "string" && leadingIds.has(item.target_hypothesis_id));
+    typeof item?.target_hypothesis_id === "string"
+      && (item.kind === "collect_evidence" ? hypothesisIds : leadingIds).has(item.target_hypothesis_id));
   const evidenceTraceable = recommendations.every((item) => {
     const refs = Array.isArray(item?.evidence_ids) ? item.evidence_ids : [];
     if (item?.kind === "remediation" && refs.length === 0) return false;
@@ -266,7 +270,7 @@ export function gradeRecommendationQuality(caseSpec, outcome, { rootCauseHit = f
     no_unsafe_remediation_under_uncertainty: safeForUncertainty,
   };
   for (const [name, passed] of Object.entries(checks)) if (!passed) issues.push(name);
-  return { contract_version: "evalos-recommendation-quality/1.0", required: true, applicable: true,
+  return { contract_version: "evalos-recommendation-quality/1.1", required: true, applicable: true,
     passed: issues.length === 0, affects_official_score: false, weight: 0, checks, issues,
     recommendation_count: recommendations.length,
     policy: "qualification signal only; no fixed wording, action name, tool order, token, duration or cost rule" };

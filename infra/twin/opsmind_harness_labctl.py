@@ -73,6 +73,19 @@ CAPABILITIES = {
     "service_health",
     "sandboxed_readonly_diagnostic",
 }
+DIAGNOSTIC_PARAMETERS = {
+    "ip_reachability": {"target_profile": ["mec", "dns", "core"]},
+    "network_path": {"target_profile": ["mec", "dns"]},
+    "tcp_port": {"service_profile": ["mec-http", "mec-mqtt", "dns-tcp"]},
+    "sctp_association": {},
+    "dns": {"query_profile": ["mec-service"]},
+    "http_service": {"service_profile": ["mec-http"]},
+    "routes": {"node_profile": ["ue", "gnb", "upf", "transport", "mec"]},
+    "interfaces": {"node_profile": ["ue", "gnb", "upf", "transport", "mec"]},
+    "sockets": {"node_profile": ["gnb", "core", "mec"]},
+    "protocol_summary": {},
+    "subscriber_auth_consistency": {},
+}
 RUNTIME_TARGETS = {
     "gnb-1": ("ueransim", "gnb", "ueransim-gnb", "ueransim-gnb"),
     "ue-1": ("ueransim", "ue", "ueransim-ue", "ueransim-ue"),
@@ -82,11 +95,13 @@ RUNTIME_TARGETS = {
     "nrf": ("services", "open5gs-nrfd", "nrf", "open5gs-nrfd"),
     "mongodb": ("services", "mongod", "mongodb", "mongod"),
 }
+# Local listener readiness only; this never certifies end-to-end service health.
+SERVICE_LISTENER_PROTOCOLS = {
+    "amf": "sctp", "smf": "udp", "upf": "udp", "nrf": "tcp", "mongodb": "tcp",
+}
 READONLY_DIAGNOSTIC_PROFILES = {
     "process_summary",
     "service_status",
-    "container_state",
-    "workload_state",
     "bounded_log_tail",
 }
 BASE_ACTION_PARAMETERS = {
@@ -283,8 +298,15 @@ def validate_request(request: dict) -> None:
         if request["purpose"] not in {"pre_action_snapshot", "post_action_verification",
                                      "post_rollback_verification"}:
             raise ValueError("invalid verification purpose")
-    if operation == "observe" and request.get("capability") not in CAPABILITIES:
-        raise ValueError("unsupported diagnostic capability")
+    if operation == "observe":
+        capability = request.get("capability")
+        if capability not in CAPABILITIES:
+            raise ValueError("unsupported diagnostic capability")
+        if capability in DIAGNOSTIC_PARAMETERS:
+            allowed = DIAGNOSTIC_PARAMETERS[capability]
+            for key, value in (request.get("parameters") or {}).items():
+                if key not in allowed or value not in allowed[key]:
+                    raise ValueError(f"unsupported {capability} parameter: {key}")
     if operation in {"act", "status"} and not ID_RE.fullmatch(
         str(request.get("external_request_id", ""))
     ):
@@ -377,8 +399,12 @@ def observe(request: dict) -> dict:
     return {
         "ok": True,
         "operation": "observe",
-        "data": {"records": records, "partial": False,
-                 "freshness": "snapshot" if capability == "protocol_summary" else "live"},
+        "data": {"records": records,
+                 "partial": any(record.get("resolution") == "unknown"
+                                or record.get("health") == "unknown" for record in records),
+                 "freshness": "snapshot" if capability == "protocol_summary" or (
+                     capability == "sandboxed_readonly_diagnostic"
+                     and parameters.get("diagnostic_profile") == "bounded_log_tail") else "live"},
         "evidence_refs": list(dict.fromkeys(evidence_refs)),
         "observed_at": now(),
     }
@@ -442,14 +468,22 @@ def query_resource_observation(
     resource_scope: dict,
 ) -> tuple[list[dict], list[str]]:
     refs = _resource_refs(trial_id, parameters, resource_scope)
-    process_response = base_observe(trial_id, "processes")
-    process_data = dict(process_response.get("data") or {})
+    options = parameters.get("parameters") or {}
+    if not isinstance(options, dict) or set(options) - {"line_limit"}:
+        raise ValueError("unsupported resource observation parameters")
     diagnostic_profile = str(parameters.get("diagnostic_profile") or "process_summary")
     if (
         capability == "sandboxed_readonly_diagnostic"
         and diagnostic_profile not in READONLY_DIAGNOSTIC_PROFILES
     ):
         raise ValueError("unsupported readonly diagnostic profile")
+    if "line_limit" in options and (
+        capability != "sandboxed_readonly_diagnostic" or diagnostic_profile != "bounded_log_tail"
+        or type(options["line_limit"]) is not int or not 1 <= options["line_limit"] <= 1000
+    ):
+        raise ValueError("line_limit requires bounded_log_tail and an integer from 1 to 1000")
+    process_response = base_observe(trial_id, "processes")
+    process_data = dict(process_response.get("data") or {})
     logs: dict = {}
     if capability == "sandboxed_readonly_diagnostic" and diagnostic_profile == "bounded_log_tail":
         logs = dict(base_observe(trial_id, "logs").get("data") or {})
@@ -491,13 +525,7 @@ def query_resource_observation(
                 active=active,
             )
         elif capability == "service_health":
-            record.update(
-                health=(
-                    "healthy" if active else "unhealthy" if active is False else "unknown"
-                ),
-                ready=active,
-                active=active,
-            )
+            record.update(local_listener_health(ref["resource_id"], target, active))
         else:
             record.update(
                 diagnostic_profile=diagnostic_profile,
@@ -507,7 +535,7 @@ def query_resource_observation(
                 ),
             )
             if diagnostic_profile == "bounded_log_tail":
-                line_limit = max(1, min(1000, int(parameters.get("line_limit", 80))))
+                line_limit = options.get("line_limit", 80)
                 if ref["resource_id"] == "gnb-1":
                     selected = logs.get("gnb") or []
                 elif ref["resource_id"] == "ue-1":
@@ -515,35 +543,75 @@ def query_resource_observation(
                 else:
                     selected = dict(logs.get("open5gs") or {}).get(ref["resource_id"]) or []
                 record["log_tail"] = [str(line)[:500] for line in list(selected)[-line_limit:]]
+                record["sampling_mode"] = "existing_log_tail"
+                record["log_time_range"] = {"start": None, "end": None}
+                record["time_coverage"] = "unknown"
         records.append(record)
     return records, list(dict.fromkeys(matched_evidence_refs))
 
 
+def collected(args: list[str]) -> str:
+    """Collection failures are not successful empty observations."""
+    result = run(args, timeout=8)
+    if result.returncode != 0:
+        raise RuntimeError(f"diagnostic collection failed: {args[-1]} (exit {result.returncode})")
+    return result.stdout or ""
+
+
+def local_listener_health(resource_id: str, target: tuple | None, active: bool | None) -> dict:
+    protocol = SERVICE_LISTENER_PROTOCOLS.get(resource_id)
+    checks = {"process_active": active, "owned_protocol_listener": None}
+    details = {
+        "health_scope": "local_process_listener",
+        "business_health": "not_measured",
+        "checks": checks,
+    }
+    ready = False if active is False else None
+    if active is True and target is not None and protocol:
+        pid_text = collected(["systemctl", "show", target[1], "--property=MainPID", "--value"]).strip()
+        if not pid_text.isdigit():
+            raise RuntimeError("diagnostic collection returned an invalid MainPID")
+        pid = int(pid_text)
+        if pid > 0:
+            output = collected(["ss", "-H", "-l", "-n", "-p", "-A", protocol])
+            owned = [
+                line[:500] for line in output.splitlines()
+                if re.search(rf"\bpid={pid},", line)
+            ]
+            ready = bool(owned)
+            checks["owned_protocol_listener"] = ready
+            details.update(process_id=pid, listener_protocol=protocol, listeners=owned[:30])
+    return {
+        **details, "active": active, "ready": ready,
+        "health": "healthy" if ready is True else "unhealthy" if ready is False else "unknown",
+    }
+
+
 def probe_sctp() -> list[dict]:
-    result = run(["ss", "-H", "-n", "-A", "sctp"], timeout=8)
-    lines = [line[:500] for line in (result.stdout or "").splitlines() if line.strip()]
+    output = collected(["ss", "-H", "-n", "-A", "sctp"])
+    lines = [line[:500] for line in output.splitlines() if line.strip()]
     return [{"association_count": len(lines), "associations": lines[:30]}]
 
 
 def query_routes(parameters: dict) -> list[dict]:
     profile = parameters.get("node_profile", "ue")
     prefix = node_prefix(profile)
-    result = run([*prefix, "ip", "-j", "route", "show"], timeout=8)
-    return [{"node_profile": profile, "routes": parse_json_list(result.stdout)}]
+    output = collected([*prefix, "ip", "-j", "route", "show"])
+    return [{"node_profile": profile, "routes": parse_json_list(output)}]
 
 
 def query_interfaces(parameters: dict) -> list[dict]:
     profile = parameters.get("node_profile", "ue")
     prefix = node_prefix(profile)
-    result = run([*prefix, "ip", "-j", "address", "show"], timeout=8)
-    return [{"node_profile": profile, "interfaces": parse_json_list(result.stdout)}]
+    output = collected([*prefix, "ip", "-j", "address", "show"])
+    return [{"node_profile": profile, "interfaces": parse_json_list(output)}]
 
 
 def query_sockets(parameters: dict) -> list[dict]:
     profile = parameters.get("node_profile", "core")
     prefix = node_prefix(profile)
-    result = run([*prefix, "ss", "-H", "-lntup"], timeout=8)
-    lines = [line[:500] for line in (result.stdout or "").splitlines() if line.strip()]
+    output = collected([*prefix, "ss", "-H", "-lntup"])
+    lines = [line[:500] for line in output.splitlines() if line.strip()]
     return [{"node_profile": profile, "socket_count": len(lines), "sockets": lines[:80]}]
 
 
@@ -787,6 +855,14 @@ def health() -> dict:
             "consumer_id": CONSUMER_ID,
             "slot_id": SLOT_ID,
             "resource_scope": response.get("resource_scope"),
+            "diagnostics": {
+                "contract_version": "opsmind-lab-diagnostics/1.0",
+                "capabilities": sorted(CAPABILITIES),
+                "parameters": DIAGNOSTIC_PARAMETERS,
+                "readonly_profiles": sorted(READONLY_DIAGNOSTIC_PROFILES),
+                "runtime_resources": sorted(RUNTIME_TARGETS),
+                "health_scope": "local_process_listener",
+            },
         },
     }
 
@@ -828,10 +904,12 @@ def load_base_module():
 
 def parse_json_list(value: str) -> list:
     try:
-        parsed = json.loads(value or "[]")
-    except json.JSONDecodeError:
-        return []
-    return parsed if isinstance(parsed, list) else []
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("diagnostic collection returned invalid JSON") from exc
+    if not isinstance(parsed, list):
+        raise RuntimeError("diagnostic collection did not return an array")
+    return parsed
 
 
 def last_lines(value: str, count: int) -> list[str]:

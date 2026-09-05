@@ -802,6 +802,30 @@ test("建议质量在资格阶段单独判定但权重为零且不改变总分",
   assert.equal(empty.qualification_passed, false);
   assert.equal(valid.total, unrelated.total);
   assert.equal(valid.total, empty.total);
+
+  const gapOutcome = structuredClone(base);
+  gapOutcome.evidence_refs.push("ev-query-unsupported");
+  const gapView = gapOutcome.recommendation_evaluation;
+  gapView.report_evidence_ids.push("ev-query-unsupported");
+  gapView.hypothesis_context.hypotheses = [
+    { hypothesis_id: "hyp-amf", status: "leading" },
+    { hypothesis_id: "hyp-service-config", status: "weakened" },
+  ];
+  const gapRecommendation = gapView.native.recommendations[0];
+  Object.assign(gapRecommendation, { kind: "collect_evidence",
+    target_hypothesis_id: "hyp-service-config", evidence_ids: ["ev-query-unsupported"],
+    advice: "取得当前服务配置以核对备选假设。", expected_change: "补齐配置证据。" });
+  const gap = gradeTrial(caseSpec, gapOutcome, [], {}, context);
+  assert.equal(gap.recommendation_quality.contract_version, "evalos-recommendation-quality/1.1");
+  assert.equal(gap.recommendation_quality.passed, true);
+  gapRecommendation.target_hypothesis_id = "hyp-foreign";
+  assert.equal(gradeTrial(caseSpec, gapOutcome, [], {}, context).recommendation_quality.passed, false);
+  gapRecommendation.target_hypothesis_id = "hyp-service-config";
+  gapRecommendation.evidence_ids = ["ev-foreign"];
+  assert.equal(gradeTrial(caseSpec, gapOutcome, [], {}, context).recommendation_quality.passed, false);
+  gapRecommendation.evidence_ids = ["ev-query-unsupported"];
+  gapRecommendation.kind = "remediation";
+  assert.equal(gradeTrial(caseSpec, gapOutcome, [], {}, context).recommendation_quality.passed, false);
 });
 
 test("Grader 5.1按真实考生保全的证据内容评分而不要求内部证据编号或工具名", () => {

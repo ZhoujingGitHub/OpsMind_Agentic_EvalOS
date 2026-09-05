@@ -65,6 +65,8 @@ def test_leased_lab_runtime_observation_resolves_amf_without_cross_scope_fallbac
     }]
     assert evidence_refs == ["process:open5gs-amfd-inactive"]
 
+    monkeypatch.setattr(labctl, "run", lambda *a, **k:
+                        types.SimpleNamespace(returncode=0, stdout="0"))
     service_records, service_refs = labctl.query_resource_observation(
         "ah-direct-test-1",
         {
@@ -85,7 +87,8 @@ def test_leased_lab_runtime_observation_resolves_amf_without_cross_scope_fallbac
         },
     )
     assert service_records[0]["active"] is True
-    assert service_records[0]["health"] == "healthy"
+    assert service_records[0]["health"] == "unknown"
+    assert service_records[0]["ready"] is None
     assert service_refs == []
 
     with pytest.raises(PermissionError, match="outside the active lab lease"):
@@ -305,3 +308,76 @@ def test_capture_summary_rejects_sampling_options_it_cannot_honor(monkeypatch, p
     monkeypatch.setattr(labctl, "base_observe", lambda *a: pytest.fail("reject before reading"))
     with pytest.raises(ValueError, match="does not support"):
         labctl.protocol_summary("ah-a", parameters)
+
+@pytest.mark.parametrize("operation", [
+    lambda: labctl.query_routes({"node_profile": "gnb"}),
+    lambda: labctl.query_interfaces({"node_profile": "ue"}),
+    lambda: labctl.query_sockets({"node_profile": "core"}),
+    labctl.probe_sctp,
+])
+def test_failed_collectors_never_return_successful_empty_observations(monkeypatch, operation):
+    monkeypatch.setattr(labctl, "run", lambda *a, **k:
+                        types.SimpleNamespace(returncode=1, stdout="permission denied"))
+    with pytest.raises(RuntimeError, match="collection failed"):
+        operation()
+
+
+@pytest.mark.parametrize("value", ["", "not json", "{}", "null"])
+def test_route_and_interface_parsing_reports_invalid_output(value):
+    with pytest.raises(RuntimeError, match="diagnostic collection"):
+        labctl.parse_json_list(value)
+
+
+def test_empty_collected_array_remains_a_valid_negative_observation(monkeypatch):
+    monkeypatch.setattr(labctl, "run", lambda *a, **k:
+                        types.SimpleNamespace(returncode=0, stdout="[]"))
+    assert labctl.query_routes({"node_profile": "gnb"}) == [{"node_profile": "gnb", "routes": []}]
+
+
+@pytest.mark.parametrize("listener_pid,ready", [(125, True), (1250, False), (91, False)])
+def test_local_health_requires_listener_owned_by_the_service(monkeypatch, listener_pid, ready):
+    calls = []
+    def run(args, **kwargs):
+        calls.append(args)
+        return types.SimpleNamespace(returncode=0, stdout="125" if args[0] == "systemctl" else
+            f'LISTEN 0 5 127.0.0.5:38412 users:(("service",pid={listener_pid},fd=4))')
+    monkeypatch.setattr(labctl, "run", run)
+    result = labctl.local_listener_health("amf", labctl.RUNTIME_TARGETS["amf"], True)
+    assert result["ready"] is ready
+    assert result["checks"]["owned_protocol_listener"] is ready
+    assert result["health_scope"] == "local_process_listener"
+    assert result["business_health"] == "not_measured"
+    assert calls[1][-1] == "sctp"
+
+
+def test_active_process_without_readiness_profile_does_not_claim_health(monkeypatch):
+    monkeypatch.setattr(labctl, "run", lambda *a, **k: pytest.fail("no invented readiness probe"))
+    result = labctl.local_listener_health("ue-1", labctl.RUNTIME_TARGETS["ue-1"], True)
+    assert result["active"] is True and result["ready"] is None
+    assert result["health"] == "unknown"
+
+def test_log_tail_honors_mcp_parameters_and_reports_historical_coverage(monkeypatch):
+    ref = {"identifier_domain": "opsmind-twin", "namespace": "ah-current",
+           "resource_type": "service", "resource_id": "amf"}
+    scope = {"identifier_domain": "opsmind-twin", "namespace": "ah-current", "resource_refs": [ref]}
+    calls = []
+    def base(trial, capability):
+        calls.append(capability)
+        return {"data": {"services": {"open5gs-amfd": True}} if capability == "processes"
+                else {"open5gs": {"amf": ["line 1", "line 2", "line 3"]}}}
+    monkeypatch.setattr(labctl, "base_observe", base)
+    parameters = {"resource_refs": [ref], "diagnostic_profile": "bounded_log_tail",
+                  "parameters": {"line_limit": 2}}
+    records, _ = labctl.query_resource_observation("ah-current", parameters, "sandboxed_readonly_diagnostic", scope)
+    assert records[0]["log_tail"] == ["line 2", "line 3"]
+    assert records[0]["log_time_range"] == {"start": None, "end": None}
+    assert calls == ["processes", "logs"]
+    for options in ({"command": "anything"}, {"line_limit": True}, {"line_limit": 0}):
+        parameters["parameters"] = options
+        with pytest.raises(ValueError):
+            labctl.query_resource_observation("ah-current", parameters, "sandboxed_readonly_diagnostic", scope)
+    parameters["parameters"] = {}
+    parameters["diagnostic_profile"] = "container_state"
+    with pytest.raises(ValueError, match="unsupported readonly"):
+        labctl.query_resource_observation("ah-current", parameters, "sandboxed_readonly_diagnostic", scope)
+    assert calls == ["processes", "logs"]
