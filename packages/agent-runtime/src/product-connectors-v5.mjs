@@ -321,7 +321,7 @@ function agentHarnessNativeContract(capability, runtime) {
     .every(([left, right]) => Boolean(left) && Boolean(right) && String(left) === String(right));
   return Object.freeze({ supported: capability?.native_run_context_supported === true &&
       runtime?.native_run_context_supported === true && versionsAgree && budgetLimits !== null &&
-      versions.repair_delivery === "opsmind-repair-delivery/1.0",
+      versions.repair_delivery === "opsmind-repair-delivery/1.1",
     versions, budget_limits: budgetLimits });
 }
 
@@ -722,11 +722,20 @@ function authoritativeOutcome({ status, detail = {}, projection = null, events =
     required: recommendationRequired, sourceRef: recommendationSourceRef });
   const repair = productRepairProgress(translate(events, product, (_, index) => `result:${index}`,
     (event) => event.event_type ?? event.name ?? event.action).normalized);
+  if (product === "agent-harness") {
+    const liveFacts = detail.repair_delivery?.actions ?? [];
+    repair.recovery_verified = repair.recovery_verified && repair.actions
+      .filter((item) => item.attempted)
+      .every((item) => liveFacts.some((fact) => fact.action_id === item.action_id &&
+        fact.execution_status === "succeeded" && fact.business_status === "passed" &&
+        fact.business_verification?.passed === true));
+  }
   const taskResolved = rootCauseConfirmed && (operatingMode === "diagnosis_only" || repair.recovery_verified);
   return { status: taskResolved ? "resolved" : "inconclusive",
     delivery_state: { contract_version: "opsmind-task-delivery/1.0", investigation: String(status),
       diagnosis: rootCauseConfirmed ? gateConclusion || "confirmed" : "inconclusive",
-      operating_mode: operatingMode, remediation: repair },
+      operating_mode: operatingMode, remediation: repair,
+      current_action_facts: product === "agent-harness" ? detail.repair_delivery : null },
     root_cause: rootCauseConfirmed ? publishedRootCause : null,
     confidence: rootCauseConfirmed ? boundedConfidence(projection?.root_cause_confidence ?? taskResult.root_cause_confidence ??
       taskResult.confidence ?? leading?.confidence ?? report.confidence ?? detail.confidence) : 0,
@@ -1072,7 +1081,7 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
         execution_mode: executionContract.execution_mode, production_writes_available: false };
     },
     async start({ executionContract }) {
-      if (latestNativeContract?.versions.repair_delivery !== "opsmind-repair-delivery/1.0") {
+      if (latestNativeContract?.versions.repair_delivery !== "opsmind-repair-delivery/1.1") {
         throw new Error("Agent+Harness repair delivery contract is unavailable; update the product before starting a Trial");
       }
       const requestBody = agentHarnessSubmission(executionContract, latestNativeContract);
@@ -1105,7 +1114,7 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
       for (const item of actions) {
         if (item.trial_id !== executionContract.trial.id) throw new Error("Action belongs to a different or unbound Trial");
       }
-      const pendingAction = hasPendingProductActions(actions);
+      const pendingAction = agentHarnessRepairPending(detail, actions);
       const terminal = !pendingAction && ["resolved", "inconclusive", "insufficient_evidence", "failed", "cancelled", "budget_exhausted"].includes(state);
       const events = terminal ? await readCursorPages({ api, pathname: logPath, cursorParam: "after_sequence",
         nextField: "next_sequence", itemCursorField: "sequence", initialCursor: 0,
@@ -1187,7 +1196,8 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
       const reportRef = detail.report_ref ?? delivery?.uri ?? detail.report?.archive_uri ??
         (delivery?.delivery_id ? `agent-harness:report-delivery:${delivery.delivery_id}` : null);
       const reportRaw = terminal && (detail.report || reportRef)
-        ? [rawEvent("agent-harness-product", `agent-harness:report:${runRef}`, { report_ref: reportRef, report: detail.report })] : [];
+        ? [rawEvent("agent-harness-product", `agent-harness:report:${runRef}`, { report_ref: reportRef, report: detail.report,
+          current_repair_delivery: detail.repair_delivery })] : [];
       const evidenceRaw = terminal && Array.isArray(detail.evidence)
         ? detail.evidence.filter((item) => item && typeof item === "object").map((item, index) =>
           rawEvent("agent-harness-product",
@@ -1223,7 +1233,7 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
     async probeRun({ runRef }) {
       const detail = await api.request(`/v2/investigations/${encodeURIComponent(runRef)}`);
       const actionPage = await api.request(`/v2/actions?limit=500&investigation_id=${encodeURIComponent(runRef)}`);
-      if (listItems(actionPage).length >= 500 || hasPendingProductActions(
+      if (listItems(actionPage).length >= 500 || agentHarnessRepairPending(detail,
         listItems(actionPage).filter((item) => item.investigation_id === runRef))) {
         return { run_ref: runRef, status: "RUNNING", terminal: false, raw_status: "repair_pending" };
       }
@@ -1234,8 +1244,9 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
       return { run_ref: runRef, status, terminal: status !== "RUNNING", raw_status: rawStatus };
     },
     async finalize({ runRef }) {
+      const detail = await api.request("/v2/investigations/" + encodeURIComponent(runRef));
       const actionPage = await api.request(`/v2/actions?limit=500&investigation_id=${encodeURIComponent(runRef)}`);
-      if (listItems(actionPage).length >= 500 || hasPendingProductActions(
+      if (listItems(actionPage).length >= 500 || agentHarnessRepairPending(detail,
         listItems(actionPage).filter((item) => item.investigation_id === runRef))) {
         throw new Error("Repair is pending; the laboratory must remain isolated");
       }
@@ -1544,3 +1555,20 @@ export const PRODUCT_CONNECTOR_V5_RUNTIME = Object.freeze({
   hiddenFieldsSent: false, bindingContract: "evalos-product-run-binding.3",
   cleanup: "candidate-handoff-then-evalos-authoritative-snapshot-reset",
 });
+
+
+// Product run completion and independently observed business recovery are different facts.
+// Two API reads may straddle an approval; keep polling until their action sets agree.
+export function agentHarnessRepairPending(detail, actions) {
+  const delivery = detail?.repair_delivery;
+  if (delivery?.contract_version !== "opsmind-repair-delivery/1.1" ||
+      delivery.source !== "action_ledger" || !Array.isArray(delivery.actions) ||
+      typeof delivery.pending !== "boolean") {
+    throw new Error("AH_REPAIR_DELIVERY_CONTRACT_MISSING");
+  }
+  const ids = new Set(actions.map((item) => item.action_id));
+  const facts = delivery.actions;
+  if (facts.length !== ids.size || new Set(facts.map((item) => item.action_id)).size !== facts.length ||
+      facts.some((item) => !ids.has(item.action_id))) return true;
+  return delivery.pending || facts.some((item) => item.pending !== false) || hasPendingProductActions(actions);
+}

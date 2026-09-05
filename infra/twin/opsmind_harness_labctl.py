@@ -377,7 +377,8 @@ def observe(request: dict) -> dict:
     return {
         "ok": True,
         "operation": "observe",
-        "data": {"records": records, "partial": False},
+        "data": {"records": records, "partial": False,
+                 "freshness": "snapshot" if capability == "protocol_summary" else "live"},
         "evidence_refs": list(dict.fromkeys(evidence_refs)),
         "observed_at": now(),
     }
@@ -557,49 +558,25 @@ def _nested_text(value: object) -> list[str]:
 
 
 def protocol_summary(trial_id: str, parameters: dict) -> list[dict]:
-    profile = parameters.get("capture_profile", "n1n2")
-    if profile not in {"n1n2", "n3", "n6", "mec"}:
-        raise ValueError("invalid capture_profile")
-    duration = max(1, min(10, int(parameters.get("duration_seconds", 3))))
-    packet_limit = max(1, min(200, int(parameters.get("packet_limit", 50))))
-    pcap = base_observe(trial_id, "pcap_summary")
-    sessions = base_observe(trial_id, "sessions")
-    subscriber = base_observe(trial_id, "subscriber")
-    logs = base_observe(trial_id, "logs")
-    log_lines = [line.lower() for line in _nested_text(logs.get("data", {}))]
-
-    def contains_all(*needles: str) -> bool:
-        return any(all(needle in line for needle in needles) for line in log_lines)
-
-    signals = {
-        "authentication_failure": contains_all("authentication", "fail"),
-        "unknown_subscriber": contains_all("unknown", "supi"),
-        "dnn_not_supported": contains_all("dnn", "not supported"),
-        "amf_selection_failed": contains_all("amf selection", "fail"),
-        "ng_setup_failed": contains_all("ng setup", "fail"),
-    }
-    evidence_refs = sorted(
-        {
-            str(reference)
-            for response in (pcap, sessions, subscriber, logs)
-            for reference in response.get("evidence_refs", ())
-        }
-    )
-    return [
-        {
-            "capture_profile": profile,
-            "requested_duration_seconds": duration,
-            "requested_packet_limit": packet_limit,
-            "immutable_capture_summary": pcap.get("data", {}),
-            "registration_and_session_state": sessions.get("data", {}),
-            "subscriber_state": subscriber.get("data", {}),
-            "protocol_signals": signals,
-            "evidence_refs": evidence_refs,
-            "bounded": True,
-            "raw_packet_payload_exposed": False,
-            "subscriber_secret_exposed": False,
-        }
-    ]
+    if parameters:
+        raise ValueError("existing capture summary does not support sampling options")
+    response = base_observe(trial_id, "pcap_summary")
+    summary = dict(response.get("data") or {})
+    # The existing collector is cumulative, not four separately sampled locations.
+    # Do not mix current sessions or scenario-conditioned evidence into this source.
+    return [{
+        "source_ref": f"protocol-lab:{trial_id}:protocol_summary",
+        "sampling_mode": "existing_capture_summary",
+        "location_coverage": "not_separated",
+        "capture_time_range": {"start": None, "end": None},
+        "summary_read_at": response.get("observed_at"),
+        "protocol_counts_file_scope": "first_capture_file",
+        "observation_available": bool(summary.get("files", 0)),
+        "capture_summary": summary,
+        "bounded": True,
+        "raw_packet_payload_exposed": False,
+        "subscriber_secret_exposed": False,
+    }]
 
 
 def _read_profile_fields(path: Path) -> dict[str, str]:
@@ -759,10 +736,9 @@ def snapshot(request: dict) -> dict:
                                   "post_rollback_verification"}:
         verification = harness_probes.business_verification(dict(value.get("resource_scope") or {}))
         value["business_verification"] = verification
-        outcomes = (verification["passed"], dict(value.get("recovery") or {}).get("task_success"))
-        value["task_success"] = (False if any(result is False for result in outcomes) else
-                                 True if all(result is True for result in outcomes) else None)
-        value["healthy"] = value["task_success"]
+        # Keep the unchanged scenario grade under recovery. Product health is
+        # independently sampled business availability, not the grader's change count.
+        value["healthy"] = verification["passed"]
     return {**response, "snapshot": value}
 
 

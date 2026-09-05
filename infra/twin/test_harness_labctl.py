@@ -194,8 +194,8 @@ def test_regular_snapshot_does_not_claim_business_recovery_or_run_probes(monkeyp
 
 
 @pytest.mark.parametrize("business,base,expected", [(False, True, False), (True, True, True),
-                                                  (None, True, None), (True, False, False),
-                                                  (None, False, False), (True, None, None)])
+                                                  (None, True, None), (True, False, True),
+                                                  (None, False, None), (True, None, True)])
 @pytest.mark.parametrize("purpose", ["pre_action_snapshot", "post_action_verification",
                                     "post_rollback_verification"])
 def test_verifier_cannot_expand_registration_success_into_business_recovery(monkeypatch, business, base, expected, purpose):
@@ -262,3 +262,46 @@ def test_prepare_timeout_uses_the_same_owned_cleanup_path(monkeypatch):
     assert result["error"]["code"] == "MEC_TOPOLOGY_FAILED"
     assert result["cleanup"]["clean"] is True
     assert cleaned == ["ah-test"]
+
+
+@pytest.mark.parametrize("business,score", [(True, False), (False, True), (None, False)])
+def test_business_health_is_independent_of_scenario_score(monkeypatch, business, score):
+    monkeypatch.setattr(labctl, "claim_active_lease", lambda _: None)
+    monkeypatch.setattr(labctl, "base_call", lambda _: {"ok": True, "snapshot": {
+        "recovery": {"task_success": score, "minimal_change": score}, "resource_scope": {}}})
+    monkeypatch.setattr(labctl, "topology_status", lambda: {})
+    monkeypatch.setattr(labctl.harness_probes, "business_verification", lambda _: {"passed": business})
+    value = labctl.snapshot({"trial_id": "ah-test", "purpose": "post_action_verification"})["snapshot"]
+    assert value["healthy"] is business
+    assert value["recovery"]["task_success"] is score
+    assert "task_success" not in value
+
+
+def test_capture_summary_exposes_one_source_and_never_imports_scenario_hints(monkeypatch):
+    calls = []
+    def base(trial, capability):
+        calls.append((trial, capability))
+        return {"data": {"files": 1, "bytes": 42, "protocol_frames": {"sctp": 2}},
+                "observed_at": "2026-09-05T04:00:00Z",
+                "evidence_refs": ["state:firewall-sctp-drop"]}
+    monkeypatch.setattr(labctl, "base_observe", base)
+    first, = labctl.protocol_summary("ah-a", {})
+    second, = labctl.protocol_summary("ah-a", {})
+    other, = labctl.protocol_summary("ah-b", {})
+    assert calls == [("ah-a", "pcap_summary"), ("ah-a", "pcap_summary"), ("ah-b", "pcap_summary")]
+    assert first["source_ref"] == second["source_ref"]
+    assert first["source_ref"] != other["source_ref"]
+    assert first["sampling_mode"] == "existing_capture_summary"
+    assert first["capture_time_range"] == {"start": None, "end": None}
+    assert first["location_coverage"] == "not_separated"
+    assert "firewall-sctp-drop" not in str(first)
+    assert "registration_and_session_state" not in first
+
+
+@pytest.mark.parametrize("parameters", [
+    {"capture_profile": "n3"}, {"duration_seconds": 3}, {"packet_limit": 50},
+])
+def test_capture_summary_rejects_sampling_options_it_cannot_honor(monkeypatch, parameters):
+    monkeypatch.setattr(labctl, "base_observe", lambda *a: pytest.fail("reject before reading"))
+    with pytest.raises(ValueError, match="does not support"):
+        labctl.protocol_summary("ah-a", parameters)

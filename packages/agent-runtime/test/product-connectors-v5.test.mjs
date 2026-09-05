@@ -162,7 +162,7 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   let sourceRef = null;
   let actionDetail = null;
   let evaluationPatch = {};
-  let repairDeliveryContract = "opsmind-repair-delivery/1.0";
+  let repairDeliveryContract = "opsmind-repair-delivery/1.1";
   let runContext = null;
   let budgetAckOverride = null;
   let conclusionStatus = "confirmed";
@@ -222,6 +222,13 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
       run_context_ack: { native: true, contract_version: "opsmind-run-context/1.0",
         budget_contract_version: "opsmind-run-budget/1.0", actual_budget: budgetAckOverride ?? runContext?.budget } }] }),
     "GET /v2/investigations/run-ah": async () => ({ status: investigationStatus, candidate_id: "candidate-ah",
+      repair_delivery: { contract_version: "opsmind-repair-delivery/1.1", source: "action_ledger",
+        pending: actionDetail?.status === "human_required",
+        actions: actionDetail ? [{ action_id: actionDetail.action_id, pending: actionDetail.status === "human_required",
+          execution_status: actionDetail.status === "verified_effective" ? "succeeded" : "not_started",
+          business_status: actionDetail.events?.some((event) => event.event_type === "verification.effective") ? "passed" : "unknown",
+          business_verification: { passed: actionDetail.events?.some((event) => event.event_type === "verification.effective") === true },
+        }] : [] },
       run_context: runContext, run_context_ack: { native: true, contract_version: "opsmind-run-context/1.0",
         budget_contract_version: "opsmind-run-budget/1.0", usage_contract_version: "opsmind-run-usage/1.0",
         actual_budget: budgetAckOverride ?? runContext?.budget }, usage: { contract_version: "opsmind-run-usage/1.0", tool_calls: 2,
