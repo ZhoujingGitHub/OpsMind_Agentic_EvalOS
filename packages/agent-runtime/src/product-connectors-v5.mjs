@@ -231,8 +231,8 @@ function immutableRuntimeProjection(runtime) {
 }
 
 function publicModelVisibleResult(value) {
-  const supported = value?.contract_version === "opsmind-model-visible-result/1.0" &&
-    value.silent_truncation === false;
+  const supported = ["opsmind-model-visible-result/1.0", "opsmind-model-visible-result/2.0"]
+    .includes(value?.contract_version) && value.silent_truncation === false;
   return Object.freeze({ supported, contract_version: value?.contract_version ?? null,
     silent_truncation: value?.silent_truncation ?? null });
 }

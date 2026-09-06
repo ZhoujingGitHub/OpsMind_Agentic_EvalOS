@@ -190,7 +190,8 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
         unavailable: { Bash: { status: "unavailable", reason_code: "SDK_SANDBOX_PROC_MOUNT_NOT_PERMITTED",
           sandbox_required: true, unsafe_fallback_allowed: false } } },
       candidate_observation: candidateObservationState,
-      model_visible_result_contract: MODEL_VISIBLE_RESULT,
+      model_visible_result_contract: { ...MODEL_VISIBLE_RESULT,
+        contract_version: "opsmind-model-visible-result/2.0" },
       protocol_lab_binding_contract_version: "2.0", native_run_context_supported: true,
       repair_delivery_contract_version: repairDeliveryContract,
       run_context_contract_version: "opsmind-run-context/1.0",
@@ -327,7 +328,7 @@ test("Adapter 5 Agent+Harness连接器发送原生预算并核验产品回执与
   assert.equal(discovery.candidate_runtime.versions.candidate_observation,
     "opsmind-candidate-observation/1.0");
   assert.equal(discovery.candidate_runtime.versions.model_visible_result,
-    "opsmind-model-visible-result/1.0");
+    "opsmind-model-visible-result/2.0");
   assert.equal(discovery.native_run_context_supported, true);
   const readiness = await connector.evaluationReadiness();
   assert.equal(readiness.budget_contract.native_enforcement, true);

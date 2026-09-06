@@ -101,14 +101,27 @@ SERVICE_LISTENER_PROTOCOLS = {
     "amf": "sctp", "smf": "udp", "upf": "udp", "nrf": "tcp", "mongodb": "tcp",
 }
 READONLY_DIAGNOSTIC_PROFILES = {
-    "process_summary": "读取目标进程是否运行及进程标识；不代表端到端业务健康。",
-    "service_status": "读取目标系统服务状态与本机监听健康；不代表端到端业务健康。",
-    "bounded_log_tail": "读取目标服务的近期日志；可用 parameters.line_limit 缩小返回行数。",
-    "network_policy": (
-        "读取目标所在网络命名空间的实际防火墙 filter/NAT 规则、顺序、匹配条件、"
-        "动作、命中计数和采集时间；只返回现场事实，不修改规则或推断根因。"
-    ),
+    "process_summary": {
+        "description": "读取目标进程是否运行及进程标识；不代表端到端业务健康。",
+        "parameters": {},
+    },
+    "service_status": {
+        "description": "读取目标系统服务状态与本机监听健康；不代表端到端业务健康。",
+        "parameters": {},
+    },
+    "bounded_log_tail": {
+        "description": "读取目标服务的近期日志；可用 parameters.line_limit 缩小返回行数。",
+        "parameters": {"line_limit": {"type": "integer", "minimum": 1, "maximum": 1000}},
+    },
+    "network_policy": {
+        "description": (
+            "读取目标所在网络命名空间的实际防火墙 filter/NAT 规则、顺序、匹配条件、"
+            "动作、命中计数和采集时间；只返回现场事实，不修改规则或推断根因。"
+        ),
+        "parameters": {},
+    },
 }
+
 BASE_ACTION_PARAMETERS = {
     "subscriber_profile": {"source": "reference_profile"},
     "ran_configuration": {"target": "tracking_area", "source": "reference_config"},
@@ -480,8 +493,6 @@ def query_resource_observation(
 ) -> tuple[list[dict], list[str]]:
     refs = _resource_refs(trial_id, parameters, resource_scope)
     options = parameters.get("parameters") or {}
-    if not isinstance(options, dict) or set(options) - {"line_limit"}:
-        raise ValueError("unsupported resource observation parameters")
     diagnostic_profile = str(parameters.get("diagnostic_profile") or "process_summary")
     if (
         capability == "sandboxed_readonly_diagnostic"
@@ -492,11 +503,21 @@ def query_resource_observation(
             + ", ".join(sorted(READONLY_DIAGNOSTIC_PROFILES))
             + ". No diagnostic was executed."
         )
-    if "line_limit" in options and (
-        capability != "sandboxed_readonly_diagnostic" or diagnostic_profile != "bounded_log_tail"
-        or type(options["line_limit"]) is not int or not 1 <= options["line_limit"] <= 1000
-    ):
-        raise ValueError("line_limit requires bounded_log_tail and an integer from 1 to 1000")
+    allowed = (READONLY_DIAGNOSTIC_PROFILES[diagnostic_profile]["parameters"]
+               if capability == "sandboxed_readonly_diagnostic" else {})
+    if not isinstance(options, dict) or set(options) - set(allowed):
+        raise ValueError(
+            "unsupported resource observation parameters; accepted parameters: "
+            + json.dumps(allowed, sort_keys=True) + ". No diagnostic was executed."
+        )
+    for name, value in options.items():
+        schema = allowed[name]
+        if (schema["type"] != "integer" or type(value) is not int
+                or not schema["minimum"] <= value <= schema["maximum"]):
+            raise ValueError(
+                f"{name} requires an integer from {schema['minimum']} to {schema['maximum']}. "
+                "No diagnostic was executed."
+            )
     if capability == "sandboxed_readonly_diagnostic" and diagnostic_profile == "network_policy":
         return query_network_policy(trial_id, refs, parameters.get("service_id")), []
     process_response = base_observe(trial_id, "processes")
@@ -901,7 +922,11 @@ def health() -> dict:
                     "protocol_summary": harness_diagnostics.CAPTURE_PARAMETERS,
                 },
                 "readonly_profiles": sorted(READONLY_DIAGNOSTIC_PROFILES),
-                "profile_descriptions": dict(READONLY_DIAGNOSTIC_PROFILES),
+                "profile_descriptions": {name: profile["description"]
+                                         for name, profile in READONLY_DIAGNOSTIC_PROFILES.items()},
+                "profile_parameters": {name: {"type": "object", "properties": profile["parameters"],
+                                              "additionalProperties": False}
+                                       for name, profile in READONLY_DIAGNOSTIC_PROFILES.items()},
                 "runtime_resources": sorted(RUNTIME_TARGETS),
                 "health_scope": "local_process_listener",
             },

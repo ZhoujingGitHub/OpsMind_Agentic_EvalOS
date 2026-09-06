@@ -453,3 +453,39 @@ def test_diagnostic_catalog_explains_readonly_profiles_without_running_them(monk
     assert "parameters.line_limit" in descriptions["bounded_log_tail"]
     assert "不代表端到端业务健康" in descriptions["service_status"]
     assert not any(answer in str(descriptions) for answer in ("38412", "SCTP", "sctp-blocked"))
+
+
+def test_diagnostic_parameter_declaration_controls_validation_before_execution(monkeypatch):
+    trial = "ah-current"
+    ref = {"identifier_domain": "opsmind-twin", "namespace": trial,
+           "resource_type": "service", "resource_id": "amf"}
+    scope = {"identifier_domain": "opsmind-twin", "namespace": trial, "resource_refs": [ref]}
+    monkeypatch.setattr(labctl, "base_call", lambda _: {"ok": True, "active_trial": None})
+    monkeypatch.setattr(labctl, "topology_status", lambda: {"ready": True})
+    schemas = labctl.health()["data"]["diagnostics"]["profile_parameters"]
+    assert set(schemas) == set(labctl.READONLY_DIAGNOSTIC_PROFILES)
+    calls = []
+    monkeypatch.setattr(labctl, "base_observe", lambda *a: calls.append(a) or {
+        "data": {"services": {"open5gs-amfd": True}, "open5gs": {"amf": ["a", "b", "c"]}}})
+    monkeypatch.setattr(labctl, "query_network_policy", lambda *a: calls.append(a) or [])
+    for profile, schema in schemas.items():
+        assert schema["additionalProperties"] is False
+        allowed = {key: item["minimum"] for key, item in schema["properties"].items()}
+        labctl.query_resource_observation(trial, {"resource_refs": [ref],
+            "diagnostic_profile": profile, "parameters": allowed}, "sandboxed_readonly_diagnostic", scope)
+        before = len(calls)
+        with pytest.raises(ValueError, match="accepted parameters") as rejected:
+            labctl.query_resource_observation(trial, {"resource_refs": [ref],
+                "diagnostic_profile": profile, "parameters": {"table": "filter"}},
+                "sandboxed_readonly_diagnostic", scope)
+        assert "No diagnostic was executed." in str(rejected.value)
+        assert len(calls) == before
+    # A changed declared limit is also the enforced limit, not a second constant.
+    monkeypatch.setitem(labctl.READONLY_DIAGNOSTIC_PROFILES["bounded_log_tail"]["parameters"],
+                        "line_limit", {"type": "integer", "minimum": 1, "maximum": 2})
+    assert labctl.health()["data"]["diagnostics"]["profile_parameters"]["bounded_log_tail"][
+        "properties"]["line_limit"]["maximum"] == 2
+    with pytest.raises(ValueError, match="from 1 to 2"):
+        labctl.query_resource_observation(trial, {"resource_refs": [ref],
+            "diagnostic_profile": "bounded_log_tail", "parameters": {"line_limit": 3}},
+            "sandboxed_readonly_diagnostic", scope)
