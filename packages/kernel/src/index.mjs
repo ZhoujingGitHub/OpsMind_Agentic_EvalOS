@@ -3,6 +3,7 @@ export * from "./budget-profile.mjs";
 export * from "./cases.mjs";
 export * from "./m2-cases.mjs";
 export * from "./m3-cases.mjs";
+export * from "./m3-observation-cases.mjs";
 export * from "./grader.mjs";
 export * from "./ledger.mjs";
 export * from "./test-double.mjs";

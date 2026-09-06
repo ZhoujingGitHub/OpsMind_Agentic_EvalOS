@@ -837,7 +837,7 @@ function discovery(attestation, architecture, capability, runtime, health, candi
     usage_observability: { complete: usageComplete, policy: "reported_with_explicit_unknowns" } };
 }
 
-function publicTaskGoal(caseSpec) {
+export function publicTaskGoal(caseSpec) {
   const task = caseSpec.visible.task_contract ?? {};
   let goal = caseSpec.goal;
   // Copy only the public task instructions; never serialize evaluation internals.

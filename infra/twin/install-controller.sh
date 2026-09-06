@@ -44,7 +44,8 @@ LIVE_FILES.update({
     "opsmind-harness-mec-http.py": Path("/usr/local/libexec/opsmind-harness-mec-http.py"),
 })
 ADOPTION_PAYLOAD_FILES = set(LIVE_FILES) | {"install-controller.sh", "harness-source-lineage.json"}
-PAYLOAD_FILES = ADOPTION_PAYLOAD_FILES | {"harness_probes.py"}
+PREVIOUS_PAYLOAD_FILES = ADOPTION_PAYLOAD_FILES | {"harness_probes.py"}
+PAYLOAD_FILES = PREVIOUS_PAYLOAD_FILES | {"harness_diagnostics.py"}
 
 
 def payload_names(metadata):
@@ -53,7 +54,7 @@ def payload_names(metadata):
             not isinstance(item, dict) or not isinstance(item.get("path"), str) for item in inventory):
         raise ValueError("controller release inventory mismatch")
     names = {item.get("path") for item in inventory}
-    if len(inventory) != len(names) or names not in (LEGACY_PAYLOAD_FILES, ADOPTION_PAYLOAD_FILES, PAYLOAD_FILES):
+    if len(inventory) != len(names) or names not in (LEGACY_PAYLOAD_FILES, ADOPTION_PAYLOAD_FILES, PREVIOUS_PAYLOAD_FILES, PAYLOAD_FILES):
         raise ValueError("controller release inventory mismatch")
     return names
 

@@ -5,7 +5,7 @@
 This controller accepts only a frozen JSON contract.  It delegates the existing
 Open5GS/UERANSIM scenario lifecycle to ``opsmind-twinctl`` and adds product-owned
 diagnostic probes, idempotency and a real virtual transport/MEC path.  It never
-accepts a shell command, filesystem path, arbitrary IP address or arbitrary port.
+accepts a shell command, filesystem path, probe destination or arbitrary port. Capture filters only select existing packets.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from pathlib import Path
 # Resolve the immutable release directory when invoked via the fixed symlink.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import harness_probes
+import harness_diagnostics
 
 BASE = Path("/usr/local/sbin/opsmind-twinctl")
 BASE_MODULE = Path("/usr/local/sbin/opsmind-twinctl")
@@ -103,6 +104,7 @@ READONLY_DIAGNOSTIC_PROFILES = {
     "process_summary",
     "service_status",
     "bounded_log_tail",
+    "network_policy",
 }
 BASE_ACTION_PARAMETERS = {
     "subscriber_profile": {"source": "reference_profile"},
@@ -302,7 +304,9 @@ def validate_request(request: dict) -> None:
         capability = request.get("capability")
         if capability not in CAPABILITIES:
             raise ValueError("unsupported diagnostic capability")
-        if capability in DIAGNOSTIC_PARAMETERS:
+        if capability == "protocol_summary":
+            harness_diagnostics.capture_filter(request.get("parameters") or {})
+        elif capability in DIAGNOSTIC_PARAMETERS:
             allowed = DIAGNOSTIC_PARAMETERS[capability]
             for key, value in (request.get("parameters") or {}).items():
                 if key not in allowed or value not in allowed[key]:
@@ -366,8 +370,11 @@ def prepare(request: dict) -> dict:
 
 def observe(request: dict) -> dict:
     trial_id = str(request["trial_id"])
-    snapshot = active_snapshot(trial_id)
-    resource_scope = dict(snapshot.get("resource_scope") or {})
+    module = load_base_module()
+    state = module.load_state()
+    if not state or state.get("trial_id") != trial_id:
+        raise PermissionError("observation does not belong to the active Trial")
+    resource_scope = module.public_resource_scope(trial_id)
     capability = str(request["capability"])
     parameters = dict(request.get("parameters") or {})
     evidence_refs: list[str] = []
@@ -401,7 +408,8 @@ def observe(request: dict) -> dict:
         "operation": "observe",
         "data": {"records": records,
                  "partial": any(record.get("resolution") == "unknown"
-                                or record.get("health") == "unknown" for record in records),
+                                or record.get("health") == "unknown"
+                                or record.get("observation_available") is False for record in records),
                  "freshness": "snapshot" if capability == "protocol_summary" or (
                      capability == "sandboxed_readonly_diagnostic"
                      and parameters.get("diagnostic_profile") == "bounded_log_tail") else "live"},
@@ -486,6 +494,8 @@ def query_resource_observation(
         or type(options["line_limit"]) is not int or not 1 <= options["line_limit"] <= 1000
     ):
         raise ValueError("line_limit requires bounded_log_tail and an integer from 1 to 1000")
+    if capability == "sandboxed_readonly_diagnostic" and diagnostic_profile == "network_policy":
+        return query_network_policy(trial_id, refs, parameters.get("service_id")), []
     process_response = base_observe(trial_id, "processes")
     process_data = dict(process_response.get("data") or {})
     logs: dict = {}
@@ -630,25 +640,44 @@ def _nested_text(value: object) -> list[str]:
 
 
 def protocol_summary(trial_id: str, parameters: dict) -> list[dict]:
-    if parameters:
-        raise ValueError("existing capture summary does not support sampling options")
-    response = base_observe(trial_id, "pcap_summary")
-    summary = dict(response.get("data") or {})
-    # The existing collector is cumulative, not four separately sampled locations.
-    # Do not mix current sessions or scenario-conditioned evidence into this source.
-    return [{
-        "source_ref": f"protocol-lab:{trial_id}:protocol_summary",
-        "sampling_mode": "existing_capture_summary",
-        "location_coverage": "not_separated",
-        "capture_time_range": {"start": None, "end": None},
-        "summary_read_at": response.get("observed_at"),
-        "protocol_counts_file_scope": "first_capture_file",
-        "observation_available": bool(summary.get("files", 0)),
-        "capture_summary": summary,
-        "bounded": True,
-        "raw_packet_payload_exposed": False,
-        "subscriber_secret_exposed": False,
-    }]
+    harness_diagnostics.capture_filter(parameters)
+    module = load_base_module()
+    state = module.load_state()
+    if not state or state.get("trial_id") != trial_id:
+        raise PermissionError("capture does not belong to the active Trial")
+    expected = module.PCAP_ROOT.resolve() / trial_id
+    directory = Path(state.get("pcap_dir", "")).resolve()
+    if directory != expected or expected.is_symlink():
+        raise PermissionError("capture directory is outside the active Trial")
+    return [harness_diagnostics.capture_summary(trial_id, parameters, directory, observed_at=now())]
+
+
+def query_network_policy(trial_id: str, refs: list[dict], service_id: str | None) -> list[dict]:
+    # Deployment topology, independent of the injected scenario. A network path
+    # identifies the host-side policy view, not every policy along that path.
+    profiles = {**{name: "core" for name in RUNTIME_TARGETS},
+                **{name: "core" for name in ("twin-t1", "n2", "n3", "n4", "n6")},
+                "ue-1": "ue", "dns": "mec"}
+    records, collected_namespaces = [], {}
+    for ref in refs:
+        target = RUNTIME_TARGETS.get(ref["resource_id"])
+        if service_id and service_id != (target[2] if target else ref["resource_id"]):
+            raise PermissionError("service_id does not match the leased lab resource")
+        profile = profiles.get(ref["resource_id"])
+        if profile is None:
+            raise ValueError("network policy location is not declared for this resource")
+        prefix = node_prefix(profile)
+        namespace = prefix[3] if prefix else "host"
+        if namespace not in collected_namespaces:
+            collected_namespaces[namespace] = harness_diagnostics.network_policy(prefix, run=run, observed_at=now())
+        records.append({
+            **collected_namespaces[namespace], "diagnostic_profile": "network_policy",
+            "resource_id": ref["resource_id"], "resource_type": ref["resource_type"],
+            "namespace_id": trial_id, "resolution": "resolved",
+            "source_ref": f"protocol-lab:{trial_id}:network_policy:{namespace}",
+            "policy_scope": "kernel_namespace_only",
+        })
+    return records
 
 
 def _read_profile_fields(path: Path) -> dict[str, str]:
@@ -727,13 +756,13 @@ def act(request: dict) -> dict:
         if response.get("ok") and action_type == "route_state":
             run([str(TOPOLOGY), "route"], timeout=30)
         data = dict(response.get("data") or {})
-        verification = dict(data.get("terminal_verification") or {})
         data.update(
             status="succeeded" if response.get("ok") else "failed",
             changed_external_state=bool(response.get("ok") and data.get("applied")),
-            task_success=verification.get("task_success"),
         )
-        response = {**response, "data": data}
+        data = {key: data[key] for key in ("status", "changed_external_state", "applied",
+                "action_type", "parameters", "post_state") if key in data}
+        response = {key: response[key] for key in ("ok", "operation", "observed_at", "error") if key in response} | {"data": data}
     save_request_record(external_request_id, response)
     return response
 
@@ -802,16 +831,17 @@ def snapshot(request: dict) -> dict:
     response = base_call({"operation": "snapshot", "trial_id": request["trial_id"]})
     if not response.get("ok"):
         return response
-    value = dict(response.get("snapshot") or {})
+    private = dict(response.get("snapshot") or {})
+    value = {key: private[key] for key in ("trial_id", "fingerprint", "processes", "sessions",
+             "resource_scope", "captured_at") if key in private}
     value.update(topology=topology_status(), production_network=False)
     if request.get("purpose") in {"pre_action_snapshot", "post_action_verification",
                                   "post_rollback_verification"}:
         verification = harness_probes.business_verification(dict(value.get("resource_scope") or {}))
         value["business_verification"] = verification
-        # Keep the unchanged scenario grade under recovery. Product health is
-        # independently sampled business availability, not the grader's change count.
+        # Product health is independently sampled business availability.
         value["healthy"] = verification["passed"]
-    return {**response, "snapshot": value}
+    return {key: response[key] for key in ("ok", "operation", "observed_at", "fingerprint") if key in response} | {"snapshot": value}
 
 
 def reset(request: dict) -> dict:
@@ -860,9 +890,13 @@ def health() -> dict:
             "slot_id": SLOT_ID,
             "resource_scope": response.get("resource_scope"),
             "diagnostics": {
-                "contract_version": "opsmind-lab-diagnostics/1.0",
+                "contract_version": "opsmind-lab-diagnostics/1.1",
                 "capabilities": sorted(CAPABILITIES),
-                "parameters": DIAGNOSTIC_PARAMETERS,
+                "parameters": {
+                    **{cap: {key: {"type": "string", "enum": values} for key, values in params.items()}
+                       for cap, params in DIAGNOSTIC_PARAMETERS.items()},
+                    "protocol_summary": harness_diagnostics.CAPTURE_PARAMETERS,
+                },
                 "readonly_profiles": sorted(READONLY_DIAGNOSTIC_PROFILES),
                 "runtime_resources": sorted(RUNTIME_TARGETS),
                 "health_scope": "local_process_listener",

@@ -276,38 +276,36 @@ def test_business_health_is_independent_of_scenario_score(monkeypatch, business,
     monkeypatch.setattr(labctl.harness_probes, "business_verification", lambda _: {"passed": business})
     value = labctl.snapshot({"trial_id": "ah-test", "purpose": "post_action_verification"})["snapshot"]
     assert value["healthy"] is business
-    assert value["recovery"]["task_success"] is score
+    assert "recovery" not in value
     assert "task_success" not in value
 
 
-def test_capture_summary_exposes_one_source_and_never_imports_scenario_hints(monkeypatch):
+def test_capture_reads_only_the_active_trial_directory(monkeypatch, tmp_path):
+    module = types.SimpleNamespace(PCAP_ROOT=tmp_path, load_state=lambda: {
+        "trial_id": "ah-a", "pcap_dir": str(tmp_path / "ah-a"),
+        "scenario_id": "private-answer"})
+    monkeypatch.setattr(labctl, "load_base_module", lambda: module)
+    monkeypatch.setattr(labctl, "base_observe", lambda *a: pytest.fail("no answer cache"))
     calls = []
-    def base(trial, capability):
-        calls.append((trial, capability))
-        return {"data": {"files": 1, "bytes": 42, "protocol_frames": {"sctp": 2}},
-                "observed_at": "2026-09-05T04:00:00Z",
-                "evidence_refs": ["state:firewall-sctp-drop"]}
-    monkeypatch.setattr(labctl, "base_observe", base)
-    first, = labctl.protocol_summary("ah-a", {})
-    second, = labctl.protocol_summary("ah-a", {})
-    other, = labctl.protocol_summary("ah-b", {})
-    assert calls == [("ah-a", "pcap_summary"), ("ah-a", "pcap_summary"), ("ah-b", "pcap_summary")]
-    assert first["source_ref"] == second["source_ref"]
-    assert first["source_ref"] != other["source_ref"]
-    assert first["sampling_mode"] == "existing_capture_summary"
-    assert first["capture_time_range"] == {"start": None, "end": None}
-    assert first["location_coverage"] == "not_separated"
-    assert "firewall-sctp-drop" not in str(first)
-    assert "registration_and_session_state" not in first
+    monkeypatch.setattr(labctl.harness_diagnostics, "capture_summary",
+                        lambda trial, params, directory, **kw: calls.append((trial, params, directory)) or {"read_only": True})
+    assert labctl.protocol_summary("ah-a", {"protocol": "sctp"}) == [{"read_only": True}]
+    assert calls == [("ah-a", {"protocol": "sctp"}, (tmp_path / "ah-a").resolve())]
+    with pytest.raises(PermissionError):
+        labctl.protocol_summary("ah-b", {})
+    module.load_state = lambda: {"trial_id": "ah-a", "pcap_dir": str(tmp_path)}
+    with pytest.raises(PermissionError):
+        labctl.protocol_summary("ah-a", {})
 
 
 @pytest.mark.parametrize("parameters", [
     {"capture_profile": "n3"}, {"duration_seconds": 3}, {"packet_limit": 50},
 ])
 def test_capture_summary_rejects_sampling_options_it_cannot_honor(monkeypatch, parameters):
-    monkeypatch.setattr(labctl, "base_observe", lambda *a: pytest.fail("reject before reading"))
-    with pytest.raises(ValueError, match="does not support"):
+    monkeypatch.setattr(labctl, "load_base_module", lambda: pytest.fail("reject before reading"))
+    with pytest.raises(ValueError, match="unsupported"):
         labctl.protocol_summary("ah-a", parameters)
+
 
 @pytest.mark.parametrize("operation", [
     lambda: labctl.query_routes({"node_profile": "gnb"}),
@@ -384,3 +382,56 @@ def test_log_tail_honors_mcp_parameters_and_reports_historical_coverage(monkeypa
         assert profile in str(rejected.value)
     assert "No diagnostic was executed." in str(rejected.value)
     assert calls == ["processes", "logs"]
+
+
+def test_public_snapshot_excludes_all_exercise_answers(monkeypatch):
+    monkeypatch.setattr(labctl, "claim_active_lease", lambda _: None)
+    monkeypatch.setattr(labctl, "topology_status", lambda: {"ready": True})
+    monkeypatch.setattr(labctl, "base_call", lambda _: {"ok": True, "private_extra": "answer", "snapshot": {
+        "trial_id": "ah-a", "scenario_id": "sctp-blocked", "recovery": {"minimal_change": True},
+        "changes": ["secret-injection"], "profile_digest": "private", "processes": {"amf": True},
+        "sessions": {"registered": False}, "resource_scope": {"namespace": "ah-a"},
+        "future_private_field": "must-not-leak"}})
+    result = labctl.snapshot({"trial_id": "ah-a"})
+    assert set(result) == {"ok", "snapshot"}
+    assert result["snapshot"]["processes"] == {"amf": True}
+    assert not any(value in str(result) for value in ("sctp-blocked", "minimal_change", "secret-injection", "must-not-leak"))
+
+
+def test_policy_keeps_resource_identity_and_shared_kernel_provenance(monkeypatch):
+    trial = "ah-current"
+    refs = [{"identifier_domain": "opsmind-twin", "namespace": trial,
+             "resource_id": resource, "resource_type": kind}
+            for resource, kind in (("amf", "service"), ("n2", "network_path"), ("ue-1", "workload"))]
+    scope = {"identifier_domain": "opsmind-twin", "namespace": trial, "resource_refs": refs}
+    calls = []
+    monkeypatch.setattr(labctl, "base_observe", lambda *a: pytest.fail("no private evidence cache"))
+    monkeypatch.setattr(labctl.harness_diagnostics, "network_policy",
+                        lambda prefix, **kw: calls.append(prefix) or {"tables": [], "read_only": True})
+    records, evidence = labctl.query_resource_observation(trial,
+        {"resource_refs": refs, "diagnostic_profile": "network_policy"}, "sandboxed_readonly_diagnostic", scope)
+    assert len(calls) == 2 and len(records) == 3 and evidence == []
+    assert records[0]["source_ref"] == records[1]["source_ref"] != records[2]["source_ref"]
+    assert records[1]["resource_id"] == "n2" and records[1]["namespace_id"] == trial
+    refs[0] = {**refs[0], "namespace": "ah-other"}
+    with pytest.raises(PermissionError):
+        labctl.query_resource_observation(trial, {"resource_refs": refs, "diagnostic_profile": "network_policy"},
+                                         "sandboxed_readonly_diagnostic", scope)
+
+
+def test_action_receipt_excludes_oracle_verdict_even_when_base_action_succeeds(monkeypatch):
+    monkeypatch.setattr(labctl, "request_record", lambda _: None)
+    monkeypatch.setattr(labctl, "active_snapshot", lambda _: {"scenario_id": "sctp-blocked"})
+    monkeypatch.setattr(labctl, "base_call", lambda _: {"ok": True, "operation": "act", "data": {
+        "applied": True, "action_type": "network_policy",
+        "parameters": {"interface": "n2", "desired_state": "allow"},
+        "post_state": {"sessions": {"registered": True}},
+        "terminal_verification": {"task_success": True, "minimal_change": True},
+        "future_private_verdict": "must-not-leak"}})
+    saved = []
+    monkeypatch.setattr(labctl, "save_request_record", lambda key, response: saved.append(response))
+    result = labctl.act({"external_request_id": "test-action", "trial_id": "ah-a", "action_type": "network_policy"})
+    assert result["data"]["status"] == "succeeded"
+    assert result["data"]["changed_external_state"] is True
+    assert not any(key in str(result) for key in ("terminal_verification", "task_success", "minimal_change", "must-not-leak"))
+    assert saved == [result]

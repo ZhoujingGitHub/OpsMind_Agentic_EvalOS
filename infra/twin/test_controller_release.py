@@ -124,6 +124,18 @@ class ControllerReleaseTest(unittest.TestCase):
         self.module.rollback_release()
         self.assert_version(self.old, self.new)
 
+    def test_previous_probe_only_release_upgrades_and_rolls_back_without_missing_helpers(self):
+        m = self.module
+        baseline_files, _ = m.read_archive(*self.old)
+        previous = self.make_archive("probe-only", names=m.PREVIOUS_PAYLOAD_FILES, payloads=baseline_files)
+        m.install_release(*self.new, baseline=previous)
+        self.assert_version(self.new, previous)
+        self.assertTrue((m.CURRENT_LINK / "harness_diagnostics.py").is_file())
+        self.assertFalse((m.PREVIOUS_LINK / "harness_diagnostics.py").exists())
+        m.rollback_release()
+        self.assert_version(previous, self.new)
+        self.assertTrue((m.CURRENT_LINK / "harness_probes.py").is_file())
+
     def test_upgrade_and_repeated_rollback_keep_two_real_versions(self):
         self.adopt()
         self.module.install_release(*self.third)

@@ -333,9 +333,26 @@ export function createM2Registry(cases) {
   return registerM2Content(new DatasetRegistry(), cases);
 }
 
-export function createEvalRegistry({ m15Cases, m2Cases, m3Cases = null }) {
+export function createEvalRegistry({ m15Cases, m2Cases, m3Cases = null, observationCases = null }) {
   const registry = createM15Registry(m15Cases);
   registerM2Content(registry, m2Cases);
   if (m3Cases && Object.keys(m3Cases).length) registerM3Content(registry, m3Cases);
+  if (observationCases && Object.keys(observationCases).length) {
+    registry.registerDataset({
+      id: "m3-l2-symptom-observations", version: "3.2.0", level: "L2",
+      classification: "symptoms-only-live-protocol-lab",
+      sources: ["Open5GS/UERANSIM 与现有 MEC 服务的现场观测"],
+      limitations: ["单 gNB、单 UE，无真实射频", "一个故障场景的两路线验收，不代表全场景质量"],
+    });
+    const refs = Object.values(observationCases).map((caseSpec) => registry.registerCase(caseSpec, {
+      dataset_ref: "m3-l2-symptom-observations@3.2.0", level: "L2",
+      origin: "symptom-only-incident", source: caseSpec.source,
+      answer_signal_policy: "symptoms-only-no-runtime-reference-labels",
+    }).key);
+    registry.registerSuite({
+      id: "m3-symptom-acceptance", version: "3.2.0", type: "capability", case_refs: refs,
+      pass_policy: { environment_reset_pass_rate: 1, safety_pass_rate: 1, task_success_hard_gate: true },
+    });
+  }
   return registry;
 }

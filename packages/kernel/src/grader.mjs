@@ -412,7 +412,7 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
   const result = {
     grader_contract_version: "5.3",
     ...(context.trialId ? { trial_id: context.trialId } : {}),
-    grader_version: context.graderRef ?? "evalos-code-grader@5.3.0",
+    grader_version: context.graderRef ?? "evalos-code-grader@5.4.0",
     official_score_source: "DETERMINISTIC_CODE_GRADER",
     total,
     passed: scorePassed,

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { validateCandidateRegistration } from "./candidate-release-registration.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -53,7 +54,7 @@ assert.match(app, /createLangGraphProductConnector/);
 assert.match(app, /createTestDouble\("test-double-a"/);
 assert.match(app, /test-double-a:ENGINEERING_TEST/);
 assert.match(runner, /buildEvaluationContract/);
-assert.match(grader, /grader_version: context\.graderRef \?\? "evalos-code-grader@5\.3\.0"/);
+assert.match(grader, /grader_version: context\.graderRef \?\? "evalos-code-grader@5\.4\.0"/);
 assert.match(grader, /recommendation quality is a separate zero-weight qualification signal/);
 assert.match(grader, /DETERMINISTIC_CODE_GRADER/);
 assert.match(twinEnvironment, /ExternalProductTwinEnvironment/);
@@ -75,7 +76,7 @@ for (const name of executableManifests) {
   const manifest = JSON.parse(read(name.startsWith("config/") ? name : `config/${name}`));
   if (name === "m15-smoke.manifest.json") {
     assert.equal(manifest.manifest_version, "6.0", "工程测试替身必须继续使用历史隔离的 Manifest 6.0");
-    assert.equal(manifest.frozen_dependencies.grader.ref, "evalos-code-grader@5.3.0",
+    assert.equal(manifest.frozen_dependencies.grader.ref, "evalos-code-grader@5.4.0",
       "当前可执行工程测试不得偷偷保留旧 Grader 路径");
   }
   if (name === "m3-formal-agent-capability.manifest.json") {
@@ -93,7 +94,14 @@ const formal = JSON.parse(read("config/m3-formal-agent-capability.manifest.json"
 assert.equal(formal.dataset_ref, "m3-l2-agentic-formal@3.1.0");
 assert.equal(formal.suite_ref, "m3-formal-80@3.1.0");
 assert.equal(formal.case_refs.every((ref) => ref.endsWith("@3.1.0")), true);
-assert.equal(formal.frozen_dependencies.grader.ref, "evalos-code-grader@5.3.0");
+assert.equal(formal.frozen_dependencies.grader.ref, "evalos-code-grader@5.4.0");
+const graderSourceDigest = "sha256:" + createHash("sha256").update(
+  ["packages/kernel/src/grader.mjs", "packages/kernel/src/product-evidence-semantics.mjs"]
+    .map((name) => read(name).replaceAll("\r\n", "\n")).join("\n")).digest("hex");
+assert.equal(formal.frozen_dependencies.grader.digest, graderSourceDigest,
+  "冻结评分依赖必须包含当前证据解释代码，不能只更新版本名称");
+assert.equal(JSON.parse(read("config/m15-smoke.manifest.json")).frozen_dependencies.grader.digest, graderSourceDigest);
+
 assert.equal(formal.model.sdk, "@anthropic-ai/claude-agent-sdk");
 assert.equal(formal.model.id, "deepseek-v4-flash");
 assert.deepEqual(formal.contestants.find((item) => item.ref === "langgraph-v1")

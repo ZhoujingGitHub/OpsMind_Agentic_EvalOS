@@ -39,7 +39,7 @@ HARNESS_RELEASE_FILES = (
     "opsmind-harness-ssh-shim", "opsmind-harness-mec-http.py",
     "harness-source-lineage.json",
 )
-RELEASE_FILES = BASE_RELEASE_FILES + HARNESS_RELEASE_FILES + ("harness_probes.py",)
+RELEASE_FILES = BASE_RELEASE_FILES + HARNESS_RELEASE_FILES + ("harness_probes.py", "harness_diagnostics.py")
 
 
 def git(*arguments: str) -> str:

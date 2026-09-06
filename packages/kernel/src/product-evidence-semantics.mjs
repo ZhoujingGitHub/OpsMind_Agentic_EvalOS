@@ -55,8 +55,7 @@ function protocolCaptureReferences(item) {
   return [...new Set(raw.records.flatMap((record) => {
     const summary = record?.capture_summary;
     if (record?.observation_available !== true ||
-        record.sampling_mode !== "existing_capture_summary" ||
-        record.protocol_counts_file_scope !== "first_capture_file" ||
+        !validCaptureContract(record) ||
         record.source_ref !== source ||
         !Number.isSafeInteger(summary?.files) || summary.files <= 0 ||
         !Number.isSafeInteger(summary?.bytes) || summary.bytes <= 0 ||
@@ -69,6 +68,74 @@ function protocolCaptureReferences(item) {
   }))];
 }
 
+function validCaptureContract(record) {
+  // Preserve old receipt interpretation; new observations declare their schema.
+  if (record.sampling_mode === "existing_capture_summary") {
+    return record.protocol_counts_file_scope === "first_capture_file";
+  }
+  const inventory = record.capture_inventory;
+  const start = Date.parse(record.capture_time_range?.start);
+  const end = Date.parse(record.capture_time_range?.end);
+  return record.contract_version === "opsmind-network-observation/1.0" &&
+    record.sampling_mode === "retained_capture_window" && record.read_only === true &&
+    record.location_coverage === "one_host_capture" &&
+    record.capture_point?.kernel_namespace === "host" &&
+    record.capture_point?.interface === "any" && record.capture_point?.separate_link_endpoints === false &&
+    record.coverage?.status === "retained_files_scanned" &&
+    record.coverage?.time_range_semantics === "matching_frames_only" &&
+    Number.isFinite(Date.parse(record.summary_read_at)) &&
+    Number.isFinite(start) && Number.isFinite(end) && start <= end &&
+    Number.isSafeInteger(record.matched_frames) && record.matched_frames > 0 &&
+    Array.isArray(inventory) && inventory.length === record.capture_summary?.files &&
+    inventory.every((item) => Number.isSafeInteger(item.bytes) && item.bytes >= 0 &&
+      Number.isSafeInteger(item.analysed_bytes) && (item.analysed_bytes === 0 || item.analysed_bytes >= 24) &&
+      Number.isSafeInteger(item.incomplete_tail_bytes) && item.incomplete_tail_bytes >= 0 &&
+      item.analysed_bytes + item.incomplete_tail_bytes === item.bytes &&
+      /^[a-f0-9]{64}$/.test(item.sha256)) &&
+    inventory.reduce((sum, item) => sum + item.bytes, 0) === record.capture_summary?.bytes;
+}
+
+// Rule presence is an observation, not proof that it caused this incident.
+// The Agent interprets hook order, selectors, counters and packet evidence.
+// No Case ID, expected action or fault-injection cache participates here.
+function protocolPolicyReferences(item) {
+  const raw = item?.raw_value_json, scope = item?.scope_json;
+  if (item?.source_type !== "protocol_lab_resource_observation" ||
+      item.source_lineage !== "lab.resource_observation.sandboxed_readonly_diagnostic" ||
+      item.quality !== "verified" || item.freshness !== "live" ||
+      !["complete", "partial"].includes(item.completeness) || ![true, 1].includes(item.substantive) ||
+      raw?.partial !== (item.completeness === "partial") || raw.production_network !== false ||
+      raw.source_lineage !== item.source_lineage || !scope?.namespace ||
+      item.protocol_trial_id !== scope.namespace || raw.trial_id !== scope.namespace ||
+      !Array.isArray(scope.resource_refs) || !Array.isArray(raw.records)) return [];
+  return [...new Set(raw.records.flatMap((record) => {
+    const authorized = scope.resource_refs.some((ref) => ref.identifier_domain === "opsmind-twin" &&
+      ref.namespace === scope.namespace && ref.resource_type === record.resource_type &&
+      ref.resource_id === record.resource_id);
+    if (!authorized || record.namespace_id !== scope.namespace || record.resolution !== "resolved" ||
+        record.read_only !== true || record.diagnostic_profile !== "network_policy" ||
+        record.contract_version !== "opsmind-network-observation/1.0" ||
+        record.sampling_mode !== "kernel_policy_snapshot" || record.policy_backend !== "iptables" ||
+        record.policy_scope !== "kernel_namespace_only" || record.causal_conclusion !== "not_computed" ||
+        !["host", "opsmind-ue", "opsmind-ah-mec"].includes(record.kernel_namespace) ||
+        record.source_ref !== "protocol-lab:" + scope.namespace + ":network_policy:" + record.kernel_namespace ||
+        !Number.isFinite(Date.parse(record.observed_at)) ||
+        !/^[a-f0-9]{64}$/.test(record.policy_digest) || !Array.isArray(record.tables)) return [];
+    return record.tables.flatMap((table) => {
+      if (table.table !== "filter" || !Array.isArray(table.rules) || !Array.isArray(table.chains)) return [];
+      return table.rules.flatMap((rule) => {
+        if (!table.chains.some((chain) => chain.name === rule.chain) || rule.target !== "DROP" ||
+            rule.has_negation !== false || !["sctp", "udp", "tcp"].includes(rule.protocol) ||
+            !/^[1-9][0-9]{0,4}$/.test(rule.destination_port) || Number(rule.destination_port) > 65535 ||
+            !Number.isSafeInteger(rule.position) || rule.position < 1 ||
+            !Number.isSafeInteger(rule.packets) || rule.packets < 0 ||
+            !Number.isSafeInteger(rule.bytes) || rule.bytes < 0) return [];
+        return ["policy:" + rule.protocol + ":" + rule.destination_port + ":drop-rule-present"];
+      });
+    });
+  }))];
+}
+
 export function protocolEvidenceReferences(item) {
-  return [...protocolServiceHealthReferences(item), ...protocolCaptureReferences(item)];
+  return [...protocolServiceHealthReferences(item), ...protocolCaptureReferences(item), ...protocolPolicyReferences(item)];
 }

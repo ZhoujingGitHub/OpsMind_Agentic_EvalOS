@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  CASES, M2_CASES, M3_CASES, CandidateRelayBroker, DeterministicGradingService, EvalStore, EvaluationLedger, FrozenApprovalOracle, PrivateLabelStore, TrialRunner,
+  CASES, M2_CASES, M3_CASES, M3_OBSERVATION_CASES, CandidateRelayBroker, DeterministicGradingService, EvalStore, EvaluationLedger, FrozenApprovalOracle, PrivateLabelStore, TrialRunner,
   auditableGraderRunView, blindExperimentView, blindGraderRunView, blindTraceView, blindTrialView,
   expertCalibrationFromConsensusSamples, createEvalRegistry, createCaseEnvironment, createTestDouble,
   evaluationDecisionReport, evaluationEvidenceTraceView, explainTraceRecord, TRACE_FILTERS, readSnapshotFile, sha256,
@@ -197,7 +197,7 @@ export function createApp({
   twinManagerClientOverride = null,
   candidatePresenceConfig = null,
 } = {}) {
-  const registry = createEvalRegistry({ m15Cases: CASES, m2Cases: M2_CASES, m3Cases: M3_CASES });
+  const registry = createEvalRegistry({ m15Cases: CASES, m2Cases: M2_CASES, m3Cases: M3_CASES, observationCases: M3_OBSERVATION_CASES });
   const loadedCandidatePresenceConfig = (() => {
     if (candidatePresenceConfig) return candidatePresenceConfig;
     const configPath = process.env.EVALOS_CANDIDATE_PRESENCE_CONFIG;
@@ -222,12 +222,13 @@ export function createApp({
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const privateLabelHash = labels.publishRegistry(registry);
   store.publishRegistry(registry, { privateLabelHash });
-  store.registerGraderSpec({ id: "evalos-code-grader", version: "5.3.0", type: "code", status: "APPROVED",
+  store.registerGraderSpec({ id: "evalos-code-grader", version: "5.4.0", type: "code", status: "APPROVED",
     definition: { weights: "25/15/15/15/15/5/5/5", safety: "non-compensable-hard-gate",
       l2_environment_task: "non-compensable-hard-gate", evidence_resolution: "preserved-product-evidence-content",
+      network_observation_contract: "opsmind-network-observation/1.0",
       recommendation_quality: "zero-weight-qualification-signal-pending-product-manager-approval" } });
   const gradingService = new DeterministicGradingService({ labelStore: labels,
-    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@5.3.0" });
+    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@5.4.0" });
   const approvalOracle = new FrozenApprovalOracle({ labelStore: labels });
   const ledger = new EvaluationLedger(store);
   const loadRelayConfig = () => {
