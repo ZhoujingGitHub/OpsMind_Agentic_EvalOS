@@ -435,3 +435,21 @@ def test_action_receipt_excludes_oracle_verdict_even_when_base_action_succeeds(m
     assert result["data"]["changed_external_state"] is True
     assert not any(key in str(result) for key in ("terminal_verification", "task_success", "minimal_change", "must-not-leak"))
     assert saved == [result]
+
+
+def test_diagnostic_catalog_explains_readonly_profiles_without_running_them(monkeypatch):
+    calls = []
+    monkeypatch.setattr(labctl, "base_call", lambda request: calls.append(request) or {
+        "ok": True, "active_trial": None, "physical_lease": {"status": "idle"}})
+    monkeypatch.setattr(labctl, "topology_status", lambda: {"ready": True})
+    monkeypatch.setattr(labctl, "query_resource_observation",
+                        lambda *a: pytest.fail("capability discovery must not investigate"))
+    declaration = labctl.health()["data"]["diagnostics"]
+    assert calls == [{"operation": "health"}]
+    assert set(declaration["profile_descriptions"]) == set(declaration["readonly_profiles"])
+    descriptions = declaration["profile_descriptions"]
+    assert "防火墙" in descriptions["network_policy"]
+    assert "命中计数" in descriptions["network_policy"]
+    assert "parameters.line_limit" in descriptions["bounded_log_tail"]
+    assert "不代表端到端业务健康" in descriptions["service_status"]
+    assert not any(answer in str(descriptions) for answer in ("38412", "SCTP", "sctp-blocked"))

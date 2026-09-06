@@ -101,10 +101,13 @@ SERVICE_LISTENER_PROTOCOLS = {
     "amf": "sctp", "smf": "udp", "upf": "udp", "nrf": "tcp", "mongodb": "tcp",
 }
 READONLY_DIAGNOSTIC_PROFILES = {
-    "process_summary",
-    "service_status",
-    "bounded_log_tail",
-    "network_policy",
+    "process_summary": "读取目标进程是否运行及进程标识；不代表端到端业务健康。",
+    "service_status": "读取目标系统服务状态与本机监听健康；不代表端到端业务健康。",
+    "bounded_log_tail": "读取目标服务的近期日志；可用 parameters.line_limit 缩小返回行数。",
+    "network_policy": (
+        "读取目标所在网络命名空间的实际防火墙 filter/NAT 规则、顺序、匹配条件、"
+        "动作、命中计数和采集时间；只返回现场事实，不修改规则或推断根因。"
+    ),
 }
 BASE_ACTION_PARAMETERS = {
     "subscriber_profile": {"source": "reference_profile"},
@@ -898,6 +901,7 @@ def health() -> dict:
                     "protocol_summary": harness_diagnostics.CAPTURE_PARAMETERS,
                 },
                 "readonly_profiles": sorted(READONLY_DIAGNOSTIC_PROFILES),
+                "profile_descriptions": dict(READONLY_DIAGNOSTIC_PROFILES),
                 "runtime_resources": sorted(RUNTIME_TARGETS),
                 "health_scope": "local_process_listener",
             },
