@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CASES, M2_CASES, M3_CASES, M3_OBSERVATION_CASES, createEvalRegistry, casePublicView } from "../src/index.mjs";
+import { CASES, M2_CASES, M3_CASES, M3_OBSERVATION_CASES, createEvalRegistry, createObservationDesign, casePublicView } from "../src/index.mjs";
 import { publicTaskGoal } from "../../agent-runtime/src/product-connectors-v5.mjs";
 
 test("new symptom-only case preserves old cases, tools, mode and private scenario", () => {
@@ -42,3 +42,17 @@ function registryGoal(current) {
   const registry = createEvalRegistry({ m15Cases: CASES, m2Cases: M2_CASES, observationCases: M3_OBSERVATION_CASES });
   return publicTaskGoal(registry.getExecutionCase(current.id + "@" + current.version));
 }
+
+
+test("symptom design preserves frozen contracts without mutating its source", () => {
+  const source = { name: "original", evaluation_mode: "FORMAL", case_refs: ["M3-PUB-008@3.1.0"],
+    case_partitions: { public: ["M3-PUB-008@3.1.0"] }, environment_seeds: [17],
+    contestants: [{ ref: "agent-harness-v2" }], frozen_dependencies: { grader: { version: "5.4.0" } } };
+  const before = structuredClone(source), result = createObservationDesign(source);
+  assert.deepEqual(source, before);
+  assert.deepEqual(result.case_refs, ["M3-OBS-001@3.2.0"]);
+  assert.deepEqual(result.environment_seeds, source.environment_seeds);
+  assert.deepEqual(result.contestants, source.contestants);
+  assert.deepEqual(result.frozen_dependencies, source.frozen_dependencies);
+  assert.equal(result.evaluation_mode, source.evaluation_mode);
+});

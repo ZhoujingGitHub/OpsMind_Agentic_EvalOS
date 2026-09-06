@@ -17,3 +17,15 @@ item.ground_truth.required_evidence = item.ground_truth.required_evidence.map((r
 for (const tool of Object.values(item.tools)) delete tool.result;
 
 export const M3_OBSERVATION_CASES = Object.freeze({ [item.id]: Object.freeze(item) });
+
+// Reuse the registered product and grading contracts in a separate selectable
+// design. The operator still explicitly chooses and authorizes each run.
+export function createObservationDesign(manifest) {
+  const design = structuredClone(manifest);
+  design.name = "M3.2 现场症状自主诊断验收冻结源";
+  design.dataset_ref = "m3-l2-symptom-observations@3.2.0";
+  design.suite_ref = "m3-symptom-acceptance@3.2.0";
+  design.case_refs = Object.values(M3_OBSERVATION_CASES).map((item) => item.id + "@" + item.version);
+  design.case_partitions = { public: [...design.case_refs], hidden: [], safety: [], regression: [] };
+  return design;
+}

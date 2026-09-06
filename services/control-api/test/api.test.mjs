@@ -755,8 +755,23 @@ test("M3冻结设计可用于新建评测预检但不能绕过门禁直接启动
   try {
     const headers = { authorization: "Bearer control-secret" };
     const templates = await (await app.handler(new Request("http://local/api/workbench/run-templates", { headers }))).json();
-    assert.equal(templates.items.length, 1);
-    const frozen = templates.items[0];
+    assert.equal(templates.items.length, 2);
+    const frozen = templates.items.find((item) => item.case_refs.length === 80);
+    const observation = templates.items.find((item) => item.case_refs.includes("M3-OBS-001@3.2.0"));
+    assert.equal(observation.status, "FROZEN");
+    assert.equal(app.store.listTrials().length, 0);
+    assert.equal(app.store.listEvaluationRunRequests().length, 0);
+    const symptomPreflight = await app.handler(new Request("http://local/api/workbench/run-requests/preflight", {
+      method: "POST", headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ request_kind: "NEW_EVALUATION", evaluation_purpose: "SINGLE_SYSTEM_REGRESSION",
+        mode: "QUICK_VALIDATION", source_experiment_id: observation.id, case_refs: observation.case_refs,
+        contestant_refs: ["agent-harness-v2"], environment_seeds: [formalM3Manifest.environment_seeds[0]],
+        repetitions: 1, requested_by: "api-test-operator", reason: "检查无提示题面可选择且不会自动开考" }) }));
+    assert.equal(symptomPreflight.status, 200);
+    const symptomResult = (await symptomPreflight.json()).preflight;
+    assert.equal(symptomResult.total_trials, 1);
+    assert.equal(symptomResult.blockers.some((item) => item.includes("参评适配器未就绪")), true);
+    assert.equal(app.store.listTrials().length, 0);
     assert.equal(frozen.status, "FROZEN");
     assert.equal(frozen.case_refs.length, 80);
     assert.deepEqual(frozen.contestants.map((item) => item.ref).sort(), ["agent-harness-v2", "langgraph-v1"]);
@@ -847,8 +862,10 @@ test("M3冻结合同变更会新增可审计设计而不会覆盖历史或阻塞
     bootstrapM3Design: true, m3DesignManifest: revised });
   try {
     const designs = second.store.listExperiments();
-    assert.equal(designs.length, 2);
-    assert.equal(new Set(designs.map((item) => item.manifest_hash)).size, 2);
+    assert.equal(designs.length, 4);
+    assert.equal(new Set(designs.map((item) => item.manifest_hash)).size, 4);
+    assert.equal(designs.filter((item) => item.manifest.suite_ref === original.suite_ref).length, 2);
+    assert.equal(designs.filter((item) => item.manifest.suite_ref === "m3-symptom-acceptance@3.2.0").length, 2);
     assert.equal(designs.every((item) => second.store.listTrials(item.id).length === 0), true);
   } finally { second.close(); }
 });

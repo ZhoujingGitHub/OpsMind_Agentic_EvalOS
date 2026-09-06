@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   CASES, M2_CASES, M3_CASES, M3_OBSERVATION_CASES, CandidateRelayBroker, DeterministicGradingService, EvalStore, EvaluationLedger, FrozenApprovalOracle, PrivateLabelStore, TrialRunner,
   auditableGraderRunView, blindExperimentView, blindGraderRunView, blindTraceView, blindTrialView,
-  expertCalibrationFromConsensusSamples, createEvalRegistry, createCaseEnvironment, createTestDouble,
+  expertCalibrationFromConsensusSamples, createEvalRegistry, createObservationDesign, createCaseEnvironment, createTestDouble,
   evaluationDecisionReport, evaluationEvidenceTraceView, explainTraceRecord, TRACE_FILTERS, readSnapshotFile, sha256,
   auditTrialEfficiency, candidateExecutionBudget, trialSettlementBudget,
   CANDIDATE_PRESENCE_PATH, CandidatePresenceRegistry, assertCandidateBound,
@@ -245,16 +245,16 @@ export function createApp({
   const candidateRelay = new CandidateRelayBroker({ store, ledger, candidates: relayCandidates });
   const frozenM31Manifest = m3DesignManifest ?? JSON.parse(readFileSync(path.join(ROOT, "config", "m3-formal-agent-capability.manifest.json"), "utf8"));
   if (bootstrapM3Design) {
-    const frozenManifest = frozenM31Manifest;
-    // A frozen design is immutable. A release that intentionally changes any
-    // part of the contract must create a new audited design instead of trying
-    // to overwrite the previous idempotent record during process startup.
-    const designKey = `m3-formal-agent-capability-design:${sha256(frozenManifest)}`;
-    const frozen = store.createExperiment(frozenManifest, designKey, { scheduleTrials: false });
-    if (frozen.created) ledger.append({ entityType: "experiment", entityId: frozen.experiment.id,
-      action: "experiment.design_frozen", payload: { manifest_hash: frozen.experiment.manifest_hash,
-        planned_trial_count: frozenManifest.case_refs.length * frozenManifest.environment_seeds.length * frozenManifest.contestants.length,
-        execution_authorized: false } });
+    // Content-hashed designs are immutable and only selectable here.
+    // Explicit run requests remain the authority to schedule Trials.
+    for (const frozenManifest of [frozenM31Manifest, createObservationDesign(frozenM31Manifest)]) {
+      const designKey = "m3-formal-agent-capability-design:" + sha256(frozenManifest);
+      const frozen = store.createExperiment(frozenManifest, designKey, { scheduleTrials: false });
+      if (frozen.created) ledger.append({ entityType: "experiment", entityId: frozen.experiment.id,
+        action: "experiment.design_frozen", payload: { manifest_hash: frozen.experiment.manifest_hash,
+          planned_trial_count: frozenManifest.case_refs.length * frozenManifest.environment_seeds.length * frozenManifest.contestants.length,
+          execution_authorized: false } });
+    }
   }
   if (bootstrapEngineeringTestDesign) {
     const engineeringManifest = JSON.parse(readFileSync(path.join(ROOT, "config", "m15-smoke.manifest.json"), "utf8"));
