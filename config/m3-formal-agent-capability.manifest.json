@@ -206,8 +206,8 @@
       "architecture": "CLAUDE_AGENT_SDK_HARNESS",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "0577c0f956ef0c1e48673176574750d62a1c59cb",
-      "artifact_digest": "sha256:a006d59b7c5f7d7dd52a0f431891ccca608dd8a7b17e2f3d0a03a352e00fe0be",
+      "source_revision": "b9e5066be3573a722e3217a9f5e618a51dcea853",
+      "artifact_digest": "sha256:4497bcfc9bf11a077ea9714d03633c60412313b3d6872e990abd1e263d3b7e76",
       "runtime_digest": "sha256:18b34bb5d06b7c731c244bd04525839f9d0cf93a5ef07b73cb82660cc23fddc9",
       "runtime_manifest_digest": "sha256:b2010ac2bcdc9d8cf431a10d0337b6ed5c58238cff970c738693fb90b4e5eb69",
       "capability_contract_digest": "sha256:d4532ebdaa9b3bc7f2f8fe1fae2744839283dcb226a1f35030bd452eadbc3383",
@@ -388,9 +388,9 @@
         "provenance": {
           "status": "product_public_maximum",
           "method": "candidate_public_runtime_contract",
-          "source_revision": "0577c0f956ef0c1e48673176574750d62a1c59cb",
-          "artifact_digest": "sha256:a006d59b7c5f7d7dd52a0f431891ccca608dd8a7b17e2f3d0a03a352e00fe0be",
-          "evidence_ref": "network-evidence-20260906:observed-public-contract:0577c0f956ef:61b3a0d5fe86938be296de7cd54d33a5f17238cf01c7f6ba45085d8b14d93875"
+          "source_revision": "b9e5066be3573a722e3217a9f5e618a51dcea853",
+          "artifact_digest": "sha256:4497bcfc9bf11a077ea9714d03633c60412313b3d6872e990abd1e263d3b7e76",
+          "evidence_ref": "network-evidence-20260906:observed-public-contract:b9e5066be357:cde640a2358a69298fa29c9efa622ff4a29203b276f34f0f38efe8f7072deee3"
         }
       },
       {
