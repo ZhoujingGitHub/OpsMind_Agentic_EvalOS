@@ -206,11 +206,11 @@
       "architecture": "CLAUDE_AGENT_SDK_HARNESS",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "b9e5066be3573a722e3217a9f5e618a51dcea853",
-      "artifact_digest": "sha256:4497bcfc9bf11a077ea9714d03633c60412313b3d6872e990abd1e263d3b7e76",
-      "runtime_digest": "sha256:18b34bb5d06b7c731c244bd04525839f9d0cf93a5ef07b73cb82660cc23fddc9",
-      "runtime_manifest_digest": "sha256:b2010ac2bcdc9d8cf431a10d0337b6ed5c58238cff970c738693fb90b4e5eb69",
-      "capability_contract_digest": "sha256:d4532ebdaa9b3bc7f2f8fe1fae2744839283dcb226a1f35030bd452eadbc3383",
+      "source_revision": "8086e7e7b406948613d3dcd05dc39016159177af",
+      "artifact_digest": "sha256:e6c0b5a5e144753bfa10ac24474bd0ae13a3a61be5302a3404ba2ec3fb3fca50",
+      "runtime_digest": "sha256:6b0d8aaac92dddd7c72af28bfd5159bfa66bcd7e5e8d191b4dd64b2e86e9b88f",
+      "runtime_manifest_digest": "sha256:27b052243e1d74621385459bf42a55aa920c03ccce996370ddef7a18fc910bad",
+      "capability_contract_digest": "sha256:95f9fbb6b6a2a6e7bb463861cc7dc6698339505aed1a33569a7a5c2fc276f93e",
       "binding_requirement": "PRODUCT_NATIVE_ACK",
       "candidate_runtime": {
         "contract_version": "1.0",
@@ -234,7 +234,7 @@
           "identifier_scope": "opsmind-identifier-scope/1.0",
           "native_tool_availability": "opsmind-native-tool-availability/2.0",
           "candidate_observation": "opsmind-candidate-observation/1.0",
-          "model_visible_result": "opsmind-model-visible-result/1.0",
+          "model_visible_result": "opsmind-model-visible-result/2.0",
           "run_context": "opsmind-run-context/1.0",
           "repair_delivery": "opsmind-repair-delivery/1.1",
           "run_budget": "opsmind-run-budget/2.0",
@@ -388,9 +388,9 @@
         "provenance": {
           "status": "product_public_maximum",
           "method": "candidate_public_runtime_contract",
-          "source_revision": "b9e5066be3573a722e3217a9f5e618a51dcea853",
-          "artifact_digest": "sha256:4497bcfc9bf11a077ea9714d03633c60412313b3d6872e990abd1e263d3b7e76",
-          "evidence_ref": "network-evidence-20260906:observed-public-contract:b9e5066be357:cde640a2358a69298fa29c9efa622ff4a29203b276f34f0f38efe8f7072deee3"
+          "source_revision": "8086e7e7b406948613d3dcd05dc39016159177af",
+          "artifact_digest": "sha256:e6c0b5a5e144753bfa10ac24474bd0ae13a3a61be5302a3404ba2ec3fb3fca50",
+          "evidence_ref": "network-evidence-20260906:observed-public-contract:8086e7e7b406:1d4d499b6373b06559bac8cc18385435a063db8928215d3273eed38b904f78d1"
         }
       },
       {
