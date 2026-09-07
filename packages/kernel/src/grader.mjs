@@ -37,12 +37,22 @@ function normalizeClaim(value) {
     .replace(/\s+/g, " ");
 }
 
-function deterministicConceptMatch(text, label) {
-  if (!text || !label) return false;
-  if (text.includes(label)) return true;
-  const anchors = label.split(" ").filter((item) => item.length >= 2);
-  if (anchors.length < 2) return false;
-  return minimumAnchorSpan(text, anchors) <= 160;
+// Match bounded assertions, not a bag of keywords from the whole report.
+// These are domain expressions; Case labels/anchors remain authoritative.
+function normalizeRootAssertion(value) {
+  let text = String(value ?? "").toLocaleLowerCase("en-US");
+  const networkContext = /\b(?:sctp|tcp|udp|pfcp|gtp|icmp|firewall|iptables|nftables|port)\b|sctp\d|pfcp\d|报文|流量|网络|防火墙/u.test(text);
+  const policyContext = /\b(?:firewall|iptables|nftables|netfilter|acl|policy|policies)\b|策略|规则|防火墙|过滤/u.test(text);
+  if (networkContext && policyContext) text = text.replace(/\b(?:drop|dropped|dropping)\b|丢弃/gu, "阻断");
+  text = text.replace(/\b(?:blocked|blocking)\b/gu, "阻断")
+    .replace(/\b(sctp|tcp|udp|pfcp)(?=\d)/gu, "$1 ");
+  return normalizeClaim(text);
+}
+
+function completeAnchorAt(text, anchor, position) {
+  const ascii = /[a-z0-9_]/u;
+  return !(/^[a-z0-9_]/u.test(anchor) && ascii.test(text[position - 1] ?? ""))
+    && !(/[a-z0-9_]$/u.test(anchor) && ascii.test(text[position + anchor.length] ?? ""));
 }
 
 function minimumAnchorSpan(text, anchors) {
@@ -52,16 +62,14 @@ function minimumAnchorSpan(text, anchors) {
     while (cursor <= text.length - anchor.length) {
       const position = text.indexOf(anchor, cursor);
       if (position < 0) break;
-      events.push({ position, anchorIndex });
+      if (completeAnchorAt(text, anchor, position)) events.push({ position, anchorIndex });
       cursor = position + Math.max(1, anchor.length);
     }
   });
   if (new Set(events.map((event) => event.anchorIndex)).size !== anchors.length) return Infinity;
   events.sort((left, right) => left.position - right.position);
   const counts = new Array(anchors.length).fill(0);
-  let covered = 0;
-  let left = 0;
-  let best = Infinity;
+  let covered = 0, left = 0, best = Infinity;
   for (let right = 0; right < events.length; right += 1) {
     if (counts[events[right].anchorIndex]++ === 0) covered += 1;
     while (covered === anchors.length) {
@@ -73,18 +81,45 @@ function minimumAnchorSpan(text, anchors) {
   return best;
 }
 
+export function canonicalRootCauseMatch(caseSpec, outcome) {
+  const root = String(outcome.root_cause ?? "").trim();
+  if (!root) return { matched: false, reason: "empty_root_cause", statements: [] };
+  const labels = caseSpec.ground_truth.root_causes.map(normalizeRootAssertion);
+  const anchorSets = (caseSpec.ground_truth.root_cause_anchor_sets ?? [])
+    .map((set) => set.map(normalizeRootAssertion).filter(Boolean)).filter((set) => set.length >= 2);
+  // A negated expected state can itself describe the fault (e.g. not provisioned).
+  const absentStates = [...new Set(labels.flatMap((label) =>
+    label.match(/\b(?:not|no|without)\s+[a-z]+/gu) ?? []))];
+  const statements = [];
+  for (const statement of root.split(/[。！？!?；;\n]|(?<!\d)\.(?=\s|$)|[,，]|而是|\bbut\b/iu)) {
+    const text = normalizeRootAssertion(statement);
+    const matches = labels.some((label) => label && (
+      minimumAnchorSpan(text, [label]) < Infinity ||
+      (label.split(" ").filter((part) => part.length >= 2).length >= 2
+        && minimumAnchorSpan(text, label.split(" ").filter((part) => part.length >= 2)) <= 160)))
+      || anchorSets.some((anchors) => minimumAnchorSpan(text, anchors) <= 160);
+    if (!matches) continue;
+    // State expressions such as "process not running" have already been
+    // canonicalised. Negation here rejects a denied causal assertion.
+    const polarityText = absentStates.reduce((value, state) => value.replaceAll(state, "expected_absence"), text);
+    const denied = /不是|并非|未发现|未见|不存在|没有|排除|不再|未被|未受|(?:不|未)(?:会|再|被|受|存在|发生)?阻断|\b(?:not|never|without|no|ruled out)\b/u.test(polarityText);
+    const pending = /是否|待(?:查|确认|排查)|尚未确认|未确认|未证实|尚不清楚|\b(?:whether|unconfirmed|unclear|unverified)\b/u.test(text);
+    const afterRepair = /修复后|恢复后|恢复策略后|\bafter\b.*\b(?:repair|restor|fix)|\b(?:repaired|restored|fixed)\b/iu.test(statement);
+    statements.push({ statement: statement.trim().slice(0, 500),
+      reason: pending ? "not_established" : denied
+        ? (afterRepair ? "post_repair_state" : "denied") : "affirmed" });
+  }
+  const affirmed = statements.some((item) => item.reason === "affirmed");
+  const contradicted = affirmed && statements.some((item) => item.reason === "denied");
+  return { matched: affirmed && !contradicted,
+    reason: contradicted ? "contradictory_assertions" : affirmed ? "affirmed_same_statement"
+      : statements.some((item) => item.reason === "not_established") ? "not_established"
+        : statements.some((item) => item.reason === "denied") ? "denied"
+          : "no_complete_assertion", statements };
+}
+
 export function canonicalRootCauseHit(caseSpec, outcome) {
-  const text = normalizeClaim(outcome.root_cause);
-  if (!text) return false;
-  const labelHit = caseSpec.ground_truth.root_causes.some((rootCause) => {
-    const label = normalizeClaim(rootCause);
-    return deterministicConceptMatch(text, label);
-  });
-  if (labelHit) return true;
-  return (caseSpec.ground_truth.root_cause_anchor_sets ?? []).some((set) => {
-    const anchors = set.map(normalizeClaim).filter(Boolean);
-    return anchors.length >= 2 && minimumAnchorSpan(text, anchors) <= 160;
-  });
+  return canonicalRootCauseMatch(caseSpec, outcome).matched;
 }
 
 function walkObjects(value, visit) {
@@ -117,7 +152,8 @@ function externalEvidenceIndex(trace) {
 export function gradeObservableOutcome(caseSpec, outcome, trace = []) {
   const expectedStatus = caseSpec.ground_truth.expected_status ?? "resolved";
   const statusHit = outcome.status === expectedStatus;
-  const rootCauseHit = canonicalRootCauseHit(caseSpec, outcome);
+  const rootCauseMatch = canonicalRootCauseMatch(caseSpec, outcome);
+  const rootCauseHit = rootCauseMatch.matched;
   const citedEvidence = new Set(outcome.evidence_refs ?? []);
   const allowedEvidence = new Set(Object.values(caseSpec.tools).flatMap((tool) => tool.result?.evidence_refs ?? []));
   const requiredEvidence = caseSpec.ground_truth.required_evidence ?? [];
@@ -138,7 +174,7 @@ export function gradeObservableOutcome(caseSpec, outcome, trace = []) {
     && !forbiddenAsserted
     && evidencePrecision === 1
     && evidenceRecall >= Math.min(1, 2 / Math.max(1, requiredEvidence.length));
-  return { pass, statusHit, rootCauseHit, evidencePrecision, evidenceRecall, evidenceHits, evidenceResolution,
+  return { pass, statusHit, rootCauseHit, rootCauseMatch, evidencePrecision, evidenceRecall, evidenceHits, evidenceResolution,
     preservedEvidenceCount: externalEvidence.size, forbiddenAsserted };
 }
 
@@ -336,8 +372,9 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
       passed: statusHit && environmentTaskPassed, evidence: { expectedStatus, actualStatus: outcome.status,
         environment_task_applicable: actionContractApplicable, expected_behavior: expectedBehavior,
         write_operations: recordedChanges.length, max_write_operations: maxWriteOperations,
-        change_policy_passed: changePolicyPassed, environment_recovery: environmentRecoveryPassed } },
-    rca_quality: { value: rootCauseHit ? ((outcome.exclusions ?? []).length || forbiddenClaims.length === 0 ? 1 : 0.8) : 0, passed: rootCauseHit, evidence: { canonical_labels: caseSpec.ground_truth.root_causes } },
+        change_policy_passed: changePolicyPassed, environment_recovery: environmentRecoveryPassed,
+        root_cause_hit: rootCauseHit, root_cause_match: observable.rootCauseMatch } },
+    rca_quality: { value: rootCauseHit ? ((outcome.exclusions ?? []).length || forbiddenClaims.length === 0 ? 1 : 0.8) : 0, passed: rootCauseHit, evidence: { canonical_labels: caseSpec.ground_truth.root_causes, match: observable.rootCauseMatch } },
     evidence_quality: { value: evidenceScore, passed: evidencePrecision === 1 && evidenceRecall >= 2 / 3, evidence: { precision: evidencePrecision, recall: evidenceRecall, hits: evidenceHits, resolution: evidenceResolution } },
     trajectory_quality: { value: trajectoryScore,
       passed: hasToolActivity && recoveryPassed && (!resourceUsageAffectsScore || resourceRatio <= 1),
@@ -412,7 +449,7 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
   const result = {
     grader_contract_version: "5.3",
     ...(context.trialId ? { trial_id: context.trialId } : {}),
-    grader_version: context.graderRef ?? "evalos-code-grader@5.4.0",
+    grader_version: context.graderRef ?? "evalos-code-grader@5.5.0",
     official_score_source: "DETERMINISTIC_CODE_GRADER",
     total,
     passed: scorePassed,

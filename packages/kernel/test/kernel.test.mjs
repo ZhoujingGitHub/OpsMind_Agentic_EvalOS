@@ -11,6 +11,7 @@ import {
   gradeTrial, judgeCalibrationGate, redact, reliabilityMetrics,
   seededShuffle, sha256, judgeSuiteCalibration, isRetryableInfrastructureFailure,
 } from "../src/index.mjs";
+import { canonicalRootCauseHit, canonicalRootCauseMatch } from "../src/grader.mjs";
 import { measuredUsage } from "../src/runner.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
@@ -1102,4 +1103,60 @@ test("Trial命名空间不共享文件", () => {
     assert.equal(existsSync(path.join(two.namespace, "sentinel.txt")), false);
     assert.notEqual(sha256(one.namespace), sha256(two.namespace));
   } finally { labels.close(); store.close(); }
+});
+
+test("根因匹配以同一陈述和完整标识判定网络阻断，不奖励否定或待查", () => {
+  const spec = { ground_truth: {
+    root_causes: ["SCTP traffic to AMF port 38412 blocked"],
+    root_cause_anchor_sets: [["sctp", "38412", "blocked"], ["sctp", "38412", "阻断"]],
+  } };
+  const cases = [
+    [true, "AMF 38412端口的SCTP报文被防火墙丢弃。"],
+    [true, "SCTP traffic to AMF port 38412 is blocked."],
+    [true, "Firewall DROP discards SCTP traffic to AMF port 38412."],
+    [true, "不是DNS，而是 AMF SCTP38412流量被网络策略阻断。"],
+    [true, "修复前 AMF SCTP38412流量被网络策略丢弃；修复后 SCTP38412不再阻断，业务已恢复。"],
+    [true, "AMF SCTP38412流量很可能被网络策略阻断。"],
+    [false, "根因不是 SCTP38412 blocked；网络正常，故障是DNS。"],
+    [false, "未发现 SCTP38412流量被阻断，实际订阅不一致。"],
+    [false, "下一步检查是否 SCTP38412 blocked，目前尚未确认。"],
+    [false, "AMF SCTP384120流量被阻断。"],
+    [false, "SCTP38412通信正常。另一条DNS路径被阻断。"],
+    [false, "SCTP38412通信正常，另一条DNS路径被阻断。"],
+    [false, "AMF UDP38412流量被阻断。"],
+    [false, "SCTP38412请求超时，尚不清楚原因。"],
+    [false, "SCTP38412 is not blocked."],
+    [false, "SCTP38412未被阻断。"],
+    [false, "SCTP38412未阻断。"],
+    [false, "Check whether SCTP38412 is blocked; not yet confirmed."],
+    [false, "SCTP38412 blocked. SCTP38412 blocked was ruled out."],
+  ];
+  for (const [expected, root_cause] of cases)
+    assert.equal(canonicalRootCauseHit(spec, { root_cause }), expected, root_cause);
+});
+
+test("同一判定入口保留已有故障合同中的缺失状态，并返回可核对解释", () => {
+  for (const spec of Object.values({ ...CASES, ...M2_CASES, ...M3_CASES })) {
+    for (const root_cause of spec.ground_truth.root_causes)
+      assert.equal(canonicalRootCauseHit(spec, { root_cause }), true, spec.id + ": " + root_cause);
+  }
+  for (const [protocol, port] of [["PFCP", "8805"], ["GTP-U", "2152"]]) {
+    const spec = { ground_truth: { root_causes: [protocol + " traffic on UDP " + port + " is blocked"] } };
+    assert.equal(canonicalRootCauseHit(spec, { root_cause:
+      protocol + " traffic on UDP " + port + " is dropped by firewall policy." }), true);
+  }
+  const spec = { ground_truth: { root_causes: ["SCTP traffic to AMF port 38412 blocked"],
+    root_cause_anchor_sets: [["sctp", "38412", "blocked"]] } };
+  const outcome = { status: "resolved", root_cause:
+    "目标 gNB(127.0.0.1:44059)→AMF(127.0.0.5:38412) 的 N2 SCTP 关联被网络策略丢弃:AMF 进程存活且端口监听正常；修复后业务恢复。",
+    evidence_refs: [] };
+  const matched = canonicalRootCauseMatch(spec, outcome);
+  assert.equal(matched.matched, true);
+  assert.equal(matched.reason, "affirmed_same_statement");
+  assert.match(matched.statements[0].statement, /127\.0\.0\.5:38412/u);
+  assert.equal(gradeTrial({ ...spec, tools: {} }, outcome).assertions.rca_quality.evidence.match.matched, true);
+  assert.equal(canonicalRootCauseMatch(spec, { root_cause: "未发现SCTP38412被阻断" }).reason, "denied");
+  assert.equal(canonicalRootCauseMatch(spec, { root_cause: "待确认SCTP38412是否阻断" }).reason, "not_established");
+  assert.equal(canonicalRootCauseHit(spec, {root_cause:
+    "SCTP to AMF38412: capture dropped packets because the capture buffer filled."}), false);
 });

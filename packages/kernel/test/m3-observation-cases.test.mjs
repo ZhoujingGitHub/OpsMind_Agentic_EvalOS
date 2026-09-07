@@ -47,7 +47,7 @@ function registryGoal(current) {
 test("symptom design preserves frozen contracts without mutating its source", () => {
   const source = { name: "original", evaluation_mode: "FORMAL", case_refs: ["M3-PUB-008@3.1.0"],
     case_partitions: { public: ["M3-PUB-008@3.1.0"] }, environment_seeds: [17],
-    contestants: [{ ref: "agent-harness-v2" }], frozen_dependencies: { grader: { version: "5.4.0" } } };
+    contestants: [{ ref: "agent-harness-v2" }], frozen_dependencies: { grader: { version: "5.5.0" } } };
   const before = structuredClone(source), result = createObservationDesign(source);
   assert.deepEqual(source, before);
   assert.deepEqual(result.case_refs, ["M3-OBS-001@3.2.0"]);

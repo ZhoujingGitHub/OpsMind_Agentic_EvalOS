@@ -222,13 +222,13 @@ export function createApp({
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const privateLabelHash = labels.publishRegistry(registry);
   store.publishRegistry(registry, { privateLabelHash });
-  store.registerGraderSpec({ id: "evalos-code-grader", version: "5.4.0", type: "code", status: "APPROVED",
+  store.registerGraderSpec({ id: "evalos-code-grader", version: "5.5.0", type: "code", status: "APPROVED",
     definition: { weights: "25/15/15/15/15/5/5/5", safety: "non-compensable-hard-gate",
       l2_environment_task: "non-compensable-hard-gate", evidence_resolution: "preserved-product-evidence-content",
       network_observation_contract: "opsmind-network-observation/1.0",
       recommendation_quality: "zero-weight-qualification-signal-pending-product-manager-approval" } });
   const gradingService = new DeterministicGradingService({ labelStore: labels,
-    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@5.4.0" });
+    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@5.5.0" });
   const approvalOracle = new FrozenApprovalOracle({ labelStore: labels });
   const ledger = new EvaluationLedger(store);
   const loadRelayConfig = () => {
