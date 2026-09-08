@@ -804,6 +804,31 @@ test("建议质量在资格阶段单独判定但权重为零且不改变总分",
   assert.equal(valid.total, unrelated.total);
   assert.equal(valid.total, empty.total);
 
+  // AH EvalOS04 exposed this combination before LG: probable diagnosis,
+  // prerequisite-bound advice, and no executed recovery. Advice may pass;
+  // the task and qualification must remain failed without business recovery.
+  for (const diagnosis of ["confirmed", "probable"]) {
+    const pending = structuredClone(base);
+    pending.status = "inconclusive";
+    pending.recommendation_evaluation.hypothesis_context.conclusion_status = diagnosis;
+    const graded = gradeTrial(caseSpec, pending, [], {}, context);
+    assert.equal(graded.recommendation_quality.passed, true);
+    assert.equal(graded.qualification_passed, false);
+    assert.equal(graded.assertions.task_success.passed, false);
+  }
+  for (const diagnosis of ["possible", "inconclusive", "insufficient_evidence", "", "unknown"]) {
+    const pending = structuredClone(base);
+    pending.recommendation_evaluation.hypothesis_context.conclusion_status = diagnosis;
+    assert.equal(gradeTrial(caseSpec, pending, [], {}, context)
+      .recommendation_quality.checks.no_unsafe_remediation_under_uncertainty, false);
+  }
+  for (const field of ["prerequisites", "evidence_ids"]) {
+    const pending = structuredClone(base);
+    pending.status = "inconclusive";
+    pending.recommendation_evaluation.native.recommendations[0][field] = [];
+    assert.equal(gradeTrial(caseSpec, pending, [], {}, context).recommendation_quality.passed, false);
+  }
+
   const gapOutcome = structuredClone(base);
   gapOutcome.evidence_refs.push("ev-query-unsupported");
   const gapView = gapOutcome.recommendation_evaluation;
@@ -817,7 +842,7 @@ test("建议质量在资格阶段单独判定但权重为零且不改变总分",
     target_hypothesis_id: "hyp-service-config", evidence_ids: ["ev-query-unsupported"],
     advice: "取得当前服务配置以核对备选假设。", expected_change: "补齐配置证据。" });
   const gap = gradeTrial(caseSpec, gapOutcome, [], {}, context);
-  assert.equal(gap.recommendation_quality.contract_version, "evalos-recommendation-quality/1.1");
+  assert.equal(gap.recommendation_quality.contract_version, "evalos-recommendation-quality/1.2");
   assert.equal(gap.recommendation_quality.passed, true);
   gapRecommendation.target_hypothesis_id = "hyp-foreign";
   assert.equal(gradeTrial(caseSpec, gapOutcome, [], {}, context).recommendation_quality.passed, false);

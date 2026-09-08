@@ -3,6 +3,74 @@ import test from "node:test";
 import { protocolServiceHealthReferences, protocolEvidenceReferences } from "../src/product-evidence-semantics.mjs";
 import { gradeObservableOutcome } from "../src/grader.mjs";
 
+function lgEvidence(original, capability) {
+  return { evidence_id: "lg-evidence-1", evidence_type: "mcp.tool_result", tenant_id: "tenant-lg",
+    scope_snapshot_id: "scope-lg", investigation_id: "investigation-lg", tool_call_id: "call-lg",
+    source_system: `protocol-lab.${capability}`, observed_at: "2026-09-09T00:00:00Z",
+    quality: "verified", freshness: capability === "protocol_summary" ? "snapshot" : "live",
+    coverage: "complete", partial: false, records: structuredClone(original.raw_value_json.records),
+    observation_context: { contract_version: "opsmind-lg-protocol-observation/1.0",
+      trial_id: original.scope_json.namespace, capability, production_network: false,
+      resource_scope: { identifier_domain: "opsmind-twin", ...structuredClone(original.scope_json) } } };
+}
+
+test("LG native facts use their own attested Trial scope and preserve original traces", () => {
+  for (const [original, capability, expected] of [
+    [evidence(), "service_health", ["process:service-z-healthy"]],
+    [policyEvidence(), "sandboxed_readonly_diagnostic", ["policy:sctp:38412:drop-rule-present"]],
+    [retainedCaptureEvidence(), "protocol_summary", ["pcap:sctp-observed", "pcap:ngap-observed"]],
+  ]) {
+    const item = lgEvidence(original, capability), before = JSON.stringify(item);
+    assert.deepEqual(protocolEvidenceReferences(item), expected);
+    const spec = { ground_truth: { root_causes: ["bounded cause"], required_evidence: expected }, tools: {} };
+    const outcome = { status: "resolved", root_cause: "bounded cause", evidence_refs: [item.evidence_id] };
+    const trace = [{ name: "candidate.raw_event", payload: { evidence: [item] } }];
+    assert.equal(gradeObservableOutcome(spec, outcome, trace).evidenceRecall, 1);
+    assert.equal(gradeObservableOutcome(spec, { ...outcome, evidence_refs: [] }, trace).evidenceRecall, 0);
+    assert.equal(JSON.stringify(item), before);
+  }
+});
+
+test("LG capture requires the retained source time and complete original coverage", () => {
+  for (const mutate of [
+    (x) => { x.freshness = "live"; },
+    (x) => { x.partial = true; },
+    (x) => { x.records[0].capture_inventory[0].sha256 = "unknown"; },
+    (x) => { x.records[0].source_ref = "protocol-lab:foreign:protocol_summary"; },
+    (x) => { x.records[0].observation_available = false; },
+  ]) {
+    const item = lgEvidence(retainedCaptureEvidence(), "protocol_summary");
+    mutate(item);
+    assert.deepEqual(protocolEvidenceReferences(item), []);
+  }
+});
+
+test("LG provenance fails closed for foreign scope, stale facts and borrowed AH namespaces", () => {
+  for (const mutate of [
+    (x) => { delete x.observation_context; },
+    (x) => { x.observation_context.trial_id = "foreign"; },
+    (x) => { x.observation_context.resource_scope.resource_refs[0].namespace = "foreign"; },
+    (x) => { x.records[0].resource_id = "foreign"; },
+    (x) => { x.observation_context.production_network = true; },
+    (x) => { x.source_system = "mysql.shared.logs"; },
+    (x) => { x.freshness = "historical"; },
+    (x) => { x.coverage = "index_only"; },
+    (x) => { x.records[0].kernel_namespace = "opsmind-ah-mec";
+      x.records[0].source_ref = "protocol-lab:trial-test:network_policy:opsmind-ah-mec"; },
+  ]) {
+    const item = lgEvidence(policyEvidence(), "sandboxed_readonly_diagnostic");
+    mutate(item);
+    assert.deepEqual(protocolEvidenceReferences(item), []);
+  }
+  const item = lgEvidence(policyEvidence(), "sandboxed_readonly_diagnostic");
+  item.records[0].kernel_namespace = "opsmind-lg-mec";
+  item.records[0].source_ref = "protocol-lab:trial-test:network_policy:opsmind-lg-mec";
+  assert.deepEqual(protocolEvidenceReferences(item), ["policy:sctp:38412:drop-rule-present"]);
+  const old = policyEvidence();
+  old.raw_value_json.records = item.records;
+  assert.deepEqual(protocolEvidenceReferences(old), []);
+});
+
 function evidence(service = "service-z") {
   return { evidence_id: "ev-live", source_type: "protocol_lab_resource_observation",
     source_lineage: "lab.resource_observation.service_health", quality: "verified", freshness: "live",

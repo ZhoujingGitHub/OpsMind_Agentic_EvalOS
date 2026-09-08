@@ -98,7 +98,7 @@ function validCaptureContract(record) {
 // Rule presence is an observation, not proof that it caused this incident.
 // The Agent interprets hook order, selectors, counters and packet evidence.
 // No Case ID, expected action or fault-injection cache participates here.
-function protocolPolicyReferences(item) {
+function protocolPolicyReferences(item, kernelNamespaces = ["host", "opsmind-ue", "opsmind-ah-mec"]) {
   const raw = item?.raw_value_json, scope = item?.scope_json;
   if (item?.source_type !== "protocol_lab_resource_observation" ||
       item.source_lineage !== "lab.resource_observation.sandboxed_readonly_diagnostic" ||
@@ -117,7 +117,7 @@ function protocolPolicyReferences(item) {
         record.contract_version !== "opsmind-network-observation/1.0" ||
         record.sampling_mode !== "kernel_policy_snapshot" || record.policy_backend !== "iptables" ||
         record.policy_scope !== "kernel_namespace_only" || record.causal_conclusion !== "not_computed" ||
-        !["host", "opsmind-ue", "opsmind-ah-mec"].includes(record.kernel_namespace) ||
+        !kernelNamespaces.includes(record.kernel_namespace) ||
         record.source_ref !== "protocol-lab:" + scope.namespace + ":network_policy:" + record.kernel_namespace ||
         !Number.isFinite(Date.parse(record.observed_at)) ||
         !/^[a-f0-9]{64}$/.test(record.policy_digest) || !Array.isArray(record.tables)) return [];
@@ -137,5 +137,42 @@ function protocolPolicyReferences(item) {
 }
 
 export function protocolEvidenceReferences(item) {
-  return [...protocolServiceHealthReferences(item), ...protocolCaptureReferences(item), ...protocolPolicyReferences(item)];
+  return [...protocolServiceHealthReferences(item), ...protocolCaptureReferences(item),
+    ...protocolPolicyReferences(item), ...langGraphProtocolReferences(item)];
+}
+
+function langGraphProtocolReferences(item) {
+  const context = item?.observation_context, scope = context?.resource_scope;
+  const capability = context?.capability;
+  const lineage = { service_health: "lab.resource_observation.service_health",
+    sandboxed_readonly_diagnostic: "lab.resource_observation.sandboxed_readonly_diagnostic",
+    protocol_summary: "lab.packet_capture" }[capability];
+  if (!lineage || item?.evidence_type !== "mcp.tool_result" ||
+      context?.contract_version !== "opsmind-lg-protocol-observation/1.0" ||
+      context.production_network !== false || scope?.identifier_domain !== "opsmind-twin" ||
+      typeof scope.namespace !== "string" || !scope.namespace || context.trial_id !== scope.namespace ||
+      !Array.isArray(scope.resource_refs) || !scope.resource_refs.length ||
+      !scope.resource_refs.every((ref) => ref?.identifier_domain === "opsmind-twin" &&
+        ref.namespace === scope.namespace && typeof ref.resource_id === "string" && ref.resource_id &&
+        typeof ref.resource_type === "string" && ref.resource_type) ||
+      !["protocol-lab." + capability, "candidate-observation." + capability].includes(item.source_system) ||
+      ![item.tenant_id, item.scope_snapshot_id, item.investigation_id, item.tool_call_id, item.evidence_id]
+        .every((value) => typeof value === "string" && value) ||
+      !Number.isFinite(Date.parse(item.observed_at)) || item.quality !== "verified" ||
+      !Array.isArray(item.records) || typeof item.partial !== "boolean" ||
+      !["complete", "filtered_complete", "upstream_partial"].includes(item.coverage) ||
+      item.freshness !== (capability === "protocol_summary" ? "snapshot" : "live")) return [];
+  // Interpret the LG-native, gateway-attested scope with the same fact rules.
+  // This view is internal to grading; it does not create an AH receipt or alter the trace.
+  const source = `protocol-lab:${scope.namespace}:protocol_summary`;
+  const view = { source_type: capability === "protocol_summary" ? "protocol_lab" : "protocol_lab_resource_observation",
+    source_lineage: lineage, source_ref: source, protocol_trial_id: scope.namespace,
+    scope_json: scope, quality: item.quality,
+    freshness: capability === "protocol_summary" ? "snapshot" : item.freshness,
+    completeness: item.partial ? "partial" : "complete", substantive: item.records.length > 0,
+    raw_value_json: { records: item.records, partial: item.partial, trial_id: scope.namespace,
+      source_lineage: lineage, source_ref: source, production_network: false,
+      protocol_lab_call_id: `langgraph:${item.tool_call_id}` } };
+  return [...protocolServiceHealthReferences(view), ...protocolCaptureReferences(view),
+    ...protocolPolicyReferences(view, ["host", "opsmind-ue", "opsmind-lg-mec"])];
 }

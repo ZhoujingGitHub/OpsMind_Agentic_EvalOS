@@ -649,7 +649,7 @@ function leadingReportHypothesis(report) {
   return leadingReportHypotheses(report)[0] ?? null;
 }
 
-function recommendationEvaluationView({ product, report, taskResult, projection, required, sourceRef }) {
+function recommendationEvaluationView({ product, report, taskResult, projection, gate, required, sourceRef }) {
   const recommendations = Array.isArray(taskResult?.recommendations) ? taskResult.recommendations
     : Array.isArray(report?.recommendations) ? report.recommendations : [];
   const delivery = taskResult?.recommendation_delivery ?? report?.recommendation_delivery ?? null;
@@ -669,7 +669,9 @@ function recommendationEvaluationView({ product, report, taskResult, projection,
     hypothesis_context: {
       leading_hypothesis_ids: leading.map((item) => item.hypothesis_id).filter(Boolean).map(String),
       hypotheses,
-      conclusion_status: String(report?.conclusion_status ?? taskResult?.outcome ?? "").toLowerCase(),
+      conclusion_status: String(product === "langgraph"
+        ? gate?.effective_conclusion_status ?? gate?.status ?? ""
+        : report?.conclusion_status ?? "").toLowerCase(),
     },
     report_evidence_ids: reportEvidence.evidence_ids,
     report_evidence: reportEvidence,
@@ -718,7 +720,7 @@ function authoritativeOutcome({ status, detail = {}, projection = null, events =
   const recoverySuccess = recoveryFailure && (failureRecovery.some((item) => item?.recovered === true ||
     ["recovered", "succeeded", "success"].includes(String(item?.status ?? item?.outcome ?? "").toLowerCase())) ||
     events.some((event) => /retry|recover|resume/.test(String(event?.event_type ?? event?.name ?? "").toLowerCase())));
-  const recommendationEvaluation = recommendationEvaluationView({ product, report, taskResult, projection,
+  const recommendationEvaluation = recommendationEvaluationView({ product, report, taskResult, projection, gate,
     required: recommendationRequired, sourceRef: recommendationSourceRef });
   const repair = productRepairProgress(translate(events, product, (_, index) => `result:${index}`,
     (event) => event.event_type ?? event.name ?? event.action).normalized);
@@ -733,7 +735,7 @@ function authoritativeOutcome({ status, detail = {}, projection = null, events =
   const taskResolved = rootCauseConfirmed && (operatingMode === "diagnosis_only" || repair.recovery_verified);
   return { status: taskResolved ? "resolved" : "inconclusive",
     delivery_state: { contract_version: "opsmind-task-delivery/1.0", investigation: String(status),
-      diagnosis: rootCauseConfirmed ? gateConclusion || "confirmed" : "inconclusive",
+      diagnosis: gateConclusion || "inconclusive",
       operating_mode: operatingMode, remediation: repair,
       current_action_facts: product === "agent-harness" ? detail.repair_delivery : null },
     root_cause: rootCauseConfirmed ? publishedRootCause : null,

@@ -526,6 +526,8 @@ test("Adapter 5 Agent+Harness模式管理员必须具备产品切换模式所需
 
 test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归档和外部清场交接", async (t) => {
   let runContext = null;
+  let gateStatus = "confirmed";
+  let taskOutcome = "root_cause_confirmed";
   const modelPortfolio = [
     { provider: "deepseek", model_id: "deepseek-v4-flash", interface: "anthropic", thinking: "disabled", roles: ["reason", "tool_selection"] },
     { provider: "deepseek", model_id: "deepseek-v4-pro", interface: "openai-chat", thinking: "high", roles: ["revise", "adjudicate"] },
@@ -579,7 +581,7 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
     "GET /api/v1/investigations/run-lg/product-e2e": async () => ({
       contract_version: "opsmind-controlled-remediation:1.2", trial_id: runContext?.trial_id,
       run_context_digest: runContext?.context_digest, run_contract_version: runContext?.contract_version,
-      evaluation_budget: runContext?.budget, task_result: { outcome: "root_cause_confirmed", root_cause: "ue-route-missing",
+      evaluation_budget: runContext?.budget, task_result: { outcome: taskOutcome, root_cause: "ue-route-missing",
         root_cause_confidence: 0.85, summary: "确认UE路由缺失",
         report_evidence: { contract_version: "opsmind-report-evidence:1.0", valid: true, status: "published",
           evidence_ids: ["evidence:lg"], hypotheses: [{ hypothesis_id: "hyp-route",
@@ -596,7 +598,7 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
       root_cause_confidence: 0.85, graph_version: "opsmind-langgraph:5.0.0",
       state_schema_version: "graph-state:5.0.0", mcp_contract_version: "observation+protocol-lab:3.2.0",
       knowledge_version: "knowledge:5.0.0", model_version: "deepseek-v4-flash+deepseek-v4-pro",
-      evidence_gate: { status: "confirmed", passed: true }, hypotheses: [{ hypothesis_id: "hyp-route",
+      evidence_gate: { status: gateStatus, passed: ["confirmed", "probable"].includes(gateStatus) }, hypotheses: [{ hypothesis_id: "hyp-route",
         cause: "ue-route-missing", status: "supported", confidence: 0.85 }], evidence: [
         { evidence_id: "evidence:lg", records: [{ evidence_refs: ["route:missing"] }] },
         { evidence_id: "evidence:lg-uncited", records: [{ id: "protocol-lab:receipt-other" }] }],
@@ -693,13 +695,25 @@ test("Adapter 5 LangGraph连接器发送不透明run_context并等待Job、归�
   observation.outcome, lgTrace);
   assert.equal(lgGrade.pass, true);
   assert.equal(lgGrade.preservedEvidenceCount, 2);
+  // Diagnosis is taken from the publication gate, independently of business recovery.
+  for (const conclusion of ["confirmed", "probable", "insufficient_evidence"]) {
+    gateStatus = conclusion;
+    taskOutcome = "safe_stop";
+    const stopped = await connector.observe({ runRef: started.run_ref, cursor: 1, executionContract: contract });
+    assert.equal(stopped.outcome.status, "inconclusive");
+    assert.equal(stopped.outcome.delivery_state.diagnosis, conclusion);
+    assert.equal(stopped.outcome.recommendation_evaluation.hypothesis_context.conclusion_status, conclusion);
+  }
+  gateStatus = "confirmed";
+  taskOutcome = "root_cause_confirmed";
   assert.equal(observation.candidate_usage.complete, true);
   assert.equal(observation.candidate_usage.by_model["deepseek-v4-flash"].input_tokens, 1000);
   assert.equal(observation.candidate_usage.by_model["deepseek-v4-pro"].output_tokens, 700);
   assert.deepEqual(observation.artifact_refs, ["oss://langgraph/archive-lg.json"]);
   const journalQueries = fixture.requests.filter((item) => item.url.startsWith("/api/v1/investigations/run-lg/journal"))
     .map((item) => new URL(item.url, "http://fixture").searchParams);
-  assert.deepEqual(journalQueries.map((query) => query.get("after_cursor")), ["1", "0", "1000"]);
+  assert.deepEqual(journalQueries.map((query) => query.get("after_cursor")),
+    Array.from({ length: 4 }, () => ["1", "0", "1000"]).flat());
   assert.ok(journalQueries.every((query) => query.get("limit") === "1000"));
   const finalized = await connector.finalize({ runRef: started.run_ref });
   assert.equal(finalized.cleanup_owner, "external_controller");

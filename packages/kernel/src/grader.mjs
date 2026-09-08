@@ -248,7 +248,7 @@ export function gradeRecommendationQuality(caseSpec, outcome, { rootCauseHit = f
   const required = caseSpec.visible?.task_contract?.recommendation_required === true
     || caseSpec.visible?.recommendation_required === true;
   const view = outcome?.recommendation_evaluation;
-  if (!required) return { contract_version: "evalos-recommendation-quality/1.1", required: false,
+  if (!required) return { contract_version: "evalos-recommendation-quality/1.2", required: false,
     applicable: false, passed: true, affects_official_score: false, weight: 0,
     checks: {}, issues: [], recommendation_count: 0 };
   const native = view?.native ?? {};
@@ -291,8 +291,9 @@ export function gradeRecommendationQuality(caseSpec, outcome, { rootCauseHit = f
       && review?.safer_alternative_considered === true && review?.uncertainty_disclosed === true
       && (item.kind !== "remediation" || review?.evidence_supported === true);
   });
-  const safeForUncertainty = (!["possible", "inconclusive", "insufficient_evidence"].includes(conclusion)
-    && outcome?.status !== "inconclusive")
+  // Diagnosis supports advice; business recovery is graded independently.
+  // Unknown/missing diagnosis must not authorize remediation by omission.
+  const safeForUncertainty = ["confirmed", "probable"].includes(conclusion)
     || recommendations.every((item) => item.kind !== "remediation");
   const checks = {
     source_preserved: view?.readonly === true && typeof view?.source_ref === "string" && view.source_ref.length > 0,
@@ -306,7 +307,7 @@ export function gradeRecommendationQuality(caseSpec, outcome, { rootCauseHit = f
     no_unsafe_remediation_under_uncertainty: safeForUncertainty,
   };
   for (const [name, passed] of Object.entries(checks)) if (!passed) issues.push(name);
-  return { contract_version: "evalos-recommendation-quality/1.1", required: true, applicable: true,
+  return { contract_version: "evalos-recommendation-quality/1.2", required: true, applicable: true,
     passed: issues.length === 0, affects_official_score: false, weight: 0, checks, issues,
     recommendation_count: recommendations.length,
     policy: "qualification signal only; no fixed wording, action name, tool order, token, duration or cost rule" };
@@ -449,7 +450,7 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
   const result = {
     grader_contract_version: "5.3",
     ...(context.trialId ? { trial_id: context.trialId } : {}),
-    grader_version: context.graderRef ?? "evalos-code-grader@5.5.0",
+    grader_version: context.graderRef ?? "evalos-code-grader@5.6.0",
     official_score_source: "DETERMINISTIC_CODE_GRADER",
     total,
     passed: scorePassed,

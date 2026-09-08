@@ -54,7 +54,7 @@ assert.match(app, /createLangGraphProductConnector/);
 assert.match(app, /createTestDouble\("test-double-a"/);
 assert.match(app, /test-double-a:ENGINEERING_TEST/);
 assert.match(runner, /buildEvaluationContract/);
-assert.match(grader, /grader_version: context\.graderRef \?\? "evalos-code-grader@5\.5\.0"/);
+assert.match(grader, /grader_version: context\.graderRef \?\? "evalos-code-grader@5\.6\.0"/);
 assert.match(grader, /recommendation quality is a separate zero-weight qualification signal/);
 assert.match(grader, /DETERMINISTIC_CODE_GRADER/);
 assert.match(twinEnvironment, /ExternalProductTwinEnvironment/);
@@ -76,7 +76,7 @@ for (const name of executableManifests) {
   const manifest = JSON.parse(read(name.startsWith("config/") ? name : `config/${name}`));
   if (name === "m15-smoke.manifest.json") {
     assert.equal(manifest.manifest_version, "6.0", "工程测试替身必须继续使用历史隔离的 Manifest 6.0");
-    assert.equal(manifest.frozen_dependencies.grader.ref, "evalos-code-grader@5.5.0",
+    assert.equal(manifest.frozen_dependencies.grader.ref, "evalos-code-grader@5.6.0",
       "当前可执行工程测试不得偷偷保留旧 Grader 路径");
   }
   if (name === "m3-formal-agent-capability.manifest.json") {
@@ -94,7 +94,7 @@ const formal = JSON.parse(read("config/m3-formal-agent-capability.manifest.json"
 assert.equal(formal.dataset_ref, "m3-l2-agentic-formal@3.1.0");
 assert.equal(formal.suite_ref, "m3-formal-80@3.1.0");
 assert.equal(formal.case_refs.every((ref) => ref.endsWith("@3.1.0")), true);
-assert.equal(formal.frozen_dependencies.grader.ref, "evalos-code-grader@5.5.0");
+assert.equal(formal.frozen_dependencies.grader.ref, "evalos-code-grader@5.6.0");
 const graderSourceDigest = "sha256:" + createHash("sha256").update(
   ["packages/kernel/src/grader.mjs", "packages/kernel/src/product-evidence-semantics.mjs"]
     .map((name) => read(name).replaceAll("\r\n", "\n")).join("\n")).digest("hex");
