@@ -107,7 +107,12 @@ assert.equal(formal.model.id, "deepseek-v4-flash");
 assert.deepEqual(formal.contestants.find((item) => item.ref === "langgraph-v1")
   .candidate_runtime.models.map((item) => item.id), ["deepseek-v4-flash", "deepseek-v4-pro"]);
 assert.equal(formal.contestants.find((item) => item.ref === "langgraph-v1")
-  .candidate_runtime.versions.job_runtime_limits_contract_version, "opsmind-job-runtime-limits:1.0");
+  .candidate_runtime.versions.job_runtime_limits_contract_version, "opsmind-job-runtime-limits:2.0");
+assert.equal(formal.candidate_resource_contract.contract_version, "evalos-candidate-open-resource/2.0");
+const lgResources = formal.candidate_resource_contract.profiles.find((item) => item.contestant_ref === "langgraph-v1");
+assert.equal(Object.values(lgResources.candidate_resources).every((value) => value === null), true);
+assert.equal(Object.values(lgResources.settlement_reserve).every((value) => value === null), true);
+assert.equal(Object.values(lgResources.enforcement).every((value) => value === "observed_only"), true);
 validateCandidateRegistration({ manifest: formal,
   relay: JSON.parse(read("config/candidate-relay-public-keys.json")),
   presence: JSON.parse(read("config/candidate-presence-public-keys.json")) });
