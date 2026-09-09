@@ -103,7 +103,8 @@ function tenantScoped(principal, tenantId, kind) {
 
 function deploymentLimits(value) {
   const maxRunMs = Number(value?.max_run_ms);
-  return Object.freeze({ observable: Number.isFinite(maxRunMs) && maxRunMs > 0,
+  const unbounded = value?.contract_version === "opsmind-job-runtime-limits:2.0" && value.max_run_ms === null;
+  return Object.freeze({ observable: unbounded || Number.isFinite(maxRunMs) && maxRunMs > 0,
     max_run_ms: Number.isFinite(maxRunMs) && maxRunMs > 0 ? maxRunMs : null,
     cancellation_supported: value?.cancellation_supported === true, source: value?.source ?? "not-declared" });
 }
@@ -129,9 +130,10 @@ function publicOpenResourcePolicy(...values) {
     throw new Error("candidate public open-resource policy declarations disagree");
   }
   const policy = available[0];
+  const accountingOnly = policy.contract_version === "opsmind-open-resource/2.0";
   const expected = {
-    contract_version: OPEN_RESOURCE_POLICY_CONTRACT,
-    mode: "open_with_safety_fuses",
+    contract_version: accountingOnly ? "opsmind-open-resource/2.0" : OPEN_RESOURCE_POLICY_CONTRACT,
+    mode: accountingOnly ? "open_with_usage_accounting" : "open_with_safety_fuses",
     limits_are_safety_fuses_only: true,
     usage_affects_score: false,
     efficiency_reporting_only: true,
@@ -250,10 +252,12 @@ function langGraphNativeContract(automation) {
   if (!contract || typeof contract !== "object" || Array.isArray(contract)) {
     throw new Error("LangGraph native Job runtime limits are not publicly available");
   }
+  const supportsUnbounded = contract.contract_version === "opsmind-job-runtime-limits:2.0";
+  const unboundedDuration = supportsUnbounded && contract.max_run_ms === null;
   const fixedFields = {
-    contract_version: LANGGRAPH_JOB_RUNTIME_CONTRACT,
+    contract_version: supportsUnbounded ? "opsmind-job-runtime-limits:2.0" : LANGGRAPH_JOB_RUNTIME_CONTRACT,
     source: "product_runtime",
-    native_enforcement: true,
+    native_enforcement: !unboundedDuration,
     cancellation_supported: false,
     terminal_status: "budget_exhausted",
     stop_semantics: "safe_stop_without_confirmed_root_cause",
@@ -264,10 +268,10 @@ function langGraphNativeContract(automation) {
       throw new Error(`LangGraph public Job runtime contract has invalid ${name}`);
     }
   }
-  const maxRunMs = strictInteger(contract.max_run_ms, "max_run_ms");
+  const maxRunMs = unboundedDuration ? null : strictInteger(contract.max_run_ms, "max_run_ms");
   const terminalizationReserveMs = strictInteger(contract.terminalization_reserve_ms,
     "terminalization_reserve_ms", { allowZero: true });
-  if (terminalizationReserveMs >= maxRunMs) {
+  if (maxRunMs !== null && terminalizationReserveMs >= maxRunMs) {
     throw new Error("LangGraph public Job runtime contract has invalid terminalization reserve");
   }
   const publicDimensions = contract.budget_dimensions;
@@ -282,23 +286,25 @@ function langGraphNativeContract(automation) {
   const normalizedDimensions = {};
   for (const [name, expected] of Object.entries(LANGGRAPH_BUDGET_DIMENSIONS)) {
     const dimension = publicDimensions[name];
+    const unbounded = supportsUnbounded && dimension?.limit === null;
     if (!dimension || typeof dimension !== "object" || Array.isArray(dimension) ||
-        dimension.unit !== expected.unit || dimension.native_enforcement !== true || dimension.observable !== true ||
+        dimension.unit !== expected.unit || dimension.native_enforcement !== !unbounded || dimension.observable !== true ||
         typeof dimension.enforcement_phase !== "string" || !dimension.enforcement_phase ||
         typeof dimension.measurement !== "string" || !dimension.measurement) {
       throw new Error(`LangGraph public Job runtime contract has invalid ${name} dimension`);
     }
-    const limit = strictInteger(dimension.limit, `${name}.limit`);
+    const limit = unbounded ? null : strictInteger(dimension.limit, `${name}.limit`);
     budgetLimits[expected.budget_key] = limit;
-    normalizedDimensions[name] = { limit, unit: expected.unit, native_enforcement: true, observable: true,
+    normalizedDimensions[name] = { limit, unit: expected.unit, native_enforcement: !unbounded, observable: true,
       enforcement_phase: dimension.enforcement_phase, measurement: dimension.measurement };
   }
-  if (budgetLimits.max_duration_seconds * 1000 + terminalizationReserveMs > maxRunMs) {
+  if (maxRunMs !== null && (budgetLimits.max_duration_seconds === null ||
+      budgetLimits.max_duration_seconds * 1000 + terminalizationReserveMs > maxRunMs)) {
     throw new Error("LangGraph active duration and terminalization reserve exceed max_run_ms");
   }
-  return Object.freeze({ supported: true, contract_version: LANGGRAPH_JOB_RUNTIME_CONTRACT,
+  return Object.freeze({ supported: true, contract_version: fixedFields.contract_version,
     source: contract.source, max_run_ms: maxRunMs, terminalization_reserve_ms: terminalizationReserveMs,
-    native_enforcement: true, cancellation_supported: false, terminal_status: contract.terminal_status,
+    native_enforcement: !unboundedDuration, cancellation_supported: false, terminal_status: contract.terminal_status,
     stop_semantics: contract.stop_semantics, budget_reason: contract.budget_reason,
     budget_limits: Object.freeze(budgetLimits), budget_dimensions: Object.freeze(normalizedDimensions) });
 }
@@ -895,13 +901,11 @@ function agentHarnessSubmission(executionContract, nativeContract) {
       cleanup_owner: "external_controller" } };
 }
 
-function langGraphSubmission(executionContract, nativeContract = null) {
+function langGraphSubmission(executionContract, nativeContract = null, { validateBudget = true } = {}) {
   const context = candidateEvaluationContext(executionContract);
   const scope = executionContract.case.visible.scope ?? {};
-  const productLimits = nativeContract?.supported === true ? nativeContract.budget_limits : {
-    max_duration_seconds: 86400, max_tool_calls: 1000, max_model_calls: 1000,
-    max_tokens: 10_000_000, max_cost_microunits: Number.MAX_SAFE_INTEGER,
-    max_result_bytes: Number.MAX_SAFE_INTEGER };
+  if (validateBudget && nativeContract?.supported !== true) throw new Error("LangGraph public resource contract is required");
+  const productLimits = nativeContract?.budget_limits;
   const requestedBudget = Object.hasOwn(executionContract.budget, "max_duration_seconds")
     ? executionContract.budget : {
       max_duration_seconds: Number(executionContract.budget.wallclock_ms) / 1000,
@@ -912,9 +916,13 @@ function langGraphSubmission(executionContract, nativeContract = null) {
       max_result_bytes: executionContract.budget.storage_bytes,
     };
   const budget = Object.fromEntries(NATIVE_BUDGET_KEYS.map((name) => {
+    // Observation after a process restart reconstructs the frozen request; it
+    // must not substitute today's product limits for that historical request.
+    if (!validateBudget) return [name, requestedBudget[name]];
+    if (requestedBudget[name] === null && productLimits[name] === null) return [name, null];
     const requested = Math.floor(Number(requestedBudget[name]));
-    const maximum = Math.floor(Number(productLimits[name]));
-    if (!Number.isSafeInteger(requested) || requested < 1 || requested > maximum) {
+    const maximum = productLimits[name];
+    if (!Number.isSafeInteger(requested) || requested < 1 || maximum !== null && requested > maximum) {
       throw new Error(`LangGraph requested native budget exceeds the public product limit: ${name}`);
     }
     return [name, requested];
@@ -1334,7 +1342,8 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
           candidate_observation: candidateObservation, model_visible_result: modelVisibleResult },
         candidate_observation: candidateObservation, model_visible_result: modelVisibleResult,
         budget_contract: { observable: true, max_run_ms: latestNativeContract.max_run_ms,
-          native_enforcement: true, cancellation_supported: latestNativeContract.cancellation_supported,
+          contract_version: latestNativeContract.contract_version,
+          native_enforcement: latestNativeContract.native_enforcement, cancellation_supported: latestNativeContract.cancellation_supported,
           deployment_declaration_matches: deploymentDeclarationMatches,
           dimensions: latestNativeContract.budget_limits,
           dimension_metadata: latestNativeContract.budget_dimensions,
@@ -1379,7 +1388,7 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
       const capability = { architecture_type: ready.architecture_type,
         operating_modes: automation.operating_modes ?? ["diagnosis_only", "human_collaboration", "controlled_auto"],
         execution_modes: automation.execution_modes ?? ["controlled_simulation", "replay_read_only"],
-        external_run_context: true, native_budget_enforcement: true,
+        external_run_context: true, native_budget_enforcement: latestNativeContract.native_enforcement,
         job_runtime_limits_contract_version: latestNativeContract.contract_version,
         production_writes_available: false };
       const stableRuntime = { architecture_type: ready.architecture_type,
@@ -1436,7 +1445,7 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         api.request(`/api/v1/investigations/${encodeURIComponent(runRef)}/product-e2e`),
         api.request("/api/v1/jobs?limit=200")]);
       const run = runs.get(runRef) ?? { expected: candidateEvaluationContext(executionContract),
-        requestBody: langGraphSubmission(executionContract, latestNativeContract), job_id: null };
+        requestBody: langGraphSubmission(executionContract, null, { validateBudget: false }), job_id: null };
       const jobs = listItems(jobsPage);
       const job = jobs.find((item) => item.job_id === run.job_id || item.investigation_id === runRef ||
         item.run_id === projection.run_id) ?? null;

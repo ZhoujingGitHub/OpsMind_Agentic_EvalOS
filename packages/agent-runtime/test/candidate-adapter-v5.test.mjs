@@ -49,6 +49,50 @@ function connector(bindingStrength = "EVIDENCE_CHAIN_BOUND") {
   };
 }
 
+test("无限额公开合同必须与冻结额度一致，不能把未知或缺字段当作无限额", async () => {
+  const dimensions = Object.fromEntries(["max_duration_seconds", "max_tool_calls", "max_model_calls",
+    "max_tokens", "max_cost_microunits", "max_result_bytes"].map((name) => [name, null]));
+  const product = connector();
+  const discovery = await product.discover();
+  product.discover = async () => ({ ...discovery, health: { status: "healthy" },
+    usage_observability: { complete: true }, native_run_context_supported: true });
+  const readiness = { identities_separated: true, tenant_bound: true, least_privilege: true,
+    model_visible_result: MODEL_VISIBLE_RESULT_READY,
+    budget_contract: { contract_version: "opsmind-job-runtime-limits:2.0", observable: true,
+      max_run_ms: null, native_enforcement: false, dimensions,
+      open_resource_policy: { supported: true, contract_version: "opsmind-open-resource/2.0",
+        mode: "open_with_usage_accounting", limits_are_safety_fuses_only: true, usage_affects_score: false,
+        efficiency_reporting_only: true, case_specific_limits: false } } };
+  product.evaluationReadiness = async () => readiness;
+  const adapter = createCandidateAdapterV5({ id: "candidate", connector: product });
+  const request = { contestant: contract("PRODUCT_NATIVE_ACK").contestant, requiresTwin: true,
+    budget: dimensions, settlementBudget: { wallclock_ms: null },
+    resourcePolicy: { candidate_limit_source: "product_public_maximum" } };
+  assert.equal((await adapter.preflight(request)).formal_ready, true);
+  assert.equal((await adapter.preflight({ ...request, settlementBudget: { wallclock_ms: 999999999 } })).formal_ready, false);
+  assert.equal((await adapter.preflight({ ...request, budget: { ...dimensions, max_tokens: 1000000 } })).formal_ready, false);
+  delete readiness.budget_contract.contract_version;
+  assert.equal((await adapter.preflight(request)).formal_ready, false);
+});
+
+test("无限额执行不会被 null 当成零时限，仍响应明确取消", async () => {
+  let observed = 0;
+  let cancelled = 0;
+  const product = connector();
+  product.observe = async ({ runRef }) => {
+    observed += 1;
+    return { run_ref: runRef, status: cancelled ? "CANCELLED" : "RUNNING", raw_events: [], normalized_events: [] };
+  };
+  product.cancel = async () => { cancelled += 1; return { supported: true, terminal: true }; };
+  const adapter = createCandidateAdapterV5({ id: "candidate", connector: product, pollIntervalMs: 1,
+    quarantineTimeoutMs: 10 });
+  await assert.rejects(adapter.execute({ executionContract: { ...contract(),
+    settlement_budget: { wallclock_ms: null } }, emit: async () => {},
+    shouldCancel: async () => ({ requested: observed >= 2 }) }), /cancellation/);
+  assert.equal(observed, 3);
+  assert.equal(cancelled, 1);
+});
+
 test("Candidate Adapter 5.0接受真实证据链绑定，且无失败时恢复证据明确不适用", async () => {
   const adapter = createCandidateAdapterV5({ id: "candidate", connector: connector(), pollIntervalMs: 1 });
   const result = await adapter.execute({ executionContract: contract(), emit: async () => {} });

@@ -145,6 +145,54 @@ function executionContract(id, candidateRuntime) {
       scope: { resource_ids: ["ue-1"], service_ids: ["mec-public-1"] } } } };
 }
 
+test("LG 新公开合同保持 null 额度直到原生提交，并拒绝伪造无限额声明", async (t) => {
+  const limits = structuredClone(LANGGRAPH_JOB_RUNTIME_LIMITS);
+  limits.contract_version = "opsmind-job-runtime-limits:2.0";
+  limits.max_run_ms = null;
+  limits.native_enforcement = false;
+  for (const dimension of Object.values(limits.budget_dimensions)) {
+    dimension.limit = null;
+    dimension.native_enforcement = false;
+  }
+  const policy = { ...OPEN_RESOURCE_POLICY, contract_version: "opsmind-open-resource/2.0",
+    mode: "open_with_usage_accounting" };
+  let submitted;
+  const fixture = await fixtureServer({
+    "GET /api/v1/me": async ({ request }) => {
+      const identity = request.headers.authorization.slice("Bearer ".length);
+      return { subject: identity, tenant_ids: ["tenant-lg"],
+        roles: [identity === "submitter" ? "on_call" : identity === "approver" ? "approver" : "tenant_admin"] };
+    },
+    "GET /health/ready": async () => ({ ready: true, status: "healthy", architecture_type: "langgraph", connectors: [] }),
+    "GET /api/v1/automation/overview": async () => ({ job_runtime_limits: limits,
+      open_resource_policy: policy, model_portfolio: [{ provider: "deepseek", id: "deepseek-v4-flash",
+        interface: "anthropic", thinking: "disabled", roles: ["reason"] }] }),
+    "POST /api/v1/candidates": async ({ body }) => {
+      submitted = body;
+      return { investigation_id: "unbounded-lg" };
+    },
+  });
+  t.after(fixture.close);
+  const connector = createLangGraphProductConnectorV5({ origin: fixture.origin, token: "submitter",
+    approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-lg", attestation: ATTESTATION,
+    runtimeLimits: { contract_version: limits.contract_version, max_run_ms: null } });
+  const found = await connector.discover();
+  assert.equal(found.runtime.job_runtime_limits.max_run_ms, null);
+  const readiness = await connector.evaluationReadiness();
+  assert.equal(readiness.budget_contract.native_enforcement, false);
+  assert.equal(readiness.budget_contract.open_resource_policy.mode, "open_with_usage_accounting");
+  const request = executionContract("evalos-lg-unbounded", found.candidate_runtime);
+  request.budget = readiness.budget_contract.dimensions;
+  await connector.start({ executionContract: request });
+  assert.deepEqual(submitted.run_context.budget, Object.fromEntries(Object.keys(request.budget).map((key) => [key, null])));
+  assert.equal(JSON.stringify(submitted).includes("918273"), false);
+  delete limits.budget_dimensions.tokens.limit;
+  await assert.rejects(connector.discover(), /invalid tokens/);
+  limits.budget_dimensions.tokens.limit = null;
+  limits.budget_dimensions.tokens.native_enforcement = true;
+  await assert.rejects(connector.discover(), /invalid tokens dimension/);
+});
+
 test("候选资源范围只生成一个namespace并拒绝缺失或不一致的名称", () => {
   const contract = executionContract("evalos-ah-scope-contract", {});
   const scope = candidateManagedResourceScope(contract);

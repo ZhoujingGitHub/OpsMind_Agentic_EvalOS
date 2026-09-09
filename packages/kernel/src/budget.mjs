@@ -22,6 +22,7 @@ export class BudgetTracker {
       const next = this.usage[dimension] + Math.max(0, Number(amount));
       const limit = this.limits[dimension];
       this.usage[dimension] = next;
+      if (limit === null) continue;
       if (next > limit) throw new BudgetExceededError(dimension, next, limit);
       const ratio = next / limit;
       if (ratio >= 0.8 && !this.warned.has(dimension)) {
@@ -36,7 +37,8 @@ export class BudgetTracker {
     return {
       limits: { ...this.limits },
       usage: { ...this.usage },
-      ratios: Object.fromEntries(Object.keys(this.limits).map((key) => [key, this.usage[key] / this.limits[key]])),
+      ratios: Object.fromEntries(Object.keys(this.limits).map((key) =>
+        [key, this.limits[key] === null ? null : this.usage[key] / this.limits[key]])),
       warnings: [...this.warned],
     };
   }

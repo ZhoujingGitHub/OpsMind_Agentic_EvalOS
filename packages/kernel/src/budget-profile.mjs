@@ -9,6 +9,7 @@ export const CANDIDATE_NATIVE_BUDGET_DIMENSIONS = Object.freeze([
 ]);
 
 export const CANDIDATE_OPEN_RESOURCE_CONTRACT = "evalos-candidate-open-resource/1.0";
+export const ACCOUNTED_OPEN_RESOURCE_CONTRACT = "evalos-candidate-open-resource/2.0";
 
 const ENFORCEMENT_MODES = new Set(["enforced", "observed_only", "not_observable"]);
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/;
@@ -20,9 +21,10 @@ function exactKeys(value, keys, label) {
   if (actual !== expected) throw new Error(`${label} must contain exactly ${[...keys].sort().join(", ")}`);
 }
 
-function positiveBudget(value, dimensions, label, { integers = false } = {}) {
+function positiveBudget(value, dimensions, label, { integers = false, allowUnbounded = false } = {}) {
   exactKeys(value, dimensions, label);
   for (const name of dimensions) {
+    if (allowUnbounded && value[name] === null) continue;
     if (!Number.isFinite(value[name]) || value[name] <= 0 || integers && !Number.isSafeInteger(value[name])) {
       throw new Error(`${label}.${name} must be a positive ${integers ? "integer" : "number"}`);
     }
@@ -30,13 +32,15 @@ function positiveBudget(value, dimensions, label, { integers = false } = {}) {
 }
 
 function settlementCoversCandidate(candidate, settlement, contestantRef) {
+  const covers = (reserve, limit, scale = 1) => reserve === null ||
+    limit !== null && reserve >= limit * scale;
   const checks = {
-    max_duration_seconds: settlement.wallclock_ms >= candidate.max_duration_seconds * 1000,
-    max_model_calls: settlement.model_calls >= candidate.max_model_calls,
-    max_tool_calls: settlement.tool_calls >= candidate.max_tool_calls,
-    max_tokens: settlement.input_tokens >= candidate.max_tokens && settlement.output_tokens >= candidate.max_tokens,
-    max_cost_microunits: settlement.cost_usd * 1_000_000 >= candidate.max_cost_microunits,
-    max_result_bytes: settlement.storage_bytes >= candidate.max_result_bytes,
+    max_duration_seconds: covers(settlement.wallclock_ms, candidate.max_duration_seconds, 1000),
+    max_model_calls: covers(settlement.model_calls, candidate.max_model_calls),
+    max_tool_calls: covers(settlement.tool_calls, candidate.max_tool_calls),
+    max_tokens: covers(settlement.input_tokens, candidate.max_tokens) && covers(settlement.output_tokens, candidate.max_tokens),
+    max_cost_microunits: covers(settlement.cost_usd, candidate.max_cost_microunits, 0.000001),
+    max_result_bytes: covers(settlement.storage_bytes, candidate.max_result_bytes),
   };
   const missing = Object.entries(checks).filter(([, covered]) => !covered).map(([name]) => name);
   if (missing.length) {
@@ -52,7 +56,8 @@ function profileFor(manifest, contestantRef) {
 export function validateCandidateResourceContract(manifest) {
   const contract = manifest?.candidate_resource_contract;
   exactKeys(contract, ["contract_version", "mode", "policy", "profiles"], "candidate_resource_contract");
-  if (contract.contract_version !== CANDIDATE_OPEN_RESOURCE_CONTRACT) {
+  const allowUnbounded = contract.contract_version === ACCOUNTED_OPEN_RESOURCE_CONTRACT;
+  if (!allowUnbounded && contract.contract_version !== CANDIDATE_OPEN_RESOURCE_CONTRACT) {
     throw new Error(`candidate_resource_contract must use ${CANDIDATE_OPEN_RESOURCE_CONTRACT}`);
   }
   if (contract.mode !== "OPEN") throw new Error("candidate_resource_contract mode must be OPEN");
@@ -77,15 +82,18 @@ export function validateCandidateResourceContract(manifest) {
     exactKeys(profile, ["contestant_ref", "candidate_resources", "settlement_reserve", "enforcement", "provenance"],
       `candidate_resource_contract.profiles.${profile.contestant_ref}`);
     positiveBudget(profile.candidate_resources, CANDIDATE_NATIVE_BUDGET_DIMENSIONS,
-      `candidate resources ${profile.contestant_ref}`, { integers: true });
+      `candidate resources ${profile.contestant_ref}`, { integers: true, allowUnbounded });
     positiveBudget(profile.settlement_reserve, LEGACY_BUDGET_DIMENSIONS,
-      `settlement reserve ${profile.contestant_ref}`);
+      `settlement reserve ${profile.contestant_ref}`, { allowUnbounded });
     settlementCoversCandidate(profile.candidate_resources, profile.settlement_reserve, profile.contestant_ref);
     exactKeys(profile.enforcement, CANDIDATE_NATIVE_BUDGET_DIMENSIONS,
       `resource enforcement ${profile.contestant_ref}`);
     for (const dimension of CANDIDATE_NATIVE_BUDGET_DIMENSIONS) {
       if (!ENFORCEMENT_MODES.has(profile.enforcement[dimension])) {
         throw new Error(`resource enforcement mode is invalid: ${profile.contestant_ref}.${dimension}`);
+      }
+      if (profile.candidate_resources[dimension] === null && profile.enforcement[dimension] !== "observed_only") {
+        throw new Error(`unbounded resource must be observed_only: ${profile.contestant_ref}.${dimension}`);
       }
     }
     exactKeys(profile.provenance, ["status", "method", "source_revision", "artifact_digest", "evidence_ref"],

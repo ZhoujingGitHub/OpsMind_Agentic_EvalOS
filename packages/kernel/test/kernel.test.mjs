@@ -3,6 +3,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+
+test("无限额资源继续累计真实用量，不制造比例或隐含停止线", () => {
+  const tracker = new BudgetTracker({ tool_calls: null, output_tokens: null, cost_usd: null });
+  assert.deepEqual(tracker.consume({ tool_calls: 1000000, output_tokens: 100000000, cost_usd: 100000 }), []);
+  tracker.consume({ tool_calls: 1 });
+  const snapshot = tracker.snapshot();
+  assert.equal(snapshot.usage.tool_calls, 1000001);
+  assert.deepEqual(snapshot.ratios, { tool_calls: null, output_tokens: null, cost_usd: null });
+});
 import {
   BudgetExceededError, BudgetTracker, CASES, M2_CASES, M3_CASES, DeterministicGradingService, EvalStore, EvaluationLedger, FrozenApprovalOracle,
   PrivateLabelStore, TrialRunner, binaryMetrics, clusteredPairedBootstrap, containsSensitiveMaterial,

@@ -85,6 +85,40 @@ function manifestV8() {
   return item;
 }
 
+test("明确的新版无限额合同贯穿冻结、调度和执行，旧合同不把缺失值当无限额", () => {
+  const { store, labels } = fixture();
+  try {
+    const manifest = manifestV8();
+    const resource = manifest.candidate_resource_contract;
+    resource.contract_version = "evalos-candidate-open-resource/2.0";
+    const profile = resource.profiles[0];
+    for (const name of Object.keys(profile.candidate_resources)) {
+      profile.candidate_resources[name] = null;
+      profile.enforcement[name] = "observed_only";
+    }
+    for (const name of Object.keys(profile.settlement_reserve)) profile.settlement_reserve[name] = null;
+    const created = store.createExperiment(manifest, "unbounded-resource", { scheduleTrials: true });
+    const trial = store.listTrials(created.experiment.id)[0];
+    const adapter = { id: "langgraph-v1", adapterVersion: "candidate-adapter-5.0.0",
+      adapterContractVersion: "5.0", supportedEvaluationLanes: ["PRODUCT_RELIABILITY"] };
+    const contract = buildEvaluationContract({ experiment: created.experiment, trial,
+      caseSpec: store.getExecutionCase(trial.case_ref), adapter });
+    assert.deepEqual(contract.budget, profile.candidate_resources);
+    assert.deepEqual(trial.budget, profile.settlement_reserve);
+    assert.deepEqual(contract.settlement_budget, profile.settlement_reserve);
+    for (const mutate of [
+      (value) => { value.contract_version = "evalos-candidate-open-resource/1.0"; },
+      (value) => { value.profiles[0].enforcement.max_tokens = "enforced"; },
+      (value) => { value.profiles[0].settlement_reserve.output_tokens = 999999999; },
+      (value) => { delete value.profiles[0].candidate_resources.max_tokens; },
+    ]) {
+      const invalid = structuredClone(manifest);
+      mutate(invalid.candidate_resource_contract);
+      assert.throws(() => store.createExperiment(invalid, "invalid-unbounded"));
+    }
+  } finally { labels.close(); store.close(); }
+});
+
 test("存储层仍可读取Manifest 7多模型合同和Manifest 6工程合同，不代表旧真实产品可重新开考", () => {
   const { store, labels } = fixture();
   try {

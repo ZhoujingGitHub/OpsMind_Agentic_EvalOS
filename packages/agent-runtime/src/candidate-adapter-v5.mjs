@@ -87,15 +87,15 @@ function assertBinding(binding, requiredStrength) {
   }
 }
 
-function nativeBudgetAlignment(budget, dimensions, { requireFullEnvelope = false } = {}) {
+function nativeBudgetAlignment(budget, dimensions, { requireFullEnvelope = false, allowUnbounded = false } = {}) {
   if (!budget || !dimensions || typeof dimensions !== "object") return { aligned: null, checks: {} };
   const requested = Object.hasOwn(budget, "max_duration_seconds") ? {
-    max_duration_seconds: Number(budget.max_duration_seconds),
-    max_tool_calls: Number(budget.max_tool_calls),
-    max_model_calls: Number(budget.max_model_calls),
-    max_tokens: Number(budget.max_tokens),
-    max_cost_microunits: Number(budget.max_cost_microunits),
-    max_result_bytes: Number(budget.max_result_bytes),
+    max_duration_seconds: budget.max_duration_seconds,
+    max_tool_calls: budget.max_tool_calls,
+    max_model_calls: budget.max_model_calls,
+    max_tokens: budget.max_tokens,
+    max_cost_microunits: budget.max_cost_microunits,
+    max_result_bytes: budget.max_result_bytes,
   } : {
     max_duration_seconds: Math.ceil(Number(budget.wallclock_ms) / 1000),
     max_tool_calls: Number(budget.tool_calls),
@@ -105,6 +105,10 @@ function nativeBudgetAlignment(budget, dimensions, { requireFullEnvelope = false
     max_result_bytes: Number(budget.storage_bytes),
   };
   const checks = Object.fromEntries(Object.entries(requested).map(([name, value]) => {
+    if (allowUnbounded && dimensions[name] === null) {
+      return [name, { requested: value, product_limit: null,
+        aligned: requireFullEnvelope ? value === null : value === null || Number.isFinite(value) && value > 0 }];
+    }
     const productLimit = Number(dimensions[name]);
     const observable = Number.isFinite(productLimit) && productLimit > 0;
     return [name, { requested: Number.isFinite(value) ? value : null,
@@ -148,15 +152,22 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         ? await connector.evaluationReadiness() : { isolated_tenant_slots: 1, safe_parallelism: 1 };
       const healthy = new Set(["reachable", "ready", "healthy", "ok"]).has(String(discovery.health?.status ?? "").toLowerCase());
       const modelVisibleResultReady = connectorReadiness.model_visible_result?.supported === true;
-      const settlementWallclockMs = Number(settlementBudget?.wallclock_ms);
-      const trialWallclockMs = Number.isFinite(settlementWallclockMs) && settlementWallclockMs > 0
+      const budgetContract = connectorReadiness.budget_contract ?? {};
+      const accountingContract = budgetContract.contract_version === "opsmind-job-runtime-limits:2.0" &&
+        budgetContract.open_resource_policy?.contract_version === "opsmind-open-resource/2.0" &&
+        budgetContract.open_resource_policy?.mode === "open_with_usage_accounting";
+      const settlementWallclockMs = settlementBudget?.wallclock_ms;
+      const trialWallclockMs = accountingContract && settlementWallclockMs === null ? null
+        : Number.isFinite(settlementWallclockMs) && settlementWallclockMs > 0
         ? settlementWallclockMs
         : Object.hasOwn(budget ?? {}, "max_duration_seconds")
           ? Number(budget.max_duration_seconds) * 1000 : Number(budget?.wallclock_ms);
-      const candidateMaxRunMs = Number(connectorReadiness.budget_contract?.max_run_ms);
+      const candidateMaxRunMs = budgetContract.max_run_ms;
+      const unboundedDuration = accountingContract && candidateMaxRunMs === null;
       const budgetObservable = connectorReadiness.budget_contract?.observable === true &&
-        Number.isFinite(candidateMaxRunMs) && candidateMaxRunMs > 0;
-      const budgetAligned = Number.isFinite(trialWallclockMs) && trialWallclockMs > 0 && budgetObservable
+        (unboundedDuration || Number.isFinite(candidateMaxRunMs) && candidateMaxRunMs > 0);
+      const budgetAligned = unboundedDuration ? budgetObservable && trialWallclockMs === null
+        : Number.isFinite(trialWallclockMs) && trialWallclockMs > 0 && budgetObservable
         ? candidateMaxRunMs <= trialWallclockMs : null;
       const budgetNative = connectorReadiness.budget_contract?.native_enforcement === true;
       const budgetContractConsistent = connectorReadiness.budget_contract?.deployment_declaration_matches !== false;
@@ -166,10 +177,10 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         publicOpenResource.limits_are_safety_fuses_only === true && publicOpenResource.usage_affects_score === false &&
         publicOpenResource.efficiency_reporting_only === true && publicOpenResource.case_specific_limits === false;
       const dimensionAlignment = nativeBudgetAlignment(budget, connectorReadiness.budget_contract?.dimensions,
-        { requireFullEnvelope: openResourceRequired });
+        { requireFullEnvelope: openResourceRequired, allowUnbounded: accountingContract });
       const limitations = [];
       if (!budgetObservable) limitations.push("candidate_max_run_time_not_public");
-      if (!budgetNative) limitations.push("candidate_budget_not_natively_enforced");
+      if (!budgetNative && !unboundedDuration) limitations.push("candidate_budget_not_natively_enforced");
       if (!budgetContractConsistent) limitations.push("candidate_budget_declaration_drift");
       if (dimensionAlignment.aligned === false) limitations.push(openResourceRequired
         ? "candidate_resource_not_full_product_envelope" : "candidate_budget_would_be_clamped_by_product");
@@ -182,7 +193,8 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
         (!requiresTwin || modelVisibleResultReady) &&
         budgetAligned !== false && dimensionAlignment.aligned !== false && budgetContractConsistent &&
         (!openResourceRequired || openResourceDeclared);
-      const formalReady = hardReady && budgetAligned === true && dimensionAlignment.aligned === true && budgetNative &&
+      const formalReady = hardReady && budgetAligned === true && dimensionAlignment.aligned === true &&
+        (budgetNative || unboundedDuration) &&
         (contestant.binding_requirement !== "PRODUCT_NATIVE_ACK" || discovery.native_run_context_supported === true);
       return {
         ready: hardReady,
@@ -267,14 +279,16 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
       const runStartedAt = Date.now();
       let nextProgressCheckpointMs = 900000;
       const handledApprovalRefs = new Set();
-      const deadline = Date.now() + Math.min(timeoutMs,
-        executionContract.settlement_budget?.wallclock_ms ?? executionContract.budget.wallclock_ms);
+      const settlementBudget = executionContract.settlement_budget ?? executionContract.budget;
+      const wallclockMs = settlementBudget.wallclock_ms;
+      const deadline = wallclockMs === null && timeoutMs === Number.POSITIVE_INFINITY ? null
+        : Date.now() + Math.min(timeoutMs, wallclockMs === null ? Number.POSITIVE_INFINITY : wallclockMs);
       try {
         while (!TERMINAL.has(status)) {
           const cancellation = typeof shouldCancel === "function" ? await shouldCancel() : { requested: false };
           if (cancellation?.requested) throw cancellationError(cancellation);
           if (typeof heartbeat === "function") await heartbeat();
-          if (Date.now() >= deadline) throw new Error("external candidate run timed out");
+          if (deadline !== null && Date.now() >= deadline) throw new Error("external candidate run timed out");
           if (Date.now() - lastProgressHeartbeatAt >= Math.max(1000, progressHeartbeatMs)) {
             lastProgressHeartbeatAt = Date.now();
             await emit("candidate.poll.heartbeat", "candidate-adapter", { run_ref: runRef, status, cursor,
