@@ -1,4 +1,5 @@
 import { assertProductResourceEvidence } from "./product-resource-evidence.mjs";
+import { langGraphRepairProgress } from "./langgraph-repair-delivery.mjs";
 import { createHash } from "node:crypto";
 import { boundActionApproval, evidenceBoundExclusions, hasPendingProductActions,
   productActionEventType, productRepairProgress } from "./product-action-events.mjs";
@@ -744,8 +745,10 @@ function authoritativeOutcome({ status, detail = {}, projection = null, events =
     events.some((event) => /retry|recover|resume/.test(String(event?.event_type ?? event?.name ?? "").toLowerCase())));
   const recommendationEvaluation = recommendationEvaluationView({ product, report, taskResult, projection, gate,
     required: recommendationRequired, sourceRef: recommendationSourceRef });
-  const repair = productRepairProgress(translate(events, product, (_, index) => `result:${index}`,
-    (event) => event.event_type ?? event.name ?? event.action).normalized);
+  const repairEvents = translate(events, product, (_, index) => `result:${index}`,
+    (event) => event.event_type ?? event.name ?? event.action).normalized;
+  const repair = product === "langgraph" ? langGraphRepairProgress(repairEvents, projection, events)
+    : productRepairProgress(repairEvents);
   if (product === "agent-harness") {
     const liveFacts = detail.repair_delivery?.actions ?? [];
     repair.recovery_verified = repair.recovery_verified && repair.actions
@@ -755,11 +758,12 @@ function authoritativeOutcome({ status, detail = {}, projection = null, events =
         fact.business_verification?.passed === true));
   }
   const taskResolved = rootCauseConfirmed && (operatingMode === "diagnosis_only" || repair.recovery_verified);
+  const summary = taskResult.summary ?? report.summary ?? detail.summary ?? detail.conclusion ?? "";
   return { status: taskResolved ? "resolved" : "inconclusive",
     delivery_state: { contract_version: "opsmind-task-delivery/1.0", investigation: String(status),
       diagnosis: gateConclusion || "inconclusive",
       operating_mode: operatingMode, remediation: repair,
-      current_action_facts: product === "agent-harness" ? detail.repair_delivery : null },
+      current_action_facts: product === "agent-harness" ? detail.repair_delivery : projection?.repair_delivery ?? null },
     root_cause: rootCauseConfirmed ? publishedRootCause : null,
     confidence: rootCauseConfirmed ? boundedConfidence(projection?.root_cause_confidence ?? taskResult.root_cause_confidence ??
       taskResult.confidence ?? leading?.confidence ?? report.confidence ?? detail.confidence) : 0,
@@ -769,7 +773,8 @@ function authoritativeOutcome({ status, detail = {}, projection = null, events =
         recommendationEvaluation.report_evidence_ids, product)])],
     tool_failures_recovered: recoveryFailure ? recoverySuccess : null,
     next_checks: stringList(taskResult.next_checks ?? report.next_checks ?? report.missing_evidence ?? report.evidence_gaps),
-    summary: taskResult.summary ?? report.summary ?? detail.summary ?? detail.conclusion ?? "",
+    summary: product === "langgraph" && repair.attempt_history?.length
+      ? [summary, repair.explanation].filter(Boolean).join("\n") : summary,
     uncertainty: projection?.uncertainty ?? taskResult.uncertainty ?? report.uncertainty ?? detail.uncertainty ?? null,
     candidate_terminal_status: String(status ?? "").toLowerCase(),
     candidate_task_outcome: taskOutcome || null,
@@ -1480,8 +1485,13 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         (event, index) => `langgraph:${event.cursor ?? Number(cursor) + index + 1}`,
         (event) => event.event_type ?? event.name ?? event.action);
       const lifecycle = projection.action_lifecycle;
+      if (detailState === "waiting_approval" && projection.contract_version === "opsmind-controlled-remediation:1.3" &&
+          (projection.current_action_ref?.action_id !== lifecycle?.proposal?.action_id ||
+           projection.current_action_ref?.proposal_digest !== lifecycle?.proposal?.proposal_digest)) {
+        throw new Error("LG_CURRENT_APPROVAL_BINDING_MISMATCH");
+      }
       const approvalRequests = detailState === "waiting_approval" && lifecycle?.proposal ? [{
-        request_ref: `langgraph-approval:${lifecycle.proposal.action_id}`, action_id: lifecycle.proposal.action_id,
+        request_ref: `langgraph-approval:${lifecycle.proposal.action_id}:${lifecycle.proposal.proposal_digest}`, action_id: lifecycle.proposal.action_id,
         proposal: lifecycle.proposal, proposal_digest: lifecycle.proposal.proposal_digest,
         environment_snapshot_digest: lifecycle.environment_snapshot?.snapshot_digest,
         policy_decision_id: lifecycle.policy_decision?.decision_id, scope: lifecycle.proposal.scope_snapshot_id }] : [];
