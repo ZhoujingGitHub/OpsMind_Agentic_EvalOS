@@ -882,3 +882,40 @@ test("Adapter 5 LangGraph连接器以Jobs dead_letter覆盖仍显示running的�
   assert.equal(observation.candidate_usage.complete, false);
   assert.deepEqual(observation.candidate_usage.incomplete_model_attempt_refs, [2]);
 });
+
+for (const known of [true, false]) test(`LG失败调用回执保留真实分阶段用量，未知不能由旧快照补零：${known}`, async (t) => {
+  const events = [
+    { cursor: 1, event_type: "hypothesis.revised", public_payload: { agent_trace: { output_snapshot: {
+      model_id: "deepseek-v4-pro", stage: "revise", usage_reported: true, input_tokens: 100, output_tokens: 20 } } } },
+    { cursor: 2, event_type: "job.failed", public_payload: { error_code: "runtime.model_contract_error",
+      model_usage: { model_id: "deepseek-v4-pro", stage: "revise", status: "failed", usage_reported: known,
+        input_tokens: known ? 70 : 0, output_tokens: known ? 30 : 0 } } },
+  ];
+  const fixture = await fixtureServer({
+    "GET /api/v1/investigations/run-accounting": async () => ({ status: "failed", budget_usage: {
+      model_calls: 1, input_tokens: 100, output_tokens: 20, cost_microunits: 360 } }),
+    "GET /api/v1/investigations/run-accounting/journal": async () => ({ next_cursor: 2, items: events }),
+    "GET /api/v1/investigations/run-accounting/product-e2e": async () => ({ public_events: events,
+      budget_usage: { model_calls: 2, input_tokens: known ? 170 : null, output_tokens: known ? 50 : null,
+        cost_microunits: known ? 740 : null, tool_calls: 2, result_bytes: 7 },
+      model_usage_accounting: { source: "append_only_model_attempts", complete: known } }),
+    "GET /api/v1/jobs": async () => ({ items: [{ job_id: "job-accounting", investigation_id: "run-accounting",
+      status: "failed", error_code: "runtime.model_contract_error", error_message: "invalid public response" }] }),
+  });
+  t.after(fixture.close);
+  const connector = createLangGraphProductConnectorV5({ origin: fixture.origin, token: "submitter",
+    approvalToken: "approver", adminToken: "administrator", tenantId: "tenant-lg", attestation: ATTESTATION });
+  const contract = executionContract("evalos-accounting", { contract_version: "1.0", models: [{ provider: "deepseek",
+    id: "deepseek-v4-pro", interface: "openai-chat", thinking: "enabled", roles: ["revise"] }], versions: { graph: "5.0.0" } });
+  const observation = await connector.observe({ runRef: "run-accounting", cursor: 0, executionContract: contract });
+  const usage = observation.candidate_usage;
+  assert.equal(observation.status, "FAILED");
+  assert.equal(usage.values.model_calls, 2);
+  assert.equal(usage.model_attempts.length, 2);
+  assert.equal(usage.model_attempts[1].success, false);
+  assert.equal(usage.by_model["deepseek-v4-pro"].model_calls, 2);
+  assert.equal(usage.values.input_tokens, known ? 170 : undefined);
+  assert.equal(usage.values.output_tokens, known ? 50 : undefined);
+  assert.equal(usage.values.cost_usd, known ? 0.00074 : undefined);
+  assert.deepEqual(usage.incomplete_model_attempt_refs, known ? [] : [2]);
+});

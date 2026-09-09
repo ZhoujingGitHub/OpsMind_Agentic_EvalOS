@@ -248,8 +248,8 @@
       "architecture": "LANGGRAPH_PRODUCT",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "65ae76899297ec0a9bdde5b54384f285cc085a6d",
-      "artifact_digest": "sha256:518c15438291288004bbdc8c2b369bd7785f4b50fcfe0e2ccca85ebeb87a4989",
+      "source_revision": "c8a0d414c9b04e371111355a0042b23915ec6558",
+      "artifact_digest": "sha256:8d2c257a627d5f89166cb8e279046772ecb4c117e55f0f65c9e0a0c843afe03f",
       "runtime_digest": "sha256:98c8f72ad80915ec0c73465cf32d18c6edfc3624c08470a28371ffebead058e9",
       "runtime_manifest_digest": "sha256:f3059b057559432420132c6487b7f56fadd16c77dad6458ea8ac15e581541b1f",
       "capability_contract_digest": "sha256:65f27c9d6568fc540fdd1252eb7960f6041c956a4cf18c090633166622c2b03e",
@@ -424,9 +424,9 @@
         "provenance": {
           "status": "product_public_maximum",
           "method": "candidate_public_runtime_contract",
-          "source_revision": "65ae76899297ec0a9bdde5b54384f285cc085a6d",
-          "artifact_digest": "sha256:518c15438291288004bbdc8c2b369bd7785f4b50fcfe0e2ccca85ebeb87a4989",
-          "evidence_ref": "lg-repair-20260909:authorized-products-observed-v4:65ae76899297"
+          "source_revision": "c8a0d414c9b04e371111355a0042b23915ec6558",
+          "artifact_digest": "sha256:8d2c257a627d5f89166cb8e279046772ecb4c117e55f0f65c9e0a0c843afe03f",
+          "evidence_ref": "lg-repair-20260909:authorized-products-observed-v5:c8a0d414c9b0"
         }
       }
     ]

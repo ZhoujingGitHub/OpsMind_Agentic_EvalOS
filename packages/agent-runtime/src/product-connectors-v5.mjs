@@ -390,18 +390,23 @@ function numericUsage(snapshot) {
   const known = (value) => value && typeof value === "object" && !Array.isArray(value) && "status" in value
     ? String(value.status).toLowerCase() === "known" ? value.value : undefined
     : value;
+  const numeric = (raw) => {
+    if (raw == null || typeof raw === "boolean" || (typeof raw === "string" && raw.trim() === "")) return undefined;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  };
+  const microunits = numeric(known(snapshot.cost_microunits));
   const values = {
     input_tokens: known(snapshot.input_tokens),
     output_tokens: known(snapshot.output_tokens),
     model_calls: known(snapshot.model_calls),
     tool_calls: known(snapshot.tool_calls),
     storage_bytes: known(snapshot.storage_bytes) ?? known(snapshot.result_bytes),
-    cost_usd: known(snapshot.cost_usd) ?? (Number.isFinite(Number(known(snapshot.cost_microunits)))
-      ? Number(known(snapshot.cost_microunits)) / 1_000_000 : undefined),
+    cost_usd: known(snapshot.cost_usd) ?? (microunits === undefined ? undefined : microunits / 1_000_000),
   };
   return Object.fromEntries(Object.entries(values).flatMap(([name, raw]) => {
-    const number = Number(raw);
-    return Number.isFinite(number) && number >= 0 ? [[name, number]] : [];
+    const number = numeric(raw);
+    return number === undefined ? [] : [[name, number]];
   }));
 }
 
@@ -414,22 +419,28 @@ function exhaustedUsage(snapshot) {
 
 function modelAttempt(event, index) {
   const payload = event?.public_payload ?? event?.payload ?? event ?? {};
-  const snapshot = payload.output_snapshot ?? payload.model_usage ?? payload.usage ?? payload;
+  const snapshot = payload.agent_trace?.output_snapshot ?? payload.output_snapshot ?? payload.model_usage ?? payload.usage ?? payload;
   const modelId = snapshot.model_id ?? payload.model_id;
+  if (modelId === "runtime-configured" && snapshot.usage_reported === false) return null;
   const usage = numericUsage(snapshot);
+  if (snapshot.usage_reported === false) {
+    delete usage.input_tokens;
+    delete usage.output_tokens;
+  }
   const name = String(event?.event_type ?? event?.name ?? event?.action ?? "").toLowerCase();
   const errorType = String(payload.error_type ?? payload.error_code ?? payload.code ?? "").toLowerCase();
   const modelRelated = /agent[_\-.]?trace|model|deepseek/.test(`${name} ${errorType}`);
   if (!modelId && !Object.keys(usage).length && !modelRelated) return null;
+  const latency = snapshot.model_latency_ms ?? snapshot.latency_ms;
   return { ref: event?.cursor ?? event?.sequence ?? index + 1,
-    model_id: modelId ?? "unknown", stage: snapshot.stage ?? payload.stage ?? payload.node ?? "unknown",
+    model_id: modelId ?? "unknown", stage: snapshot.stage ?? payload.agent_trace?.stage ?? payload.stage ?? payload.node ?? "unknown",
     input_tokens: usage.input_tokens ?? null, output_tokens: usage.output_tokens ?? null,
-    latency_ms: Number.isFinite(Number(snapshot.latency_ms)) ? Number(snapshot.latency_ms) : null,
+    latency_ms: latency != null && Number.isFinite(Number(latency)) ? Number(latency) : null,
     reasoning_mode: snapshot.reasoning_mode ?? payload.reasoning_mode ?? null,
-    stop_reason: snapshot.stop_reason ?? payload.stop_reason ?? null,
+    stop_reason: snapshot.model_stop_reason ?? snapshot.stop_reason ?? payload.stop_reason ?? null,
     response_format: snapshot.response_format ?? payload.response_format ?? null,
-    json_valid: snapshot.json_valid ?? payload.json_valid ?? null,
-    success: !["failed", "error", "timeout"].includes(String(payload.status ?? "").toLowerCase()) };
+    json_valid: snapshot.public_json_valid ?? snapshot.json_valid ?? payload.json_valid ?? null,
+    success: !["failed", "error", "timeout"].includes(String(snapshot.status ?? payload.status ?? "").toLowerCase()) };
 }
 
 function aggregateAttempts(attempts, key) {
@@ -448,7 +459,7 @@ function aggregateAttempts(attempts, key) {
   return result;
 }
 
-function candidateUsageSnapshot({ authoritative = [], events = [], directToolCalls = null } = {}) {
+function candidateUsageSnapshot({ authoritative = [], events = [], directToolCalls = null, unavailableDimensions = [] } = {}) {
   const values = {};
   const sources = {};
   const exhaustedDimensions = [];
@@ -464,7 +475,7 @@ function candidateUsageSnapshot({ authoritative = [], events = [], directToolCal
     const payload = event?.public_payload ?? event?.payload ?? event ?? {};
     return [String(payload.tool_use_id ?? payload.id ?? event.sequence ?? event.cursor ?? `event-${index}`)];
   }));
-  const reportedToolCalls = Number.isFinite(Number(directToolCalls)) ? Number(directToolCalls) : null;
+  const reportedToolCalls = directToolCalls != null && Number.isFinite(Number(directToolCalls)) ? Number(directToolCalls) : null;
   const eventToolCalls = eventToolCallRefs.size ? eventToolCallRefs.size : null;
   if (!Object.hasOwn(values, "tool_calls") && (reportedToolCalls !== null || eventToolCalls !== null)) {
     values.tool_calls = Math.max(reportedToolCalls ?? 0, eventToolCalls ?? 0);
@@ -482,6 +493,11 @@ function candidateUsageSnapshot({ authoritative = [], events = [], directToolCal
       values[dimension] = modelAttempts.reduce((sum, item) => sum + item[dimension], 0);
       sources[dimension] = "candidate_public_model_attempts";
     }
+  }
+  // An authoritative unknown cannot be repaired by older cumulative snapshots.
+  for (const dimension of unavailableDimensions) {
+    delete values[dimension];
+    delete sources[dimension];
   }
   const observedDimensions = USAGE_DIMENSIONS.filter((name) => Object.hasOwn(values, name));
   const totalsComplete = observedDimensions.length === USAGE_DIMENSIONS.length;
@@ -1525,7 +1541,9 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
         candidate_usage: candidateUsageSnapshot({ authoritative: [
           { source: "product_e2e.budget_usage", value: projection.budget_usage },
           { source: "investigation.budget_usage", value: detail.budget_usage },
-          { source: "job.usage", value: job?.usage }], events: allEvents }),
+          { source: "job.usage", value: job?.usage }], events: allEvents,
+          unavailableDimensions: projection.model_usage_accounting?.source === "append_only_model_attempts"
+            && projection.model_usage_accounting.complete === false ? ["input_tokens", "output_tokens", "cost_usd"] : [] }),
         error: failureTerminal ? terminalFailure(detail, allEvents, job) : null,
         artifact_refs: archiveRefs };
     },
