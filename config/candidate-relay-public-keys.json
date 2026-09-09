@@ -21,15 +21,16 @@
       "tenant_id": "tenant-ctyun-ops-demo",
       "deployment_attestation": {
         "contract_version": "evalos-deployment-attestation/1.0",
-        "source_revision": "2cc1eb7d03a56315731a536cf1d421c67d1fee06",
-        "artifact_digest": "sha256:c484da4ae2cc7488beacaf26b19528b913855c658491153187a19a5432ae5166",
+        "source_revision": "4cc98d14cb66624eba647c71b35fe04104935144",
+        "artifact_digest": "sha256:68822c551a28a123795781c0982d5eaec0dccc5f76e729b27a564b94102eaf42",
         "verification_method": "evalos_trusted_read_only_git_oci",
-        "verified_evidence_ref": "lg-repair-20260909:authorized-products-observed-v2:2cc1eb7d03a5"
+        "verified_evidence_ref": "lg-repair-20260909:authorized-products-observed-v3:4cc98d14cb66"
       },
       "evaluation_limits": {
-        "max_run_ms": 2700000,
+        "contract_version": "opsmind-job-runtime-limits:2.0",
+        "max_run_ms": null,
         "cancellation_supported": false,
-        "source": "evalos-langgraph-deployment-20260827-open-resource-safety-fuse"
+        "source": "candidate_public_runtime_4cc98d14cb66"
       },
       "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAM8Loi2EnMWmPEW3l3TTvOWwuj9wXw1GA3jBnIyTM2Ak=\n-----END PUBLIC KEY-----\n"
     }
