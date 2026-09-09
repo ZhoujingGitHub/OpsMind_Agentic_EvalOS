@@ -64,3 +64,53 @@ test("old LG contract keeps its original interpretation", () => {
   const fixture = recoveredAfterFailure();
   assert.equal(langGraphRepairProgress(fixture.normalized, {}, fixture.raw).recovery_verified, false);
 });
+
+function recoveredAfterVerifiedChange() {
+  const fixture = recoveredAfterFailure();
+  const first = fixture.projection.repair_delivery.actions[0];
+  first.changed_external_state = true;
+  first.verification = { report_id: "verify-first", action_id: "first", attempt_id: "attempt-first",
+    outcome: "ineffective", after_digest: "c".repeat(64), verifier_identity: "independent-observer",
+    observed_at: "2026-09-09T10:00:00Z" };
+  fixture.raw.splice(1, 0, { event_type: "verification.ineffective",
+    public_payload: { action_id: "first", report_id: "verify-first" } });
+  return fixture;
+}
+
+test("LG accepts later recovery after a verified ineffective change without inventing rollback", () => {
+  for (const status of ["failed", "succeeded"]) {
+    const fixture = recoveredAfterVerifiedChange();
+    fixture.projection.repair_delivery.actions[0].execution_status = status;
+    fixture.raw[0].event_type = `action.${status}`;
+    const before = structuredClone(fixture);
+    const result = langGraphRepairProgress(fixture.normalized, fixture.projection, fixture.raw);
+    assert.equal(result.recovery_verified, true);
+    assert.equal(result.attempt_history[0].verification.outcome, "ineffective");
+    assert.equal(result.attempt_history[0].rollback, undefined);
+    assert.deepEqual(fixture, before);
+  }
+});
+
+test("LG rejects unbound, unordered or uncertain prior changed-action evidence", () => {
+  const alterations = [
+    ({ projection: p }) => { p.repair_delivery.actions[0].execution_status = "unknown"; },
+    ({ projection: p }) => { p.repair_delivery.actions[0].verification.attempt_id = "other"; },
+    ({ projection: p }) => { p.repair_delivery.actions[0].verification.action_id = "other"; },
+    ({ projection: p }) => { delete p.repair_delivery.actions[0].verification.report_id; },
+    ({ projection: p }) => { p.repair_delivery.actions[0].verification.outcome = "inconclusive"; },
+    ({ projection: p }) => { p.repair_delivery.actions[0].verification.after_digest = "invalid"; },
+    ({ projection: p }) => { p.repair_delivery.actions[0].verification.verifier_identity = ""; },
+    ({ projection: p }) => { p.repair_delivery.actions[0].verification.observed_at = "2026-09-10T00:00:00Z"; },
+    ({ projection: p }) => { p.repair_delivery.actions[0].escalation_reason = "uncertain_write"; },
+    ({ raw }) => { raw.splice(0, 1); },
+    ({ raw }) => { raw.splice(1, 1); },
+    ({ raw }) => { raw[1].public_payload.report_id = "other"; },
+    ({ raw }) => { [raw[1], raw[2]] = [raw[2], raw[1]]; },
+    ({ raw }) => { [raw[2], raw[3]] = [raw[3], raw[2]]; },
+  ];
+  for (const alter of alterations) {
+    const fixture = recoveredAfterVerifiedChange();
+    alter(fixture);
+    assert.equal(langGraphRepairProgress(fixture.normalized, fixture.projection, fixture.raw).recovery_verified, false);
+  }
+});

@@ -39,12 +39,31 @@ export function langGraphRepairProgress(normalized, projection, rawEvents) {
   }
   for (const row of rows.slice(0, -1).filter((item) => item.attempt_id)) {
     const rollback = row.rollback;
-    const safelyClosed = ["failed", "succeeded"].includes(row.execution_status) &&
-      (row.changed_external_state === false || (rollback?.attempt_id === row.attempt_id &&
-        rollback?.outcome === "succeeded" && rollback?.verification_outcome === "effective"));
+    const priorReport = row.verification;
+    const completedIndex = rawEvents.findLastIndex((event) =>
+      event.event_type === `action.${row.execution_status}` &&
+      payload(event).action_id === row.action_id);
+    const priorVerifiedIndex = rawEvents.findLastIndex((event) =>
+      event.event_type === "verification.ineffective" &&
+      payload(event).action_id === row.action_id && payload(event).report_id === priorReport?.report_id);
     const closureIndex = rawEvents.findIndex((event) => event.event_type === "investigation.reopened" &&
       payload(event).action_id === row.action_id && payload(event).reason === "action_closed_after_verified_outcome");
-    if (!safelyClosed || row.escalation_reason || closureIndex < 0 || closureIndex >= verifiedIndex) {
+    const nextWriteIndex = rawEvents.findIndex((event, index) => index > completedIndex &&
+      writes.has(event.event_type) && payload(event).action_id !== row.action_id);
+    // A known ineffective change can be closed without pretending it was undone.
+    // Both the independent report and the ordered public events must agree.
+    const verifiedIneffective = row.changed_external_state === true && Boolean(priorReport?.report_id) &&
+      priorReport?.action_id === row.action_id && priorReport?.attempt_id === row.attempt_id &&
+      priorReport?.outcome === "ineffective" && Boolean(priorReport.verifier_identity) &&
+      /^[a-f0-9]{64}$/.test(priorReport.after_digest ?? "") &&
+      Number.isFinite(Date.parse(priorReport.observed_at)) &&
+      Date.parse(priorReport.observed_at) <= Date.parse(report?.observed_at) &&
+      completedIndex >= 0 && priorVerifiedIndex > completedIndex && closureIndex > priorVerifiedIndex;
+    const safelyClosed = ["failed", "succeeded"].includes(row.execution_status) &&
+      (row.changed_external_state === false || verifiedIneffective || (rollback?.attempt_id === row.attempt_id &&
+        rollback?.outcome === "succeeded" && rollback?.verification_outcome === "effective"));
+    if (!safelyClosed || row.escalation_reason || completedIndex < 0 || closureIndex <= completedIndex ||
+        closureIndex >= verifiedIndex || (nextWriteIndex >= 0 && closureIndex >= nextWriteIndex)) {
       errors.push("prior_action_not_safely_closed");
     }
   }
