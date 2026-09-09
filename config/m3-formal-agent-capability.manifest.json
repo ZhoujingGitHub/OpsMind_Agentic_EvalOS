@@ -248,10 +248,10 @@
       "architecture": "LANGGRAPH_PRODUCT",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "29ec3acfc9407c9c91b457ccbf031b4c6dbe5c0e",
-      "artifact_digest": "sha256:f2e4d9a74188de4c17cdbaec92b1e43ddb1fba7b55eb2914475758145f204695",
-      "runtime_digest": "sha256:cef8f1759a3ca9a2ea1bd470ed8ace086fee26be89793f9222e3795eb9fa9047",
-      "runtime_manifest_digest": "sha256:be11dbff7033c1dacc490803d02993f54a9ded58d3f1fadd9459e5556981ba7f",
+      "source_revision": "2cc1eb7d03a56315731a536cf1d421c67d1fee06",
+      "artifact_digest": "sha256:c484da4ae2cc7488beacaf26b19528b913855c658491153187a19a5432ae5166",
+      "runtime_digest": "sha256:7ccd650aee02f1b09cc54ce9c0967b50498ce46638ccee09c81d3dd16e738581",
+      "runtime_manifest_digest": "sha256:3fe8f887f2aff1ddcd40706f2022f0fe0269de6022a44b13708f6a33c1bd4427",
       "capability_contract_digest": "sha256:be8baef1b7be9c2023ff1cb49fb89b2b75849f342e4636a7216d65d49ed73c2a",
       "binding_requirement": "PRODUCT_NATIVE_ACK",
       "candidate_runtime": {
@@ -284,7 +284,7 @@
         "versions": {
           "graph_version": "opsmind-langgraph:5.0.0",
           "state_schema_version": "graph-state:5.0.0",
-          "mcp_contract_version": "observation+protocol-lab:3.4.0",
+          "mcp_contract_version": "observation+protocol-lab:3.5.0",
           "knowledge_version": "[\"general-investigation@2.0.0\"]",
           "model_version": "deepseek-v4-flash+deepseek-v4-pro",
           "product_e2e_contract_version": "opsmind-controlled-remediation:1.2",
@@ -424,9 +424,9 @@
         "provenance": {
           "status": "product_public_maximum",
           "method": "candidate_public_runtime_contract",
-          "source_revision": "29ec3acfc9407c9c91b457ccbf031b4c6dbe5c0e",
-          "artifact_digest": "sha256:f2e4d9a74188de4c17cdbaec92b1e43ddb1fba7b55eb2914475758145f204695",
-          "evidence_ref": "three-chain-acceptance-20260904:observed-public-contract:langgraph-v1:29ec3acfc940"
+          "source_revision": "2cc1eb7d03a56315731a536cf1d421c67d1fee06",
+          "artifact_digest": "sha256:c484da4ae2cc7488beacaf26b19528b913855c658491153187a19a5432ae5166",
+          "evidence_ref": "lg-repair-20260909:authorized-products-observed-v2:2cc1eb7d03a5"
         }
       }
     ]
