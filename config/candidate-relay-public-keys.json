@@ -21,16 +21,16 @@
       "tenant_id": "tenant-ctyun-ops-demo",
       "deployment_attestation": {
         "contract_version": "evalos-deployment-attestation/1.0",
-        "source_revision": "1df3d2193570ab456dfa854e2a243c35daf49c5d",
-        "artifact_digest": "sha256:a91b21462b47307b85e20e7a07e3d6cc77c9b217c2fdce36e9e9fb23819c0740",
+        "source_revision": "e34773bd0484b33bf0c101d70d1262fd67190447",
+        "artifact_digest": "sha256:c4c7941d7ef5dbeeaed9d245f1cf1769ac30bd6e113d634f3cec42c58f04010b",
         "verification_method": "evalos_trusted_read_only_git_oci",
-        "verified_evidence_ref": "lg-repair-20260909:authorized-products-observed-v13:1df3d2193570"
+        "verified_evidence_ref": "lg-repair-20260909:authorized-products-observed-v14:e34773bd0484"
       },
       "evaluation_limits": {
         "contract_version": "opsmind-job-runtime-limits:2.0",
         "max_run_ms": null,
         "cancellation_supported": false,
-        "source": "candidate_public_runtime_1df3d2193570"
+        "source": "candidate_public_runtime_e34773bd0484"
       },
       "public_key_pem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAM8Loi2EnMWmPEW3l3TTvOWwuj9wXw1GA3jBnIyTM2Ak=\n-----END PUBLIC KEY-----\n"
     }
