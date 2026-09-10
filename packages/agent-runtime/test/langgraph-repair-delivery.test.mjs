@@ -10,11 +10,15 @@ function recoveredAfterFailure() {
   const attempt = { action_id: "second", attempt_id: "attempt-second", status: "succeeded",
     completed_at: "2026-09-09T10:00:01Z" };
   const projection = { contract_version: "opsmind-controlled-remediation:1.3", current_action_ref: current,
+    action_history: [{ action_id: "first", proposal_digest: "a".repeat(64) }, current],
     action_lifecycle: { action_id: "second", proposal: current, attempt, verification: report },
     repair_delivery: { contract_version: "opsmind-lg-repair-delivery/1.0", current_action_ref: current,
+      final_action_ref: current,
       recovery_verified: true, final_verification: report, explanation: "第1次修复未恢复；第2次修复成功，独立验证有效",
       actions: [{ action_id: "first", attempt_id: "attempt-first", execution_status: "failed", changed_external_state: false },
-        { action_id: "second", attempt_id: "attempt-second", execution_status: "succeeded", changed_external_state: true }] } };
+        { action_id: "second", proposal_digest: current.proposal_digest, attempt_id: "attempt-second",
+          completed_at: attempt.completed_at, verification: report,
+          execution_status: "succeeded", changed_external_state: true }] } };
   const raw = [
     { event_type: "action.failed", public_payload: { action_id: "first" } },
     { event_type: "investigation.reopened", public_payload: { action_id: "first", reason: "action_closed_after_verified_outcome" } },
@@ -113,4 +117,30 @@ test("LG rejects unbound, unordered or uncertain prior changed-action evidence",
     alter(fixture);
     assert.equal(langGraphRepairProgress(fixture.normalized, fixture.projection, fixture.raw).recovery_verified, false);
   }
+});
+
+test("closed LG approval retains independently verified recovery without old authority", () => {
+  const fixture = recoveredAfterFailure();
+  fixture.projection.current_action_ref = null;
+  fixture.projection.action_lifecycle = null;
+  fixture.projection.repair_delivery.current_action_ref = null;
+  fixture.raw.push({ event_type: "investigation.reopened", public_payload: {
+    action_id: "second", reason: "action_closed_after_verified_outcome" } });
+  assert.equal(langGraphRepairProgress(fixture.normalized, fixture.projection, fixture.raw).recovery_verified, true);
+  assert.equal(langGraphRepairProgress(fixture.normalized, fixture.projection, fixture.raw.slice(0, -1)).recovery_verified, false);
+  const omitted = structuredClone(fixture);
+  omitted.projection.action_history.unshift({ action_id: "omitted-action" });
+  assert.equal(langGraphRepairProgress(omitted.normalized, omitted.projection, omitted.raw).recovery_verified, false);
+  fixture.projection.current_action_ref = { action_id: "pending", proposal_digest: "d".repeat(64) };
+  fixture.projection.repair_delivery.current_action_ref = fixture.projection.current_action_ref;
+  assert.equal(langGraphRepairProgress(fixture.normalized, fixture.projection, fixture.raw).recovery_verified, false);
+});
+
+test("prior verified success may precede a later verified repair", () => {
+  const fixture = recoveredAfterVerifiedChange();
+  fixture.projection.repair_delivery.actions[0].execution_status = "succeeded";
+  fixture.projection.repair_delivery.actions[0].verification.outcome = "effective";
+  fixture.raw[0].event_type = "action.succeeded";
+  fixture.raw[1].event_type = "verification.effective";
+  assert.equal(langGraphRepairProgress(fixture.normalized, fixture.projection, fixture.raw).recovery_verified, true);
 });
