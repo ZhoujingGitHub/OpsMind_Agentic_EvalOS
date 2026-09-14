@@ -474,13 +474,29 @@ def query_sockets(parameters: dict) -> list[dict]:
     ]
 
 
+CONTROLLER_RELEASE_CONTRACT = "opsmind-twin-controller-release/1.0"
+NETWORK_COLLECTOR = "harness_diagnostics.py"
+
+
 def network_diagnostics():
-    """Load the single installed collector from the trusted controller release."""
+    """Load the single installed collector from the trusted controller release.
+
+    The release inventory, not a pinned Git revision, decides what may be loaded:
+    a revision pin fails closed on every later release even when the collector is
+    byte-identical, while the inventory digest still proves that the file on disk
+    is exactly the one the installed release shipped.
+    """
     release = Path("/opt/opsmind-twin-controller/current").resolve(strict=True)
     identity = json.loads((release / "RELEASE.json").read_text())
-    if identity.get("source_revision") != "8e859e82158479688f48efae0df04e353ffb5356":
-        raise RuntimeError("LG requires the approved network-evidence controller release")
-    source = release / "harness_diagnostics.py"
+    if identity.get("contract") != CONTROLLER_RELEASE_CONTRACT:
+        raise RuntimeError("LG requires an OpsMind Twin controller release")
+    source = release / NETWORK_COLLECTOR
+    declared = {
+        str(entry.get("path")): str(entry.get("sha256"))
+        for entry in identity.get("files") or []
+    }
+    if declared.get(NETWORK_COLLECTOR) != hashlib.sha256(source.read_bytes()).hexdigest():
+        raise RuntimeError("network collector does not match the installed release inventory")
     loader = SourceFileLoader("lg_network_diagnostics", str(source))
     spec = spec_from_loader(loader.name, loader)
     module = module_from_spec(spec)

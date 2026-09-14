@@ -5,6 +5,7 @@ adapter never installed the NAT bypass its own data path needs, and it reported
 the scenario score as product health.
 """
 from pathlib import Path
+import hashlib
 import json
 import shutil
 import sys
@@ -353,6 +354,62 @@ def test_failed_socket_route_and_sctp_reads_never_report_empty_success(monkeypat
                   lambda: labctl.query_interfaces({}), lambda: labctl.query_sockets({})):
         with pytest.raises(RuntimeError, match="collection failed"):
             query()
+
+
+def install_controller_release(tmp_path, monkeypatch, *, collector=None, contract=None, digest=None):
+    """A minimal installed release directory, shaped exactly like a built one."""
+    release = tmp_path / "controller"
+    release.mkdir()
+    payload = collector if collector is not None else (TWIN / labctl.NETWORK_COLLECTOR).read_bytes()
+    (release / labctl.NETWORK_COLLECTOR).write_bytes(payload)
+    (release / "RELEASE.json").write_text(json.dumps({
+        "contract": contract if contract is not None else labctl.CONTROLLER_RELEASE_CONTRACT,
+        "release_id": "twin-controller-20260914-0000000000",
+        "source_revision": "f" * 40,
+        "files": [{"path": labctl.NETWORK_COLLECTOR, "bytes": len(payload),
+                   "sha256": digest if digest is not None
+                   else hashlib.sha256(payload).hexdigest()}],
+    }), encoding="utf-8")
+    real_path = labctl.Path
+    monkeypatch.setattr(labctl, "Path", lambda value=".": _ReleasePath(value, release, real_path))
+    return release
+
+
+class _ReleasePath:
+    """Only the two operations network_diagnostics performs on a release path."""
+
+    def __init__(self, value, release, real_path):
+        self._value, self._release, self._real = str(value), release, real_path
+
+    def resolve(self, strict=False):
+        if self._value == "/opt/opsmind-twin-controller/current":
+            return self._release
+        return self._real(self._value).resolve(strict=strict)
+
+
+def test_collector_loads_when_the_installed_release_declares_its_digest(tmp_path, monkeypatch):
+    install_controller_release(tmp_path, monkeypatch)
+    assert labctl.network_diagnostics().CONTRACT == "opsmind-network-observation/1.0"
+
+
+def test_collector_is_refused_when_its_bytes_left_the_release_inventory(tmp_path, monkeypatch):
+    install_controller_release(tmp_path, monkeypatch, digest="0" * 64)
+    with pytest.raises(RuntimeError, match="release inventory"):
+        labctl.network_diagnostics()
+
+
+def test_collector_is_refused_outside_a_twin_controller_release(tmp_path, monkeypatch):
+    install_controller_release(tmp_path, monkeypatch, contract="something-else/1.0")
+    with pytest.raises(RuntimeError, match="Twin controller release"):
+        labctl.network_diagnostics()
+
+
+def test_a_later_controller_revision_no_longer_disables_lg_network_evidence(tmp_path, monkeypatch):
+    """2026-09-14: a pinned Git revision failed closed on every later release."""
+    release = install_controller_release(tmp_path, monkeypatch)
+    identity = json.loads((release / "RELEASE.json").read_text())
+    assert identity["source_revision"] != "8e859e82158479688f48efae0df04e353ffb5356"
+    assert labctl.network_diagnostics().CONTRACT == "opsmind-network-observation/1.0"
 
 
 def test_capture_passes_exact_filters_and_rejects_foreign_trial(monkeypatch, tmp_path):
