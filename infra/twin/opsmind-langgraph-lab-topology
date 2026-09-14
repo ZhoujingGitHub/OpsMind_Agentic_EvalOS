@@ -1,0 +1,160 @@
+#!/bin/sh
+set -eu
+
+STATE_ROOT=/run/opsmind-langgraph-lab
+HTTP_PID="$STATE_ROOT/http.pid"
+MQTT_PID="$STATE_ROOT/mqtt.pid"
+DNS_PID="$STATE_ROOT/dns.pid"
+MEC_IP=10.46.0.80
+DNS_IP=10.46.0.53
+SERVICE_NET=10.46.0.0/24
+
+stop_pid() {
+  path="$1"
+  if [ -f "$path" ]; then
+    pid=$(cat "$path" 2>/dev/null || true)
+    if [ -n "$pid" ]; then kill "$pid" 2>/dev/null || true; fi
+    rm -f "$path"
+  fi
+}
+
+delete_rule() {
+  while iptables -C "$@" >/dev/null 2>&1; do iptables -D "$@"; done
+}
+
+restore_base_route() {
+  if ip link show opsminddn0 >/dev/null 2>&1; then
+    ip route replace "$SERVICE_NET" dev opsminddn0 src 10.46.0.1
+  else
+    ip route del "$SERVICE_NET" 2>/dev/null || true
+  fi
+}
+
+reset_topology() {
+  stop_pid "$HTTP_PID"
+  stop_pid "$MQTT_PID"
+  stop_pid "$DNS_PID"
+  ip route del "$SERVICE_NET" 2>/dev/null || true
+  delete_rule FORWARD -i ogstun -o lg-host-a -j ACCEPT
+  delete_rule FORWARD -i lg-host-a -o ogstun -j ACCEPT
+  for ns in opsmind-lg-mec opsmind-lg-c opsmind-lg-b opsmind-lg-a; do
+    ip netns del "$ns" 2>/dev/null || true
+  done
+  ip link del lg-host-a 2>/dev/null || true
+  restore_base_route
+}
+
+up_all() {
+  for ns in opsmind-lg-a opsmind-lg-b opsmind-lg-c opsmind-lg-mec; do
+    ip netns add "$ns"
+    ip -n "$ns" link set lo up
+    ip netns exec "$ns" sysctl -q -w net.ipv4.ip_forward=1
+  done
+
+  ip link add lg-host-a type veth peer name lg-a-host
+  ip link set lg-a-host netns opsmind-lg-a
+  ip addr add 10.60.0.1/30 dev lg-host-a
+  ip link set lg-host-a up
+  ip -n opsmind-lg-a addr add 10.60.0.2/30 dev lg-a-host
+  ip -n opsmind-lg-a link set lg-a-host up
+
+  ip link add lg-a-b type veth peer name lg-b-a
+  ip link set lg-a-b netns opsmind-lg-a
+  ip link set lg-b-a netns opsmind-lg-b
+  ip -n opsmind-lg-a addr add 10.60.0.5/30 dev lg-a-b
+  ip -n opsmind-lg-b addr add 10.60.0.6/30 dev lg-b-a
+  ip -n opsmind-lg-a link set lg-a-b up
+  ip -n opsmind-lg-b link set lg-b-a up
+
+  ip link add lg-b-c type veth peer name lg-c-b
+  ip link set lg-b-c netns opsmind-lg-b
+  ip link set lg-c-b netns opsmind-lg-c
+  ip -n opsmind-lg-b addr add 10.60.0.9/30 dev lg-b-c
+  ip -n opsmind-lg-c addr add 10.60.0.10/30 dev lg-c-b
+  ip -n opsmind-lg-b link set lg-b-c up
+  ip -n opsmind-lg-c link set lg-c-b up
+
+  ip link add lg-c-mec type veth peer name lg-mec-c
+  ip link set lg-c-mec netns opsmind-lg-c
+  ip link set lg-mec-c netns opsmind-lg-mec
+  ip -n opsmind-lg-c addr add 10.60.0.13/30 dev lg-c-mec
+  ip -n opsmind-lg-mec addr add 10.60.0.14/30 dev lg-mec-c
+  ip -n opsmind-lg-c link set lg-c-mec up
+  ip -n opsmind-lg-mec link set lg-mec-c up
+  ip -n opsmind-lg-mec addr add "$MEC_IP/32" dev lo
+  ip -n opsmind-lg-mec addr add "$DNS_IP/32" dev lo
+
+  ip -n opsmind-lg-a route add "$SERVICE_NET" via 10.60.0.6 dev lg-a-b
+  ip -n opsmind-lg-b route add "$SERVICE_NET" via 10.60.0.10 dev lg-b-c
+  ip -n opsmind-lg-c route add "$SERVICE_NET" via 10.60.0.14 dev lg-c-mec
+  ip -n opsmind-lg-mec route add 10.45.0.0/16 via 10.60.0.13 dev lg-mec-c
+  ip -n opsmind-lg-c route add 10.45.0.0/16 via 10.60.0.9 dev lg-c-b
+  ip -n opsmind-lg-b route add 10.45.0.0/16 via 10.60.0.5 dev lg-b-a
+  ip -n opsmind-lg-a route add 10.45.0.0/16 via 10.60.0.1 dev lg-a-host
+  ip route replace "$SERVICE_NET" via 10.60.0.2 dev lg-host-a
+
+  iptables -C FORWARD -i ogstun -o lg-host-a -j ACCEPT >/dev/null 2>&1 || \
+    iptables -I FORWARD 1 -i ogstun -o lg-host-a -j ACCEPT
+  iptables -C FORWARD -i lg-host-a -o ogstun -j ACCEPT >/dev/null 2>&1 || \
+    iptables -I FORWARD 1 -i lg-host-a -o ogstun -j ACCEPT
+}
+
+start_services() {
+  mkdir -p "$STATE_ROOT"
+  ip netns exec opsmind-lg-mec python3 /usr/local/libexec/opsmind-langgraph-mec-http.py \
+    >>/var/log/opsmind-langgraph-mec-http.log 2>&1 &
+  echo $! >"$HTTP_PID"
+  ip netns exec opsmind-lg-mec mosquitto -c /etc/opsmind-langgraph-lab/mosquitto.conf \
+    >>/var/log/opsmind-langgraph-mec-mqtt.log 2>&1 &
+  echo $! >"$MQTT_PID"
+  ip netns exec opsmind-lg-mec dnsmasq -C /etc/opsmind-langgraph-lab/dnsmasq.conf \
+    >>/var/log/opsmind-langgraph-mec-dns.log 2>&1 &
+  echo $! >"$DNS_PID"
+}
+
+status() {
+  ready=false
+  if ip netns exec opsmind-lg-mec curl -fsS --max-time 2 "http://$MEC_IP:8080/health" >/dev/null 2>&1 && \
+     ip netns exec opsmind-lg-mec mosquitto_pub -h "$MEC_IP" -p 1883 \
+       -t opsmind/health -m ok -q 1 >/dev/null 2>&1 && \
+     ip netns exec opsmind-lg-mec dig +time=1 +tries=1 +short @"$DNS_IP" opsmind-mec.lab A | grep -qx "$MEC_IP"; then
+    ready=true
+  fi
+  route_present=false
+  if ip route show "$SERVICE_NET" | grep -q lg-host-a; then route_present=true; fi
+  printf '{"ready":%s,"route_present":%s,"service_network":"%s","mec_ip":"%s","dns_ip":"%s","transport_hops":3,"http":8080,"mqtt":1883,"dns":53,"runtime_isolated":true}\n' \
+    "$ready" "$route_present" "$SERVICE_NET" "$MEC_IP" "$DNS_IP"
+}
+
+command=${1:-}
+case "$command" in
+  prepare)
+    scenario=${2:-}
+    reset_topology
+    up_all
+    start_services
+    if [ "$scenario" = "n6-route-missing" ]; then
+      ip route del "$SERVICE_NET" 2>/dev/null || true
+    fi
+    status
+    ;;
+  route)
+    ip route replace "$SERVICE_NET" via 10.60.0.2 dev lg-host-a
+    status
+    ;;
+  fault-route)
+    ip route del "$SERVICE_NET" 2>/dev/null || true
+    status
+    ;;
+  status)
+    status
+    ;;
+  reset)
+    reset_topology
+    printf '{"clean":true}\n'
+    ;;
+  *)
+    echo "unsupported fixed topology operation" >&2
+    exit 2
+    ;;
+esac

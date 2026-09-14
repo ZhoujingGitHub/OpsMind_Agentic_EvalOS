@@ -1,0 +1,31 @@
+{
+  "source_repository": "ZhoujingGitHub/OpsMind-LangGraph",
+  "source_revision": "e34773bd0484b33bf0c101d70d1262fd67190447",
+  "destination_repository": "ZhoujingGitHub/OpsMind_Agentic_EvalOS",
+  "files": [
+    {
+      "source_path": "deploy/protocol_lab/opsmind_langgraph_labctl.py",
+      "destination_path": "infra/twin/opsmind_langgraph_labctl.py",
+      "sha256": "92c4a427b5332f7b64d24b6a2f6983a108d71f47ee3a12f2b32bffc010aaef59"
+    },
+    {
+      "source_path": "deploy/protocol_lab/opsmind-langgraph-lab-topology",
+      "destination_path": "infra/twin/opsmind-langgraph-lab-topology",
+      "sha256": "780a31edbf9e82bac34f15d8e3974a0681af5fcf638dcb18ff9fdb11a4d7fffd"
+    },
+    {
+      "source_path": "deploy/protocol_lab/opsmind-langgraph-ssh-shim",
+      "destination_path": "infra/twin/opsmind-langgraph-ssh-shim",
+      "sha256": "9712874eb5bbe3f7a72830d185cca4f7a6039b1bb3f2fbe96fd526173c2d24ba"
+    },
+    {
+      "source_path": "deploy/protocol_lab/opsmind-langgraph-mec-http.py",
+      "destination_path": "infra/twin/opsmind-langgraph-mec-http.py",
+      "sha256": "e73c60d4796350cac47ae3f220b850aa030f97d5a8aa78779c7e6cc2894d840d"
+    }
+  ],
+  "test_ownership": {
+    "note": "LG 仓库没有可迁移的实验室测试；覆盖由本仓库 infra/twin/test_langgraph_labctl.py 在行为修改提交中新增。",
+    "destination_path": "infra/twin/test_langgraph_labctl.py"
+  }
+}

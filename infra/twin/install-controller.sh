@@ -45,7 +45,22 @@ LIVE_FILES.update({
 })
 ADOPTION_PAYLOAD_FILES = set(LIVE_FILES) | {"install-controller.sh", "harness-source-lineage.json"}
 PREVIOUS_PAYLOAD_FILES = ADOPTION_PAYLOAD_FILES | {"harness_probes.py"}
-PAYLOAD_FILES = PREVIOUS_PAYLOAD_FILES | {"harness_diagnostics.py"}
+HARNESS_PAYLOAD_FILES = PREVIOUS_PAYLOAD_FILES | {"harness_diagnostics.py"}
+LIVE_FILES.update({
+    "opsmind_langgraph_labctl.py": Path("/usr/local/sbin/opsmind-langgraph-labctl"),
+    "opsmind-langgraph-lab-topology": Path("/usr/local/sbin/opsmind-langgraph-lab-topology"),
+    "opsmind-langgraph-ssh-shim": Path("/usr/local/sbin/opsmind-langgraph-ssh-shim"),
+    "opsmind-langgraph-mec-http.py": Path("/usr/local/libexec/opsmind-langgraph-mec-http.py"),
+})
+PAYLOAD_FILES = HARNESS_PAYLOAD_FILES | set(LIVE_FILES) | {"langgraph-source-lineage.json"}
+# Every generation this installer can still read; only PAYLOAD_FILES may be installed.
+PRIOR_GENERATIONS = (LEGACY_PAYLOAD_FILES, ADOPTION_PAYLOAD_FILES,
+                     PREVIOUS_PAYLOAD_FILES, HARNESS_PAYLOAD_FILES)
+
+
+def owns_live_files(names):
+    """A generation may be rolled back to only if it supplies every live entry."""
+    return set(LIVE_FILES) <= set(names)
 
 
 def payload_names(metadata):
@@ -54,7 +69,7 @@ def payload_names(metadata):
             not isinstance(item, dict) or not isinstance(item.get("path"), str) for item in inventory):
         raise ValueError("controller release inventory mismatch")
     names = {item.get("path") for item in inventory}
-    if len(inventory) != len(names) or names not in (LEGACY_PAYLOAD_FILES, ADOPTION_PAYLOAD_FILES, PREVIOUS_PAYLOAD_FILES, PAYLOAD_FILES):
+    if len(inventory) != len(names) or names not in (*PRIOR_GENERATIONS, PAYLOAD_FILES):
         raise ValueError("controller release inventory mismatch")
     return names
 
@@ -187,8 +202,10 @@ def preserve_release(files, metadata):
             file = staging / name
             file.parent.mkdir(parents=True, exist_ok=True)
             mode = 0o755 if name in {"install-controller.sh", "ssh_gateway.sh",
-                                     "opsmind-harness-ssh-shim"} else 0o750 if (
-                name.endswith(".py") or name == "opsmind-harness-lab-topology") else 0o640
+                                     "opsmind-harness-ssh-shim",
+                                     "opsmind-langgraph-ssh-shim"} else 0o750 if (
+                name.endswith(".py") or name in {"opsmind-harness-lab-topology",
+                                                 "opsmind-langgraph-lab-topology"}) else 0o640
             atomic_replace(file, payload=payload, mode=mode)
         os.replace(staging, target)
         fsync_directory(RELEASES_ROOT)
@@ -279,15 +296,15 @@ def restore_paths(before, original):
 
 
 
-def adopt_harness_release(current, adoption_payload):
+def adopt_release(current, adoption_payload):
     files, metadata = adoption_payload
-    if payload_names(metadata) != ADOPTION_PAYLOAD_FILES:
-        raise ValueError("adoption requires the complete unchanged harness inventory")
+    if payload_names(metadata) != PAYLOAD_FILES:
+        raise ValueError("adoption requires the complete unchanged component inventory")
     current_files = release_files(current)
     current_names = payload_names(json.loads(current_files["RELEASE.json"]))
-    if current_names != LEGACY_PAYLOAD_FILES and current_files != files:
-        raise ValueError("harness adoption requires legacy files or the same interrupted adoption")
-    # Verify all base and formerly unmanaged AH bytes before adopting their identity.
+    if owns_live_files(current_names) and current_files != files:
+        raise ValueError("adoption requires an unowned generation or the same interrupted adoption")
+    # Verify every base and formerly unmanaged candidate byte before adopting its identity.
     for name, path in LIVE_FILES.items():
         if not path.is_file() or digest(path.read_bytes()) != digest(files[name]):
             raise ValueError("adoption differs from installed component: " + name)
@@ -316,8 +333,8 @@ def install_release(archive, release_id, archive_hash, baseline=None, adoption=N
                 raise ValueError("first registration requires an explicit approved baseline archive")
             baseline_files, baseline_metadata = baseline_payload
             baseline_names = payload_names(baseline_metadata)
-            if baseline_names == LEGACY_PAYLOAD_FILES and adoption_payload is None:
-                raise ValueError("legacy installation requires explicit harness adoption")
+            if not owns_live_files(baseline_names) and adoption_payload is None:
+                raise ValueError("an unowned generation requires explicit component adoption")
             for name, path in LIVE_FILES.items():
                 if name not in baseline_names:
                     continue
@@ -328,9 +345,9 @@ def install_release(archive, release_id, archive_hash, baseline=None, adoption=N
             raise ValueError("baseline option is only allowed for first registration")
         verify_live_files(current)
         if adoption_payload:
-            current = adopt_harness_release(current, adoption_payload)
-        elif payload_names(json.loads((current / "RELEASE.json").read_bytes())) == LEGACY_PAYLOAD_FILES:
-            raise ValueError("legacy installation requires explicit harness adoption")
+            current = adopt_release(current, adoption_payload)
+        elif not owns_live_files(payload_names(json.loads((current / "RELEASE.json").read_bytes()))):
+            raise ValueError("an unowned generation requires explicit component adoption")
         target = preserve_release(files, metadata)
         switch_release(target, current)
 
@@ -342,9 +359,9 @@ def rollback_release():
         if current is None or previous is None or current == previous:
             raise ValueError("two distinct verified controller versions are required")
         verify_live_files(current)
-        if any(payload_names(json.loads((release / "RELEASE.json").read_bytes())) == LEGACY_PAYLOAD_FILES
+        if any(not owns_live_files(payload_names(json.loads((release / "RELEASE.json").read_bytes())))
                for release in (current, previous)):
-            raise ValueError("rollback requires complete harness ownership in both versions")
+            raise ValueError("rollback requires complete component ownership in both versions")
         switch_release(previous, current)
 
 
@@ -356,7 +373,7 @@ def show_status(entry):
         if name == "current" and target:
             verify_live_files(target)
         metadata = json.loads((target / "RELEASE.json").read_text()) if target else None
-        if metadata and payload_names(metadata) == LEGACY_PAYLOAD_FILES:
+        if metadata and not owns_live_files(payload_names(metadata)):
             complete_versions = False
         result[name] = ({key: metadata[key] for key in ("release_id", "source_revision", "content_digest", "component_manifest_digest")} if metadata else None)
     result["rollback_ready"] = bool(complete_versions and result["current"] and result["previous"]
@@ -377,10 +394,10 @@ def main(argv):
     install.add_argument("release_id")
     install.add_argument("archive_hash")
     install.add_argument("--baseline", nargs=3, metavar=("ARCHIVE", "RELEASE_ID", "SHA256"))
-    install.add_argument("--adopt-harness", nargs=3, metavar=("ARCHIVE", "RELEASE_ID", "SHA256"))
+    install.add_argument("--adopt-components", nargs=3, metavar=("ARCHIVE", "RELEASE_ID", "SHA256"))
     args = parser.parse_args(argv[1:])
     if args.command == "install":
-        install_release(args.archive, args.release_id, args.archive_hash, args.baseline, args.adopt_harness)
+        install_release(args.archive, args.release_id, args.archive_hash, args.baseline, args.adopt_components)
     elif args.command == "rollback":
         rollback_release()
     show_status(Path(argv[0]))

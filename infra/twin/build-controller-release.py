@@ -39,7 +39,15 @@ HARNESS_RELEASE_FILES = (
     "opsmind-harness-ssh-shim", "opsmind-harness-mec-http.py",
     "harness-source-lineage.json",
 )
-RELEASE_FILES = BASE_RELEASE_FILES + HARNESS_RELEASE_FILES + ("harness_probes.py", "harness_diagnostics.py")
+# The LangGraph laboratory adapter is owned, released, hashed and rolled back
+# exactly like the Agent+Harness one; neither candidate installs lab files itself.
+LANGGRAPH_RELEASE_FILES = (
+    "opsmind_langgraph_labctl.py", "opsmind-langgraph-lab-topology",
+    "opsmind-langgraph-ssh-shim", "opsmind-langgraph-mec-http.py",
+    "langgraph-source-lineage.json",
+)
+RELEASE_FILES = (BASE_RELEASE_FILES + HARNESS_RELEASE_FILES
+                 + ("harness_probes.py", "harness_diagnostics.py") + LANGGRAPH_RELEASE_FILES)
 
 
 def git(*arguments: str) -> str:

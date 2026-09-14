@@ -124,16 +124,21 @@ class ControllerReleaseTest(unittest.TestCase):
         self.module.rollback_release()
         self.assert_version(self.old, self.new)
 
-    def test_previous_probe_only_release_upgrades_and_rolls_back_without_missing_helpers(self):
+    def test_harness_only_generation_is_adopted_before_it_can_be_a_rollback_target(self):
         m = self.module
         baseline_files, _ = m.read_archive(*self.old)
-        previous = self.make_archive("probe-only", names=m.PREVIOUS_PAYLOAD_FILES, payloads=baseline_files)
-        m.install_release(*self.new, baseline=previous)
-        self.assert_version(self.new, previous)
-        self.assertTrue((m.CURRENT_LINK / "harness_diagnostics.py").is_file())
-        self.assertFalse((m.PREVIOUS_LINK / "harness_diagnostics.py").exists())
+        harness_only = self.make_archive("harness-only", names=m.HARNESS_PAYLOAD_FILES,
+                                         payloads=baseline_files)
+        adoption = self.make_archive("adoption", names=m.PAYLOAD_FILES, payloads=baseline_files)
+        with self.assertRaisesRegex(ValueError, "explicit component adoption"):
+            m.install_release(*self.new, baseline=harness_only)
+        self.assert_original()
+        m.install_release(*self.new, baseline=harness_only, adoption=adoption)
+        self.assert_version(self.new, adoption)
+        self.assertTrue((m.CURRENT_LINK / "opsmind_langgraph_labctl.py").is_file())
+        self.assertTrue((m.PREVIOUS_LINK / "opsmind-langgraph-lab-topology").is_file())
         m.rollback_release()
-        self.assert_version(previous, self.new)
+        self.assert_version(adoption, self.new)
         self.assertTrue((m.CURRENT_LINK / "harness_probes.py").is_file())
 
     def test_upgrade_and_repeated_rollback_keep_two_real_versions(self):
@@ -387,7 +392,7 @@ class ControllerReleaseTest(unittest.TestCase):
         m = self.module
         old_files, _ = m.read_archive(*self.old)
         legacy = self.make_archive("legacy", names=m.LEGACY_PAYLOAD_FILES, payloads=old_files)
-        adoption = self.make_archive("adoption", names=m.ADOPTION_PAYLOAD_FILES, payloads=old_files)
+        adoption = self.make_archive("adoption", names=m.PAYLOAD_FILES, payloads=old_files)
         if registered:
             target = m.preserve_release(*m.read_archive(*legacy))
             m.atomic_replace(m.CURRENT_LINK, target=target)
@@ -399,7 +404,7 @@ class ControllerReleaseTest(unittest.TestCase):
     def test_existing_legacy_upgrade_requires_complete_explicit_adoption(self):
         m = self.module
         legacy, adoption = self.legacy_archives()
-        with self.assertRaisesRegex(ValueError, "explicit harness adoption"):
+        with self.assertRaisesRegex(ValueError, "explicit component adoption"):
             m.install_release(*self.new)
         self.assertEqual(m.release_target(m.CURRENT_LINK).name, legacy[1])
         m.install_release(*self.new, adoption=adoption)
@@ -412,7 +417,7 @@ class ControllerReleaseTest(unittest.TestCase):
     def test_first_legacy_registration_preserves_both_base_and_harness(self):
         m = self.module
         legacy, adoption = self.legacy_archives(registered=False)
-        with self.assertRaisesRegex(ValueError, "explicit harness adoption"):
+        with self.assertRaisesRegex(ValueError, "explicit component adoption"):
             m.install_release(*self.new, baseline=legacy)
         self.assert_original()
         m.install_release(*self.new, baseline=legacy, adoption=adoption)
@@ -420,10 +425,10 @@ class ControllerReleaseTest(unittest.TestCase):
         m.rollback_release()
         self.assert_version(adoption, self.new)
 
-    def test_adoption_rejects_unmatched_unmanaged_harness_without_pointer_changes(self):
+    def test_adoption_rejects_unmatched_unmanaged_adapter_without_pointer_changes(self):
         m = self.module
         legacy, adoption = self.legacy_archives()
-        m.LIVE_FILES["opsmind_harness_labctl.py"].write_bytes(b"unapproved-harness")
+        m.LIVE_FILES["opsmind_langgraph_labctl.py"].write_bytes(b"unapproved-adapter")
         with self.assertRaisesRegex(ValueError, "adoption differs from installed"):
             m.install_release(*self.new, adoption=adoption)
         self.assertEqual(m.release_target(m.CURRENT_LINK).name, legacy[1])
@@ -432,10 +437,10 @@ class ControllerReleaseTest(unittest.TestCase):
     def test_adoption_refuses_partial_inventory_and_full_release_re_adoption(self):
         m = self.module
         legacy, adoption = self.legacy_archives()
-        with self.assertRaisesRegex(ValueError, "complete unchanged harness inventory"):
+        with self.assertRaisesRegex(ValueError, "complete unchanged component inventory"):
             m.install_release(*self.new, adoption=legacy)
         m.install_release(*self.new, adoption=adoption)
-        with self.assertRaisesRegex(ValueError, "requires legacy files"):
+        with self.assertRaisesRegex(ValueError, "requires an unowned generation"):
             m.install_release(*self.third, adoption=adoption)
         self.assert_version(self.new, adoption)
 
@@ -473,7 +478,7 @@ class ControllerReleaseTest(unittest.TestCase):
         with redirect_stdout(io.StringIO()) as output:
             m.show_status(self.entry)
         self.assertFalse(json.loads(output.getvalue())["rollback_ready"])
-        with self.assertRaisesRegex(ValueError, "complete harness ownership"):
+        with self.assertRaisesRegex(ValueError, "complete component ownership"):
             m.rollback_release()
         m.install_release(*self.new, adoption=adoption)
         self.assert_version(self.new, adoption)
