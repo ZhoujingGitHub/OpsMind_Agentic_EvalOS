@@ -188,5 +188,70 @@ class EvalManagerTests(unittest.TestCase):
                 )
 
 
+class BusinessTruthSnapshotTest(unittest.TestCase):
+    """The grader must never receive a scenario score as the business fact."""
+
+    def snapshot(self, contestant_ref, verification):
+        request = {
+            "operation": "snapshot",
+            "contestant_ref": contestant_ref,
+            "trial_id": ("lg-" if contestant_ref == "langgraph-v1" else "ah-") + "managed-1",
+        }
+        seen = {}
+
+        def verify(scope, profile):
+            seen["scope"], seen["profile"] = scope, profile
+            return verification
+
+        with (
+            patch.object(manager.Path, "is_file", return_value=True),
+            patch.object(
+                manager,
+                "controller_status",
+                return_value=controller_status(request["trial_id"], available=False),
+            ),
+            patch.object(
+                manager,
+                "base_call",
+                return_value={
+                    "ok": True,
+                    "snapshot": {
+                        "trial_id": request["trial_id"],
+                        "recovery": {"task_success": True},
+                        "resource_scope": {"namespace": request["trial_id"]},
+                    },
+                    "snapshot_hash": "hash",
+                },
+            ),
+            patch.object(manager.harness_probes, "business_verification", verify),
+        ):
+            return manager.dispatch(request), seen
+
+    def test_snapshot_carries_an_independent_business_verification(self):
+        for contestant_ref, profile in (
+            ("agent-harness-v2", manager.harness_probes.HARNESS_NETWORK),
+            ("langgraph-v1", manager.harness_probes.LANGGRAPH_NETWORK),
+        ):
+            with self.subTest(contestant_ref=contestant_ref):
+                verification = {"contract_version": "opsmind-mec-business-verification/1.0",
+                                "passed": False, "status": "failed"}
+                response, seen = self.snapshot(contestant_ref, verification)
+                self.assertTrue(response["ok"])
+                self.assertEqual(seen["profile"], profile)
+                self.assertEqual(seen["scope"], {"namespace": response["trial_id"]})
+                # The scenario score stays visible, and it is not product health.
+                self.assertTrue(response["snapshot"]["recovery"]["task_success"])
+                self.assertEqual(response["snapshot"]["business_verification"], verification)
+                self.assertIs(response["snapshot"]["healthy"], False)
+
+    def test_unobservable_business_is_reported_as_unknown_not_as_recovered(self):
+        response, _ = self.snapshot(
+            "langgraph-v1",
+            {"contract_version": "opsmind-mec-business-verification/1.0",
+             "passed": None, "status": "inconclusive"},
+        )
+        self.assertIsNone(response["snapshot"]["healthy"])
+
+
 if __name__ == "__main__":
     unittest.main()

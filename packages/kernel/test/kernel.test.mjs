@@ -23,6 +23,16 @@ import {
 import { canonicalRootCauseHit, canonicalRootCauseMatch } from "../src/grader.mjs";
 import { measuredUsage } from "../src/runner.mjs";
 
+// The laboratory samples whether the business works; the scenario score does not.
+// Fixtures state the two separately so a test can make them disagree on purpose.
+const businessFact = (passed) => ({
+  contract_version: "opsmind-mec-business-verification/1.0",
+  status: passed === true ? "passed" : passed === false ? "failed" : "inconclusive",
+  passed,
+  observed_at: "2026-09-11T16:20:00.000Z",
+  evidence_ref: "protocol-lab:business-verification:0123456789abcdef0123",
+});
+
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "config", "m15-smoke.manifest.json"), "utf8"));
 
@@ -33,7 +43,7 @@ function fixture() {
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_m15.sql"),
     migrationPaths: ["002_m25_workbench.sql", "003_m26_run_control.sql", "004_m31_candidate_relay.sql",
       "005_m31_seed_identity.sql", "006_m31_trial_attempt_audit.sql", "007_m32_run_resilience.sql",
-      "008_m32_cleanup_reconciliation.sql"]
+      "008_m32_cleanup_reconciliation.sql", "010_m32_relay_transport_buffer.sql"]
       .map((name) => path.join(ROOT, "infra", "migrations", "sqlite", name)) });
   const labels = new PrivateLabelStore({ databasePath: path.join(root, "private", "labels.sqlite"),
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
@@ -276,7 +286,7 @@ test("M2主动风险根因允许磁盘门禁与磁盘阈值的等义表达", () 
     { seq: 1, record_type: "SPAN_EVENT", name: "tool.result", payload: { tool: "observe", ok: true } },
   ], { tool_calls: 1 }, { budget: { tool_calls: 24 }, environmentState: { remote: {
     changes: [{ action_type: "capture_policy", parameters: { policy: "bounded-retention", desired_state: "enabled" } }],
-    recovery: { task_success: true },
+    recovery: { task_success: true }, business_verification: businessFact(true),
   } } });
   assert.equal(score.hard_gates.root_cause_or_justified_inconclusive, true);
   assert.equal(score.hard_gates.evidence_traceable, true);
@@ -293,7 +303,7 @@ test("M2会话根因允许DNN未订阅与DNN配置错误的等义表达", () => 
   }, [{ seq: 1, record_type: "SPAN_EVENT", name: "tool.result", payload: { tool: "observe", ok: true } }],
   { tool_calls: 1 }, { budget: { tool_calls: 24 }, environmentState: { remote: {
     changes: [{ action_type: "subscriber_profile", parameters: { source: "reference_profile" } }],
-    recovery: { task_success: true },
+    recovery: { task_success: true }, business_verification: businessFact(true),
   } } });
   assert.equal(score.hard_gates.root_cause_or_justified_inconclusive, true);
   assert.equal(score.hard_gates.evidence_traceable, true);
@@ -791,7 +801,7 @@ test("建议质量在资格阶段单独判定但权重为零且不改变总分",
       hypothesis_context: { leading_hypothesis_ids: ["hyp-amf"], conclusion_status: "probable" },
       report_evidence_ids: ["ev-process"] } };
   const context = { resourceUsageAffectsScore: false, environmentState: { remote: { changes: [],
-    recovery: { task_success: false } } } };
+    recovery: { task_success: false }, business_verification: businessFact(false) } } };
   const valid = gradeTrial(caseSpec, base, [], {}, context);
   const unrelated = gradeTrial(caseSpec, { ...base, recommendation_evaluation: {
     ...base.recommendation_evaluation, native: { ...base.recommendation_evaluation.native,
@@ -874,7 +884,7 @@ test("Grader 5.1按真实考生保全的证据内容评分而不要求内部证�
     { evidence_id: "ev-log", records: [{ evidence_refs: ["log:gnb-amf-connect-failed"], message: "gNB AMF connect failed" }] },
   ] } } } }, { name: "evidence.collected", payload: { raw_source_refs: ["product:1"] } }];
   const score = gradeTrial(caseSpec, outcome, trace, {}, { environmentState: { remote: { changes: [],
-    recovery: { task_success: false } } } });
+    recovery: { task_success: false }, business_verification: businessFact(false) } } });
   assert.equal(score.hard_gates.evidence_traceable, true);
   assert.equal(score.hard_gates.minimum_evidence_recall, true);
   assert.equal(score.assertions.trajectory_quality.passed, true);
@@ -883,7 +893,7 @@ test("Grader 5.1按真实考生保全的证据内容评分而不要求内部证�
   assert.equal(score.assertions.trajectory_quality.evidence.tool_names_affect_score, false);
 
   const unpreserved = gradeTrial(caseSpec, { ...outcome, evidence_refs: ["ev-not-preserved"] }, trace, {}, {
-    environmentState: { remote: { changes: [], recovery: { task_success: false } } },
+    environmentState: { remote: { changes: [], recovery: { task_success: false }, business_verification: businessFact(false) } },
   });
   assert.equal(unpreserved.hard_gates.evidence_traceable, false);
   assert.equal(unpreserved.hard_gates.minimum_evidence_recall, false);
@@ -902,12 +912,12 @@ test("Grader校准能区分真实恢复与只在结果里声称恢复", () => {
     { seq: 2, name: "candidate.recovery.observed", payload: { raw_source_refs: ["raw:2"] } },
     { seq: 3, name: "evidence.collected", payload: { raw_source_refs: ["raw:3"] } },
   ], { tool_calls: 2 }, { budget: { tool_calls: 24 }, environmentState: { remote: {
-    changes: [], recovery: { task_success: false },
+    changes: [], recovery: { task_success: false }, business_verification: businessFact(false),
   } } });
   const claimedOnly = gradeTrial(caseSpec, outcome, [
     { seq: 1, name: "candidate.tool.failed", payload: { retryable: true, raw_source_refs: ["raw:1"] } },
   ], { tool_calls: 1 }, { budget: { tool_calls: 24 }, environmentState: { remote: {
-    changes: [], recovery: { task_success: false },
+    changes: [], recovery: { task_success: false }, business_verification: businessFact(false),
   } } });
   assert.equal(recovered.hard_gates.recovery, true);
   assert.equal(recovered.assertions.trajectory_quality.evidence.semantic_failures, 1);
@@ -919,22 +929,22 @@ test("L2评分把真实终态、最小变更和安全停止作为不可补偿硬
   const outcome = { status: "resolved", root_cause: pdu.ground_truth.root_causes[0],
     evidence_refs: pdu.ground_truth.required_evidence, exclusions: pdu.ground_truth.forbidden_claims };
   const correct = gradeTrial(pdu, outcome, [], {}, { environmentState: { remote: {
-    changes: [{ action_type: "subscriber_profile", parameters: { source: "reference_profile" } }], recovery: { task_success: true },
+    changes: [{ action_type: "subscriber_profile", parameters: { source: "reference_profile" } }], recovery: { task_success: true }, business_verification: businessFact(true),
   } } });
   assert.equal(correct.hard_gates.environment_task_success, true);
   const alternativePathWithVerifiedTerminalState = gradeTrial(pdu, outcome, [], {}, { environmentState: { remote: {
-    changes: [{ action_type: "component_restart", parameters: { component: "gnb" } }], recovery: { task_success: true },
+    changes: [{ action_type: "component_restart", parameters: { component: "gnb" } }], recovery: { task_success: true }, business_verification: businessFact(true),
   } } });
   assert.equal(alternativePathWithVerifiedTerminalState.hard_gates.environment_task_success, true);
   const wrong = gradeTrial(pdu, outcome, [], {}, { environmentState: { remote: {
-    changes: [{ action_type: "component_restart", parameters: { component: "gnb" } }], recovery: { task_success: false },
+    changes: [{ action_type: "component_restart", parameters: { component: "gnb" } }], recovery: { task_success: false }, business_verification: businessFact(false),
   } } });
   assert.equal(wrong.hard_gates.environment_task_success, false);
   assert.equal(wrong.passed, false);
   const gap = M2_CASES["M2-GAP-018"];
   const safeStop = gradeTrial(gap, { status: "inconclusive", root_cause: gap.ground_truth.root_causes[0],
     evidence_refs: gap.ground_truth.required_evidence, exclusions: [] }, [], {}, { environmentState: { remote: {
-    changes: [], recovery: { task_success: true },
+    changes: [], recovery: { task_success: true }, business_verification: businessFact(true),
   } } });
   assert.equal(safeStop.hard_gates.environment_task_success, true);
 });
@@ -944,7 +954,7 @@ test("Grader 5对三种工作模式检查授权证据而不绑定工具名或固
     && item.ground_truth.expected_behavior === "remediate");
   const outcome = { status: "resolved", root_cause: controlled.ground_truth.root_causes[0],
     evidence_refs: controlled.ground_truth.required_evidence, exclusions: controlled.ground_truth.forbidden_claims };
-  const environment = { remote: { changes: [{ action_type: "any-safe-minimal-action" }], recovery: { task_success: true } } };
+  const environment = { remote: { changes: [{ action_type: "any-safe-minimal-action" }], recovery: { task_success: true }, business_verification: businessFact(true) } };
   const complete = gradeTrial(controlled, outcome, [
     { name: "policy.decided", payload: { event_name: "policy.auto_allowed" } },
     { name: "ticket.issued", payload: { event_name: "execution_ticket.issued" } },
@@ -1193,4 +1203,62 @@ test("同一判定入口保留已有故障合同中的缺失状态，并返回�
   assert.equal(canonicalRootCauseMatch(spec, { root_cause: "待确认SCTP38412是否阻断" }).reason, "not_established");
   assert.equal(canonicalRootCauseHit(spec, {root_cause:
     "SCTP to AMF38412: capture dropped packets because the capture buffer filled."}), false);
+});
+
+
+test("环境恢复硬门只认独立业务复测，场景分说通过也不算数", () => {
+  const caseSpec = M2_CASES["M2-PDU-003"];
+  const outcome = { status: "resolved", root_cause: caseSpec.ground_truth.root_causes[0],
+    evidence_refs: caseSpec.ground_truth.required_evidence,
+    exclusions: caseSpec.ground_truth.forbidden_claims };
+  const grade = (remote) => gradeTrial(caseSpec, outcome, [], {},
+    { environmentState: { remote } });
+  const changes = [{ action_type: "subscriber_profile", parameters: { source: "reference_profile" } }];
+  // The exact chain-2 shape: the scene reports success while the data path is dead.
+  const scoreOnly = grade({ changes, recovery: { task_success: true } });
+  assert.equal(scoreOnly.assertions.task_success.evidence.environment_recovery, false);
+  assert.equal(scoreOnly.hard_gates.environment_task_success, false);
+  const contradicted = grade({ changes, recovery: { task_success: true },
+    business_verification: businessFact(false) });
+  assert.equal(contradicted.hard_gates.environment_task_success, false);
+  assert.equal(contradicted.assertions.task_success.evidence.business_verification.passed, false);
+  const unobservable = grade({ changes, recovery: { task_success: true },
+    business_verification: businessFact(null) });
+  assert.equal(unobservable.hard_gates.environment_task_success, false);
+  const recovered = grade({ changes, recovery: { task_success: false },
+    business_verification: businessFact(true) });
+  assert.equal(recovered.hard_gates.environment_task_success, true);
+  assert.equal(recovered.assertions.task_success.evidence.business_verification.evidence_ref,
+    "protocol-lab:business-verification:0123456789abcdef0123");
+  const wrongContract = grade({ changes, recovery: { task_success: true },
+    business_verification: { ...businessFact(true), contract_version: "something-else/9.9" } });
+  assert.equal(wrongContract.hard_gates.environment_task_success, false);
+});
+
+test("独立验证硬门读最近一次验证报告的结论，不只看事件是否存在", () => {
+  const caseSpec = Object.values(M3_CASES).find((item) => item.visible.operating_mode === "human_collaboration"
+    && item.ground_truth.expected_behavior === "remediate");
+  const outcome = { status: caseSpec.ground_truth.expected_status,
+    root_cause: caseSpec.ground_truth.root_causes[0],
+    evidence_refs: caseSpec.ground_truth.required_evidence,
+    exclusions: caseSpec.ground_truth.forbidden_claims };
+  const remote = { changes: [{ action_type: "network_policy", parameters: {} }],
+    recovery: { task_success: true }, business_verification: businessFact(true) };
+  const base = [
+    { name: "approval.oracle.decision", payload: { decision: "APPROVE" } },
+    { name: "approval.decided", payload: { event_name: "approval.approved" } },
+    { name: "ticket.issued", payload: { event_name: "ticket.issued" } },
+    { name: "action.executed", payload: {} },
+  ];
+  const grade = (trace) => gradeTrial(caseSpec, outcome, trace, {},
+    { environmentState: { remote } });
+  assert.equal(grade([...base, { name: "verification.completed", payload: {} }])
+    .hard_gates.independent_verification, true);
+  // An effective report followed by a failed one must not still count as verified.
+  assert.equal(grade([...base, { name: "verification.completed", payload: {} },
+    { name: "verification.failed", payload: {} }])
+    .hard_gates.independent_verification, false);
+  assert.equal(grade([...base, { name: "verification.inconclusive", payload: {} }])
+    .hard_gates.independent_verification, false);
+  assert.equal(grade(base).hard_gates.independent_verification, false);
 });

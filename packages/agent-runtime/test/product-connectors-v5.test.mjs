@@ -100,7 +100,8 @@ function relayedFixture(t, origin) {
   const migrationRoot = path.resolve(import.meta.dirname, "../../../infra/migrations/sqlite");
   const store = new EvalStore({ databasePath: path.join(root, "control.sqlite"), runtimeRoot: root,
     migrationPath: path.join(migrationRoot, "001_m15.sql"),
-    migrationPaths: ["002_m25_workbench.sql", "003_m26_run_control.sql", "004_m31_candidate_relay.sql"]
+    migrationPaths: ["002_m25_workbench.sql", "003_m26_run_control.sql", "004_m31_candidate_relay.sql",
+      "010_m32_relay_transport_buffer.sql"]
       .map((name) => path.join(migrationRoot, name)) });
   t.after(() => store.close());
   const { publicKey } = generateKeyPairSync("ed25519");

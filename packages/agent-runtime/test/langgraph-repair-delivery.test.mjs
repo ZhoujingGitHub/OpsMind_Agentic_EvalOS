@@ -12,10 +12,12 @@ function recoveredAfterFailure() {
   const projection = { contract_version: "opsmind-controlled-remediation:1.3", current_action_ref: current,
     action_history: [{ action_id: "first", proposal_digest: "a".repeat(64) }, current],
     action_lifecycle: { action_id: "second", proposal: current, attempt, verification: report },
-    repair_delivery: { contract_version: "opsmind-lg-repair-delivery/1.0", current_action_ref: current,
-      final_action_ref: current,
-      recovery_verified: true, final_verification: report, explanation: "第1次修复未恢复；第2次修复成功，独立验证有效",
-      actions: [{ action_id: "first", attempt_id: "attempt-first", execution_status: "failed", changed_external_state: false },
+    repair_delivery: { contract_version: "opsmind-lg-repair-delivery/2.0", current_action_ref: current,
+      task_action_ref: current, recovery_conclusion: "recovered",
+      recovery_verified: true, task_verification: report,
+      explanation: "第1次修复未恢复；第2次修复成功，动作后独立业务复测通过。任务结论：最近一次独立业务复测通过，业务已恢复。",
+      actions: [{ action_id: "first", proposal_digest: "a".repeat(64), attempt_id: "attempt-first",
+          execution_status: "failed", changed_external_state: false },
         { action_id: "second", proposal_digest: current.proposal_digest, attempt_id: "attempt-second",
           completed_at: attempt.completed_at, verification: report,
           execution_status: "succeeded", changed_external_state: true }] } };
@@ -48,8 +50,11 @@ test("LG cannot use old verification, omitted history or unresolved write as rec
   const alterations = [
     ({ projection }) => { projection.current_action_ref = { action_id: "first" }; },
     ({ projection }) => { projection.current_action_ref.proposal_digest = "invalid"; },
-    ({ projection }) => { projection.action_lifecycle.verification.attempt_id = "old-attempt"; },
-    ({ projection }) => { projection.action_lifecycle.verification.observed_at = "2026-09-09T09:00:00Z"; },
+    ({ projection }) => { projection.repair_delivery.task_action_ref = { action_id: "ghost", proposal_digest: "e".repeat(64) }; },
+    ({ projection }) => { projection.repair_delivery.recovery_conclusion = "not_recovered"; },
+    ({ projection }) => { projection.repair_delivery.contract_version = "opsmind-lg-repair-delivery/1.0"; },
+    ({ projection }) => { projection.repair_delivery.task_verification.attempt_id = "old-attempt"; },
+    ({ projection }) => { projection.repair_delivery.task_verification.observed_at = "2026-09-09T09:00:00Z"; },
     ({ projection }) => { projection.repair_delivery.actions.shift(); },
     ({ projection }) => { projection.repair_delivery.actions[0].execution_status = "unknown"; },
     ({ projection }) => { projection.repair_delivery.actions[0].changed_external_state = true; },
@@ -90,6 +95,7 @@ test("LG accepts later recovery after a verified ineffective change without inve
     const result = langGraphRepairProgress(fixture.normalized, fixture.projection, fixture.raw);
     assert.equal(result.recovery_verified, true);
     assert.equal(result.attempt_history[0].verification.outcome, "ineffective");
+    assert.equal(result.recovery_conclusion, "recovered");
     assert.equal(result.attempt_history[0].rollback, undefined);
     assert.deepEqual(fixture, before);
   }
@@ -143,4 +149,44 @@ test("prior verified success may precede a later verified repair", () => {
   fixture.raw[0].event_type = "action.succeeded";
   fixture.raw[1].event_type = "verification.effective";
   assert.equal(langGraphRepairProgress(fixture.normalized, fixture.projection, fixture.raw).recovery_verified, true);
+});
+
+
+test("EvalOS 接收 LG 发布的任务级结论，不按动作顺序自己推断", () => {
+  // Chain 2 shape: the newest independent reading belongs to an earlier row.
+  const fixture = recoveredAfterFailure();
+  const delivery = fixture.projection.repair_delivery;
+  const blocked = { action_id: "n6", proposal_digest: "f".repeat(64) };
+  delivery.actions.push({ action_id: "n6", proposal_digest: blocked.proposal_digest,
+    execution_status: "not_attempted", changed_external_state: null, verification: null });
+  fixture.projection.action_history.push(blocked);
+  const result = langGraphRepairProgress(fixture.normalized, fixture.projection, fixture.raw);
+  // The conclusion still belongs to the verified action, not to the last row.
+  assert.equal(result.task_verification.action_id, "second");
+  assert.equal(result.recovery_conclusion, "recovered");
+  assert.equal(result.recovery_verified, true);
+  assert.equal(result.attempt_history.at(-1).execution_status, "not_attempted");
+});
+
+test("LG 发布未恢复时按未恢复接收，既不翻成恢复也不报接收错误", () => {
+  const fixture = recoveredAfterFailure();
+  const delivery = fixture.projection.repair_delivery;
+  delivery.task_verification.outcome = "ineffective";
+  delivery.recovery_conclusion = "not_recovered";
+  delivery.recovery_verified = false;
+  fixture.raw[3].event_type = "verification.ineffective";
+  const result = langGraphRepairProgress(fixture.normalized, fixture.projection, fixture.raw);
+  assert.equal(result.recovery_verified, false);
+  assert.equal(result.recovery_conclusion, "not_recovered");
+  assert.deepEqual(result.reception_errors, []);
+});
+
+test("LG 声称恢复但自己的验证报告说无效时按接收错误处理", () => {
+  const fixture = recoveredAfterFailure();
+  fixture.projection.repair_delivery.task_verification.outcome = "ineffective";
+  fixture.raw[3].event_type = "verification.ineffective";
+  const result = langGraphRepairProgress(fixture.normalized, fixture.projection, fixture.raw);
+  assert.equal(result.recovery_verified, false);
+  assert.equal(result.recovery_conclusion, "unverified");
+  assert.ok(result.reception_errors.includes("task_conclusion_inconsistent_with_its_report"));
 });

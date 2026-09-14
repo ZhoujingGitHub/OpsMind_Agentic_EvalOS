@@ -3,6 +3,22 @@ import { isoNow, sha256, stableStringify } from "./utils.mjs";
 
 const ROLES = new Set(["candidate_submitter", "approval_oracle", "mode_administrator"]);
 const METHODS = new Set(["GET", "POST", "PUT"]);
+// A relay row records who called what and the hashes of what crossed the
+// boundary. A large response body is transport payload, not that record, so it
+// is handed over through a mutable buffer and dropped once the caller has it.
+const INLINE_RESPONSE_BODY_LIMIT = 16 * 1024;
+const EXTERNAL_BODY_MARKER = "candidate-relay-response-body/1.0";
+const ABANDONED_BODY_MS = 3600000;
+
+function externalBodyEnvelope(body) {
+  return stableStringify({ __relay_response_body: EXTERNAL_BODY_MARKER,
+    sha256: sha256(body ?? {}), bytes: Buffer.byteLength(jsonValue(body) ?? "", "utf8") });
+}
+
+function externalBodyReference(stored) {
+  const value = parseJson(stored, null);
+  return value?.__relay_response_body === EXTERNAL_BODY_MARKER ? value : null;
+}
 
 function bodyHash(rawBody) {
   return createHash("sha256").update(rawBody).digest("hex");
@@ -95,7 +111,7 @@ export class CandidateRelayBroker {
     while (Date.now() < deadline) {
       const row = this.store.db.prepare("SELECT * FROM candidate_relay_requests WHERE id=?").get(id);
       if (row?.status === "COMPLETED") {
-        const payload = parseJson(row.response_body_json, {});
+        const payload = this.takeResponseBody(row);
         if (row.response_status < 200 || row.response_status >= 300) {
           const code = payload?.detail?.code ?? payload?.error?.code ?? payload?.detail ?? "request_failed";
           throw new Error(`candidate product ${normalizedMethod} ${pathname} HTTP ${row.response_status}: ${typeof code === "string" ? code : JSON.stringify(code)}`);
@@ -112,7 +128,29 @@ export class CandidateRelayBroker {
     throw new Error(`candidate relay timed out after ${timeoutMs}ms`);
   }
 
+  takeResponseBody(row) {
+    // The immutable evidence row keeps the envelope with hash and length; the
+    // body itself is collected once and then removed from the buffer.
+    const reference = externalBodyReference(row.response_body_json);
+    if (!reference) return parseJson(row.response_body_json, {});
+    const stored = this.store.db.prepare(
+      "SELECT body_json FROM candidate_relay_response_bodies WHERE request_id=?").get(row.id);
+    if (!stored) {
+      throw new Error(`candidate relay response body is no longer available: ${row.id}`);
+    }
+    const payload = parseJson(stored.body_json, {});
+    this.store.db.prepare("DELETE FROM candidate_relay_response_bodies WHERE request_id=?").run(row.id);
+    return payload;
+  }
+
+  sweepAbandonedResponseBodies() {
+    const cutoff = new Date(Date.now() - ABANDONED_BODY_MS).toISOString();
+    return this.store.db.prepare(
+      "DELETE FROM candidate_relay_response_bodies WHERE created_at<?").run(cutoff).changes;
+  }
+
   claim(candidateRef, { worker_id: workerId, lease_ms: leaseMs = 30000 } = {}) {
+    this.sweepAbandonedResponseBodies();
     if (!workerId || !Number.isInteger(leaseMs) || leaseMs < 1000 || leaseMs > 120000) {
       throw new Error("candidate relay claim requires worker_id and lease_ms between 1000 and 120000");
     }
@@ -141,13 +179,23 @@ export class CandidateRelayBroker {
     const row = this.store.db.prepare("SELECT * FROM candidate_relay_requests WHERE id=? AND candidate_ref=?").get(requestId, candidateRef);
     if (!row || row.status !== "LEASED" || row.lease_owner !== workerId) throw new Error("candidate relay lease is missing or owned by another worker");
     const status = error ? "FAILED" : "COMPLETED";
-    this.store.db.prepare(`UPDATE candidate_relay_requests SET status=?,response_status=?,response_body_json=?,error=?,completed_at=?
-      WHERE id=? AND status='LEASED' AND lease_owner=?`).run(status, error ? null : Number(responseStatus),
-      error ? null : jsonValue(responseBody ?? {}), error, isoNow(), requestId, workerId);
+    const body = error ? null : jsonValue(responseBody ?? {});
+    const external = body !== null && Buffer.byteLength(body, "utf8") > INLINE_RESPONSE_BODY_LIMIT;
+    this.store.transaction(() => {
+      if (external) {
+        this.store.db.prepare(`INSERT OR REPLACE INTO candidate_relay_response_bodies(
+          request_id,body_json,bytes,sha256,created_at) VALUES(?,?,?,?,?)`).run(
+          requestId, body, Buffer.byteLength(body, "utf8"), sha256(responseBody ?? {}), isoNow());
+      }
+      this.store.db.prepare(`UPDATE candidate_relay_requests SET status=?,response_status=?,response_body_json=?,error=?,completed_at=?
+        WHERE id=? AND status='LEASED' AND lease_owner=?`).run(status, error ? null : Number(responseStatus),
+        external ? externalBodyEnvelope(responseBody ?? {}) : body, error, isoNow(), requestId, workerId);
+    });
     this.ledger.append({ entityType: "candidate_relay_request", entityId: requestId,
       action: error ? "candidate_relay.failed" : "candidate_relay.completed",
       payload: { candidate_ref: candidateRef, request_hash: row.request_hash,
-        response_status: error ? null : Number(responseStatus), response_hash: error ? null : sha256(responseBody ?? {}), error } });
+        response_status: error ? null : Number(responseStatus), response_hash: error ? null : sha256(responseBody ?? {}),
+        response_body_storage: external ? "transport_buffer" : "inline", error } });
     return { id: requestId, status };
   }
 

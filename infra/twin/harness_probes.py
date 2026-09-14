@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 import errno
+import hashlib
 import ipaddress
 import json
 from pathlib import Path
@@ -239,11 +240,17 @@ def business_verification(scope, profile):
               and dns.get("source") == http.get("source"))
     unavailable = any(x.get("status") == "unavailable" or
                       x.get("error", {}).get("code") == "DEPENDENCY_UNAVAILABLE" for x in (dns, http))
-    return {"contract_version": "opsmind-mec-business-verification/1.0",
-            "required_checks": ["mec_dns_answer", "mec_http_health"],
-            "status": "passed" if passed else "inconclusive" if unavailable else "failed",
-            "passed": True if passed else None if unavailable else False,
-            "checks": {"dns": dns, "http": http}, "observed_at": now()}
+    record = {"contract_version": "opsmind-mec-business-verification/1.0",
+              "required_checks": ["mec_dns_answer", "mec_http_health"],
+              "status": "passed" if passed else "inconclusive" if unavailable else "failed",
+              "passed": True if passed else None if unavailable else False,
+              "checks": {"dns": dns, "http": http}, "observed_at": now()}
+    # Same reference vocabulary the observation path uses, so a verification report
+    # can cite the sampling it actually performed instead of an earlier snapshot.
+    digest = hashlib.sha256(
+        json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return {**record, "evidence_ref": "protocol-lab:business-verification:" + digest[:20]}
 
 
 if __name__ == "__main__":

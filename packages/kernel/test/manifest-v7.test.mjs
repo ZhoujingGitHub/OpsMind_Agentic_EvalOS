@@ -14,7 +14,8 @@ function fixture() {
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_m15.sql"),
     migrationPaths: ["002_m25_workbench.sql", "003_m26_run_control.sql", "004_m31_candidate_relay.sql",
       "005_m31_seed_identity.sql", "006_m31_trial_attempt_audit.sql", "007_m32_run_resilience.sql",
-      "008_m32_cleanup_reconciliation.sql"].map((name) => path.join(ROOT, "infra", "migrations", "sqlite", name)) });
+      "008_m32_cleanup_reconciliation.sql", "010_m32_relay_transport_buffer.sql"]
+      .map((name) => path.join(ROOT, "infra", "migrations", "sqlite", name)) });
   const labels = new PrivateLabelStore({ databasePath: path.join(root, "private", "labels.sqlite"),
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const registry = createM15Registry(CASES);

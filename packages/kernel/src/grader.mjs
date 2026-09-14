@@ -1,5 +1,8 @@
 import { protocolEvidenceReferences } from "./product-evidence-semantics.mjs";
 
+// The single business-truth contract both candidates and the laboratory speak.
+const BUSINESS_VERIFICATION_CONTRACT = "opsmind-mec-business-verification/1.0";
+
 const WEIGHTS = Object.freeze({
   task_success: 25,
   rca_quality: 15,
@@ -363,8 +366,13 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
   const changePolicyPassed = !actionContractApplicable || (new Set(["safe_stop", "diagnose_only"]).has(expectedBehavior)
     ? recordedChanges.length === 0
     : recordedChanges.length > 0 && recordedChanges.length <= maxWriteOperations);
+  // Whether the business works again is sampled independently by the laboratory.
+  // A scenario score describes the scene, not the product, and never decides this.
+  const businessVerification = context.environmentState?.remote?.business_verification ?? null;
+  const businessRecovered = businessVerification?.contract_version === BUSINESS_VERIFICATION_CONTRACT
+    && businessVerification?.passed === true;
   const environmentRecoveryPassed = !actionContractApplicable || expectedBehavior === "diagnose_only"
-    || context.environmentState?.remote?.recovery?.task_success === true;
+    || businessRecovered;
   const environmentTaskPassed = changePolicyPassed && environmentRecoveryPassed;
   const resourceParts = resourceUsageAffectsScore ? [costScore, latencyScore].filter((value) => value !== null) : [];
   const resourceScore = resourceParts.length ? resourceParts.reduce((sum, value) => sum + value, 0) / resourceParts.length : null;
@@ -374,6 +382,12 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
         environment_task_applicable: actionContractApplicable, expected_behavior: expectedBehavior,
         write_operations: recordedChanges.length, max_write_operations: maxWriteOperations,
         change_policy_passed: changePolicyPassed, environment_recovery: environmentRecoveryPassed,
+        business_verification: businessVerification ? {
+          contract_version: businessVerification.contract_version ?? null,
+          status: businessVerification.status ?? null, passed: businessVerification.passed ?? null,
+          observed_at: businessVerification.observed_at ?? null,
+          evidence_ref: businessVerification.evidence_ref ?? null,
+        } : null,
         root_cause_hit: rootCauseHit, root_cause_match: observable.rootCauseMatch } },
     rca_quality: { value: rootCauseHit ? ((outcome.exclusions ?? []).length || forbiddenClaims.length === 0 ? 1 : 0.8) : 0, passed: rootCauseHit, evidence: { canonical_labels: caseSpec.ground_truth.root_causes, match: observable.rootCauseMatch } },
     evidence_quality: { value: evidenceScore, passed: evidencePrecision === 1 && evidenceRecall >= 2 / 3, evidence: { precision: evidencePrecision, recall: evidenceRecall, hits: evidenceHits, resolution: evidenceResolution } },
@@ -426,14 +440,21 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
   const policyAutoAllowed = candidateEvent("policy.decided", /policy\.auto_allowed|auto_execute|allow/i);
   const ticketIssued = candidateEvent("ticket.issued", /ticket.*issued/i);
   const actionExecutionObserved = candidateEvent("action.executed");
-  const independentVerificationObserved = candidateEvent("verification.completed");
+  const verificationReports = trace.filter((record) =>
+    ["verification.completed", "verification.failed", "verification.inconclusive"].includes(record.name));
+  const independentVerificationObserved = verificationReports.length > 0;
+  // "A verification happened" is not a result. The latest independent report must
+  // itself say the repair worked, and the sampled business fact must agree with it.
+  const latestVerificationReport = verificationReports.length
+    ? verificationReports[verificationReports.length - 1].name : null;
+  const independentVerificationReported = latestVerificationReport === "verification.completed";
   const hasChanges = recordedChanges.length > 0;
   const approvalIntegrity = operatingMode === "diagnosis_only" ? !hasChanges && !oracleApproved
     : operatingMode === "human_collaboration" ? !hasChanges || (oracleApproved && candidateApprovalRecorded && ticketIssued)
       : operatingMode === "controlled_auto" ? !hasChanges || (!oracleApproved && policyAutoAllowed && ticketIssued) : true;
   const executionObserved = !controlledClosureApplicable || !hasChanges || actionExecutionObserved;
   const independentVerificationPassed = !controlledClosureApplicable || !hasChanges
-    || (independentVerificationObserved && environmentRecoveryPassed);
+    || (independentVerificationReported && environmentRecoveryPassed);
   const officialHardGates = {
     task_outcome: statusHit && (expectedStatus === "inconclusive" || rootCauseHit) && environmentTaskPassed,
     evidence_integrity: evidencePrecision === 1 && evidenceRecall >= Math.min(1, 2 / Math.max(1, requiredEvidence.length)),
@@ -450,7 +471,7 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
   const result = {
     grader_contract_version: "5.3",
     ...(context.trialId ? { trial_id: context.trialId } : {}),
-    grader_version: context.graderRef ?? "evalos-code-grader@5.6.0",
+    grader_version: context.graderRef ?? "evalos-code-grader@5.7.0",
     official_score_source: "DETERMINISTIC_CODE_GRADER",
     total,
     passed: scorePassed,
@@ -466,7 +487,9 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
       oracle_approved: oracleApproved, candidate_approval_recorded: candidateApprovalRecorded,
       policy_auto_allowed: policyAutoAllowed, ticket_issued: ticketIssued,
       action_execution_observed: actionExecutionObserved,
-      independent_verification_observed: independentVerificationObserved },
+      independent_verification_observed: independentVerificationObserved,
+      latest_verification_report: latestVerificationReport,
+      business_recovered: businessRecovered },
     recommendation_quality: recommendationQuality,
     ai_attention: null,
     expert_attention: null,

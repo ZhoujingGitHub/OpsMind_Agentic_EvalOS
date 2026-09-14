@@ -18,15 +18,21 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Resolve the immutable release directory when invoked via the fixed symlink.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import harness_probes
+
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 CONTROLLERS = {
     "agent-harness-v2": {
         "prefix": "ah-",
         "path": Path("/usr/local/sbin/opsmind-harness-labctl"),
+        "network_profile": harness_probes.HARNESS_NETWORK,
     },
     "langgraph-v1": {
         "prefix": "lg-",
         "path": Path("/usr/local/sbin/opsmind-langgraph-labctl"),
+        "network_profile": harness_probes.LANGGRAPH_NETWORK,
     },
 }
 BASE = Path("/usr/local/sbin/opsmind-twinctl")
@@ -241,12 +247,22 @@ def dispatch(raw_request: Any) -> dict[str, Any]:
         response = base_call({"operation": "snapshot", "trial_id": trial_id})
         if response.get("ok") is not True:
             return error(operation, "SNAPSHOT_FAILED", str(response.get("error") or "Twin snapshot failed"))
+        snapshot = dict(response.get("snapshot") or {})
+        # The scene controller reports a scenario score. Whether the business
+        # actually works is a separate, independently sampled fact, taken here with
+        # the same contract both candidates use, so grading never reads a score.
+        verification = harness_probes.business_verification(
+            dict(snapshot.get("resource_scope") or {}),
+            str(CONTROLLERS[contestant_ref]["network_profile"]),
+        )
+        snapshot["business_verification"] = verification
+        snapshot["healthy"] = verification["passed"]
         return {
             "ok": True,
             "operation": "snapshot",
             "contestant_ref": contestant_ref,
             "trial_id": trial_id,
-            "snapshot": response.get("snapshot") or {},
+            "snapshot": snapshot,
             "snapshot_hash": response.get("snapshot_hash"),
         }
 

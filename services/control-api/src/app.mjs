@@ -217,7 +217,8 @@ export function createApp({
       path.join(ROOT, "infra", "migrations", "sqlite", "006_m31_trial_attempt_audit.sql"),
       path.join(ROOT, "infra", "migrations", "sqlite", "007_m32_run_resilience.sql"),
       path.join(ROOT, "infra", "migrations", "sqlite", "008_m32_cleanup_reconciliation.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "009_m32_capacity_rehearsal.sql")] });
+      path.join(ROOT, "infra", "migrations", "sqlite", "009_m32_capacity_rehearsal.sql"),
+      path.join(ROOT, "infra", "migrations", "sqlite", "010_m32_relay_transport_buffer.sql")] });
   const labels = new PrivateLabelStore({ databasePath: privateLabelDatabasePath,
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const privateLabelHash = labels.publishRegistry(registry);
@@ -229,7 +230,7 @@ export function createApp({
       recommendation_quality: "evalos-recommendation-quality/1.2",
       diagnosis_and_recovery: "independent-advice-and-task-judgments" } });
   const gradingService = new DeterministicGradingService({ labelStore: labels,
-    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@5.6.0" });
+    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@5.7.0" });
   const approvalOracle = new FrozenApprovalOracle({ labelStore: labels });
   const ledger = new EvaluationLedger(store);
   const loadRelayConfig = () => {
