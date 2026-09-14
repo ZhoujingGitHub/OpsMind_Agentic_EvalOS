@@ -206,11 +206,11 @@
       "architecture": "CLAUDE_AGENT_SDK_HARNESS",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "b13c5f54b94945d07f960a703a75b6a5d70eaa46",
-      "artifact_digest": "sha256:253d63f00dc76583dcf685854756993279f508a8295ed8c66e967c9234466905",
-      "runtime_digest": "sha256:565e2aedaaf722accb1ceec1b9376350681d4e63c3af26dbd40dbc43f64e4088",
+      "source_revision": "9f7cf335f94cc5c22689dcb0027c34ea48d1bcdb",
+      "artifact_digest": "sha256:518d0a167d8a53d52898d5eeb953b74e2a325f9ca9562b63aff350b834586b0f",
+      "runtime_digest": "sha256:823db0ba099411769aea95ce98c4aefec9d3136425acfba6285c42477a150ef3",
       "runtime_manifest_digest": "sha256:27b052243e1d74621385459bf42a55aa920c03ccce996370ddef7a18fc910bad",
-      "capability_contract_digest": "sha256:b2087fe277336190a00dae2ae58809f152e61464d60a418c9a295c9b9b0f2cda",
+      "capability_contract_digest": "sha256:61398d3e26bb6865f75a16d2e7311f00c763ae556a91d4af02afdd486a0ee8bd",
       "binding_requirement": "PRODUCT_NATIVE_ACK",
       "candidate_runtime": {
         "contract_version": "1.0",
@@ -248,8 +248,8 @@
       "architecture": "LANGGRAPH_PRODUCT",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "e34773bd0484b33bf0c101d70d1262fd67190447",
-      "artifact_digest": "sha256:c4c7941d7ef5dbeeaed9d245f1cf1769ac30bd6e113d634f3cec42c58f04010b",
+      "source_revision": "372d6dcbe371f0fa35bb9ec1f95190239cda4950",
+      "artifact_digest": "sha256:4c3c6c7e9391ead062ba5ae705fec049e36ce8a3da3b2d29e3b033c907798681",
       "runtime_digest": "sha256:252e9ba645df827216948d23a8a45d8f32585af0c46fa6f12c94dc8590de7cec",
       "runtime_manifest_digest": "sha256:0f5b8a35e098ce7bad29e09b95fd86543fdc03a6dcf68714d1a4179767dbb238",
       "capability_contract_digest": "sha256:65f27c9d6568fc540fdd1252eb7960f6041c956a4cf18c090633166622c2b03e",
@@ -388,9 +388,9 @@
         "provenance": {
           "status": "product_public_maximum",
           "method": "candidate_public_runtime_contract",
-          "source_revision": "b13c5f54b94945d07f960a703a75b6a5d70eaa46",
-          "artifact_digest": "sha256:253d63f00dc76583dcf685854756993279f508a8295ed8c66e967c9234466905",
-          "evidence_ref": "network-evidence-20260906:observed-public-contract:b13c5f54b949:e2fb21331d333c979bb9e095067a4ca37145cfe114a4d927b589a18d1ec76898"
+          "source_revision": "9f7cf335f94cc5c22689dcb0027c34ea48d1bcdb",
+          "artifact_digest": "sha256:518d0a167d8a53d52898d5eeb953b74e2a325f9ca9562b63aff350b834586b0f",
+          "evidence_ref": "business-truth-contract-20260914:observed-public-contract:9f7cf335f94c:758d1bbaa5cb1d0e29a1d8fed4d0c30bc33c108980ef12b5158d4e247f56ac65"
         }
       },
       {
@@ -424,9 +424,9 @@
         "provenance": {
           "status": "product_public_maximum",
           "method": "candidate_public_runtime_contract",
-          "source_revision": "e34773bd0484b33bf0c101d70d1262fd67190447",
-          "artifact_digest": "sha256:c4c7941d7ef5dbeeaed9d245f1cf1769ac30bd6e113d634f3cec42c58f04010b",
-          "evidence_ref": "lg-repair-20260909:authorized-products-observed-v14:e34773bd0484"
+          "source_revision": "372d6dcbe371f0fa35bb9ec1f95190239cda4950",
+          "artifact_digest": "sha256:4c3c6c7e9391ead062ba5ae705fec049e36ce8a3da3b2d29e3b033c907798681",
+          "evidence_ref": "business-truth-contract-20260914:observed-public-contract:372d6dcbe371:758d1bbaa5cb1d0e29a1d8fed4d0c30bc33c108980ef12b5158d4e247f56ac65"
         }
       }
     ]
