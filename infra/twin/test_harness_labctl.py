@@ -191,7 +191,7 @@ def test_regular_snapshot_does_not_claim_business_recovery_or_run_probes(monkeyp
         "recovery": {"task_success": True}, "resource_scope": {}}})
     monkeypatch.setattr(labctl, "topology_status", lambda: {})
     monkeypatch.setattr(labctl.harness_probes, "business_verification",
-                        lambda _: pytest.fail("ordinary snapshot must not probe business"))
+                        lambda *_: pytest.fail("ordinary snapshot must not probe business"))
     result = labctl.snapshot({"trial_id": "ah-test"})["snapshot"]
     assert "healthy" not in result and "task_success" not in result
 
@@ -207,14 +207,14 @@ def test_verifier_cannot_expand_registration_success_into_business_recovery(monk
         "recovery": {"task_success": base}, "resource_scope": {"namespace": "ah-test"}}})
     monkeypatch.setattr(labctl, "topology_status", lambda: {})
     calls = []
-    def verify(scope):
-        calls.append(scope)
+    def verify(scope, profile):
+        calls.append((scope, profile))
         return {"passed": business}
     monkeypatch.setattr(labctl.harness_probes, "business_verification", verify)
     result = labctl.snapshot({"trial_id": "ah-test", "purpose": purpose})["snapshot"]
     assert result["healthy"] is expected
     assert result["business_verification"]["passed"] is business
-    assert calls == [{"namespace": "ah-test"}]
+    assert calls == [({"namespace": "ah-test"}, labctl.harness_probes.HARNESS_NETWORK)]
 
 
 def test_failed_mec_cleanup_does_not_release_the_base_lease(monkeypatch):
@@ -273,7 +273,8 @@ def test_business_health_is_independent_of_scenario_score(monkeypatch, business,
     monkeypatch.setattr(labctl, "base_call", lambda _: {"ok": True, "snapshot": {
         "recovery": {"task_success": score, "minimal_change": score}, "resource_scope": {}}})
     monkeypatch.setattr(labctl, "topology_status", lambda: {})
-    monkeypatch.setattr(labctl.harness_probes, "business_verification", lambda _: {"passed": business})
+    monkeypatch.setattr(labctl.harness_probes, "business_verification",
+                        lambda *_: {"passed": business})
     value = labctl.snapshot({"trial_id": "ah-test", "purpose": "post_action_verification"})["snapshot"]
     assert value["healthy"] is business
     assert "recovery" not in value

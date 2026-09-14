@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+import ipaddress
 import json
 import subprocess
 
@@ -104,7 +105,7 @@ def test_dns_error_is_separate_from_answer_records():
 def test_fresh_business_verification_requires_both_services_and_same_source(monkeypatch):
     calls = []
     outputs = {}
-    monkeypatch.setattr(probes, "topology", lambda: NETWORK)
+    monkeypatch.setattr(probes, "topology", lambda profile: NETWORK)
     def sample(kind, parameters, source_scope, **_):
         calls.append(kind)
         return outputs[kind]
@@ -112,9 +113,36 @@ def test_fresh_business_verification_requires_both_services_and_same_source(monk
     outputs.update(dns={"resolved": True, "answers": [NETWORK["mec_address"]],
                         "source": {"interface": "uesimtun1"}},
                    http={"healthy": False, "source": {"interface": "uesimtun1"}})
-    assert probes.business_verification(scope())["passed"] is False
+    verify = lambda: probes.business_verification(scope(), probes.HARNESS_NETWORK)
+    assert verify()["passed"] is False
     outputs["http"]["healthy"] = True
-    assert probes.business_verification(scope())["passed"] is True
+    assert verify()["passed"] is True
     outputs["http"]["source"] = {"interface": "uesimtun2"}
-    assert probes.business_verification(scope())["passed"] is False
+    assert verify()["passed"] is False
     assert calls == ["dns", "http"] * 3
+
+
+def test_manifest_profile_must_name_a_known_candidate_and_stay_self_consistent(monkeypatch):
+    monkeypatch.setattr(probes, "MANIFEST", Path(probes.__file__).with_name("stack.manifest.json"))
+    for profile in (probes.HARNESS_NETWORK, probes.LANGGRAPH_NETWORK):
+        network = probes.topology(profile)
+        assert ipaddress.ip_address(network["mec_address"]) in ipaddress.ip_network(network["service_network"])
+        assert ipaddress.ip_address(network["dns_address"]) in ipaddress.ip_network(network["service_network"])
+        assert ipaddress.ip_address(network["ue_gateway"]) in ipaddress.ip_network(network["ue_network"])
+    with pytest.raises(ValueError, match="unknown laboratory network profile"):
+        probes.topology("harness")
+
+
+@pytest.mark.parametrize("broken,message", [
+    ({"mec_address": "10.99.0.80"}, "outside its own network"),
+    ({"dns_address": "10.99.0.53"}, "outside its own network"),
+    ({"ue_gateway": "10.99.0.1"}, "outside its own network"),
+    ({"service_network": "10.45.0.0/24"}, "overlap"),
+])
+def test_manifest_addresses_outside_their_own_network_are_refused(monkeypatch, tmp_path, broken, message):
+    network = {**NETWORK, **broken}
+    manifest = tmp_path / "stack.manifest.json"
+    manifest.write_text(json.dumps({probes.HARNESS_NETWORK: network}))
+    monkeypatch.setattr(probes, "MANIFEST", manifest)
+    with pytest.raises(ValueError, match=message):
+        probes.topology(probes.HARNESS_NETWORK)

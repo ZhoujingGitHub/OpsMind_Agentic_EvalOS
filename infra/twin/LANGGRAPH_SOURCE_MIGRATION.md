@@ -14,3 +14,26 @@ LG 原 deploy/protocol_lab/install-protocol-lab.sh 随对应 LG 迁移提交退�
 搬迁提交的产物是控制器「接管归属」用的 adoption 发布包：其四份 LG 文件与线上裸文件逐字节一致，
 因此 install-controller.sh 可以在不改变任何实验室行为的前提下把这四个路径转为受控软链，
 随后的行为修改提交才构成真正的新一代版本，两代回退因此成立。
+
+## 实验室主机上保留为主机配置的部分
+
+与 AH 的 `/etc/opsmind-harness-lab/*.conf` 同一处置，下列文件继续由主机安全配置维护，不进发布包：
+
+| 路径 | 2026-09-14 实测 SHA-256 |
+|---|---|
+| `/etc/opsmind-langgraph-lab/protocol-actions.json` | `38aa974fc2e42de544e15ecd0bccaae091f1e50ddddaa14ed11931cc65f554b2` |
+| `/etc/opsmind-langgraph-lab/dnsmasq.conf` | `a1f88ad49207d0c5cfaa80cb87995b65a9a96a606c1eca1105fa26ecaf46f8a2` |
+| `/etc/opsmind-langgraph-lab/mosquitto.conf` | `0f42d70c320fd270d312e0938b1bc26db3bfd7e2316f86471e6456fe6f84a24a` |
+
+四个产品 SSH 身份、`authorized_keys`、`sudoers` 同样不随发布包变更，升级不创建账号、不改权限。
+
+### 已知的摘要不可重现问题（已在 LG 仓库前向修复）
+
+线上 `protocol-actions.json` 的 10705 字节 / `38aa974f…`，是 LG 仓库 `e34773b` 中那份
+10439 字节 / `0e73d728…` 的 **CRLF 变体**（266 行，正好差 266 字节）。两者是同一份 JSON，
+逐字符等价，解析结果相同，因此线上动作目录并不陈旧；但该摘要只能由 Windows 工作区产出，
+无法从 Git 在 Linux 上重现。LG 仓库已补 `.gitattributes` 的 `text eol=lf` 规则，
+本仓库也已对 `infra/twin` 的发布负载补齐同类规则。
+
+动作目录若今后需要变更，应在那一次把它作为受管文件加入控制器发布包（届时内容本就要变，
+不存在与线上逐字节对齐的约束），而不是复活 `install-protocol-lab.sh`。

@@ -41,6 +41,18 @@
     "public_business_ports": [],
     "destructive_agent_tools": false
   },
+  "langgraph_network": {
+    "ue_resource_id": "ue-1",
+    "ue_namespace": "opsmind-ue",
+    "ue_network": "10.45.0.0/16",
+    "ue_gateway": "10.45.0.1",
+    "service_network": "10.46.0.0/24",
+    "mec_address": "10.46.0.80",
+    "dns_address": "10.46.0.53",
+    "dns_name": "opsmind-mec.lab",
+    "http_port": 8080,
+    "mqtt_port": 1883
+  },
   "harness_network": {
     "ue_resource_id": "ue-1",
     "ue_namespace": "opsmind-ue",

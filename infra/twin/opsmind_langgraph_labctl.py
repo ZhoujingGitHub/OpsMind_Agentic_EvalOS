@@ -24,6 +24,10 @@ from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 
+# Resolve the immutable release directory when invoked via the fixed symlink.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import harness_probes
+
 BASE = Path("/usr/local/sbin/opsmind-twinctl")
 BASE_MODULE = Path("/usr/local/sbin/opsmind-twinctl")
 TOPOLOGY = Path("/usr/local/sbin/opsmind-langgraph-lab-topology")
@@ -35,8 +39,8 @@ ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 CONSUMER_ID = "opsmind-langgraph"
 SLOT_ID = "langgraph-slot-1"
 PROFILE = "protocol-lab:1.0.0"
-MEC_IP = "10.46.0.80"
-DNS_IP = "10.46.0.53"
+# Network facts come from the component manifest; this adapter names its profile.
+NETWORK_PROFILE = harness_probes.LANGGRAPH_NETWORK
 
 ROLE_BY_USER = {
     "opsmind_lg_control": "control",
@@ -245,13 +249,14 @@ def observe(request: dict) -> dict:
     capability = str(request["capability"])
     parameters = dict(request.get("parameters") or {})
     evidence_refs: list[str] = []
+    network = harness_probes.topology(NETWORK_PROFILE)
     records = {
-        "ip_reachability": lambda: probe_ip(parameters),
-        "network_path": lambda: trace_path(parameters),
-        "tcp_port": lambda: probe_tcp(parameters),
+        "ip_reachability": lambda: [harness_probes.probe("ip", parameters, resource_scope, network=network)],
+        "network_path": lambda: [harness_probes.probe("trace", parameters, resource_scope, network=network)],
+        "tcp_port": lambda: [harness_probes.probe("tcp", parameters, resource_scope, network=network)],
         "sctp_association": probe_sctp,
-        "dns": lambda: probe_dns(parameters),
-        "http_service": lambda: probe_http(parameters),
+        "dns": lambda: [harness_probes.probe("dns", parameters, resource_scope, network=network)],
+        "http_service": lambda: [harness_probes.probe("http", parameters, resource_scope, network=network)],
         "routes": lambda: query_routes(parameters),
         "interfaces": lambda: query_interfaces(parameters),
         "sockets": lambda: query_sockets(parameters),
@@ -432,108 +437,10 @@ def query_resource_observation(
     return records, list(dict.fromkeys(matched_evidence_refs))
 
 
-def probe_ip(parameters: dict) -> list[dict]:
-    profile = parameters.get("target_profile", "mec")
-    target = {"mec": MEC_IP, "dns": DNS_IP, "core": "10.45.0.1"}.get(profile)
-    if target is None:
-        raise ValueError("invalid target_profile")
-    result = run(
-        ["ip", "netns", "exec", "opsmind-ue", "ping", "-c", "3", "-W", "2", target], timeout=12
-    )
-    return [
-        {
-            "target_profile": profile,
-            "reachable": result.returncode == 0,
-            "summary": last_lines(result.stdout, 4),
-        }
-    ]
-
-
-def trace_path(parameters: dict) -> list[dict]:
-    profile = parameters.get("target_profile", "mec")
-    target = {"mec": MEC_IP, "dns": DNS_IP}.get(profile)
-    if target is None:
-        raise ValueError("invalid target_profile")
-    result = run(
-        ["ip", "netns", "exec", "opsmind-ue", "tracepath", "-n", "-m", "10", target], timeout=15
-    )
-    hops = [line.strip()[:300] for line in (result.stdout or "").splitlines() if line.strip()]
-    return [
-        {
-            "target_profile": profile,
-            "complete": result.returncode == 0,
-            "hops": hops[:12],
-            "hop_count": len(hops),
-        }
-    ]
-
-
-def probe_tcp(parameters: dict) -> list[dict]:
-    profile = parameters.get("service_profile", "mec-http")
-    target = {
-        "mec-http": (MEC_IP, "8080"),
-        "mec-mqtt": (MEC_IP, "1883"),
-        "dns-tcp": (DNS_IP, "53"),
-    }.get(profile)
-    if target is None:
-        raise ValueError("invalid service_profile")
-    result = run(["ip", "netns", "exec", "opsmind-ue", "nc", "-z", "-w", "3", *target], timeout=8)
-    return [
-        {
-            "service_profile": profile,
-            "connected": result.returncode == 0,
-            "target": f"{target[0]}:{target[1]}",
-        }
-    ]
-
-
 def probe_sctp() -> list[dict]:
     output = collected(["ss", "-H", "-n", "-A", "sctp"])
     lines = [line[:500] for line in output.splitlines() if line.strip()]
     return [{"association_count": len(lines), "associations": lines[:30]}]
-
-
-def probe_dns(parameters: dict) -> list[dict]:
-    if parameters.get("query_profile", "mec-service") != "mec-service":
-        raise ValueError("invalid query_profile")
-    result = run(
-        ["ip", "netns", "exec", "opsmind-ue", "dig", "+short", f"@{DNS_IP}", "opsmind-mec.lab"],
-        timeout=8,
-    )
-    answers = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
-    return [
-        {
-            "query_profile": "mec-service",
-            "resolved": result.returncode == 0 and bool(answers),
-            "answers": answers[:10],
-        }
-    ]
-
-
-def probe_http(parameters: dict) -> list[dict]:
-    if parameters.get("service_profile", "mec-http") != "mec-http":
-        raise ValueError("invalid service_profile")
-    result = run(
-        [
-            "ip",
-            "netns",
-            "exec",
-            "opsmind-ue",
-            "curl",
-            "-fsS",
-            "--max-time",
-            "5",
-            f"http://{MEC_IP}:8080/health",
-        ],
-        timeout=8,
-    )
-    return [
-        {
-            "service_profile": "mec-http",
-            "healthy": result.returncode == 0,
-            "response": (result.stdout or "")[:1000],
-        }
-    ]
 
 
 def query_routes(parameters: dict) -> list[dict]:
@@ -850,13 +757,34 @@ def snapshot(request: dict) -> dict:
         return response
     value = dict(response.get("snapshot") or {})
     recovery = dict(value.get("recovery") or {})
+    verification = harness_probes.business_verification(
+        dict(value.get("resource_scope") or {}), NETWORK_PROFILE)
     value.update(
         topology=topology_status(),
+        # The scenario score stays visible as a scenario signal only. Product
+        # health is the independently sampled business verification below.
         task_success=recovery.get("task_success"),
-        healthy=recovery.get("task_success"),
+        business_verification=verification,
+        healthy=verification["passed"],
         production_network=False,
     )
     return {**response, "snapshot": value}
+
+
+def business_verify(request: dict) -> dict:
+    """Independent business truth for the active Trial, never a scenario score.
+
+    ``ok`` says whether the laboratory could observe the data path at all.
+    ``business_verification.passed`` is the business verdict: True, False, or
+    None when the probes themselves were unavailable.
+    """
+    trial_id = str(request["trial_id"])
+    snapshot_state = active_snapshot(trial_id)
+    verification = harness_probes.business_verification(
+        dict(snapshot_state.get("resource_scope") or {}), NETWORK_PROFILE)
+    return {"ok": verification["passed"] is not None, "operation": "business-verify",
+            "trial_id": trial_id, "business_verification": verification,
+            "observed_at": verification["observed_at"]}
 
 
 def reset(request: dict) -> dict:
@@ -956,10 +884,6 @@ def parse_json_list(value: str) -> list:
     return parsed if isinstance(parsed, list) else []
 
 
-def last_lines(value: str, count: int) -> list[str]:
-    return [line[:500] for line in (value or "").splitlines()[-count:]]
-
-
 def error(operation: str, code: str, message: str) -> dict:
     return {"ok": False, "operation": operation, "error": {"code": code, "message": message[:500]}}
 
@@ -1014,10 +938,15 @@ def manage(arguments: list[str]) -> dict:
         if not ID_RE.fullmatch(trial_id) or not trial_id.startswith("lg-"):
             raise ValueError("manager trial_id must start with lg-")
         return reset({"trial_id": trial_id})
+    if command == "business-verify" and len(arguments) == 2:
+        trial_id = arguments[1]
+        if not ID_RE.fullmatch(trial_id) or not trial_id.startswith("lg-"):
+            raise ValueError("manager trial_id must start with lg-")
+        return business_verify({"trial_id": trial_id})
     raise ValueError(
         "use manage-status, manage-prepare <lg-trial-id> <scenario-id> <seed> "
         "<langgraph_direct|evalos_trial> [evalos-trial-id], "
-        "or manage-reset <lg-trial-id>"
+        "manage-reset <lg-trial-id>, or business-verify <lg-trial-id>"
     )
 
 

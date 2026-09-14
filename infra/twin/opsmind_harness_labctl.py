@@ -43,8 +43,8 @@ ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 CONSUMER_ID = "opsmind-harness"
 SLOT_ID = "harness-slot-1"
 PROFILE = "protocol-lab:1.0.0"
-MEC_IP = "10.47.0.80"
-DNS_IP = "10.47.0.53"
+# Network facts come from the component manifest; this adapter names its profile.
+NETWORK_PROFILE = harness_probes.HARNESS_NETWORK
 
 ROLE_BY_USER = {
     "opsmind_ah_control": "control",
@@ -394,13 +394,14 @@ def observe(request: dict) -> dict:
     capability = str(request["capability"])
     parameters = dict(request.get("parameters") or {})
     evidence_refs: list[str] = []
+    network = harness_probes.topology(NETWORK_PROFILE)
     records = {
-        "ip_reachability": lambda: [harness_probes.probe("ip", parameters, resource_scope)],
-        "network_path": lambda: [harness_probes.probe("trace", parameters, resource_scope)],
-        "tcp_port": lambda: [harness_probes.probe("tcp", parameters, resource_scope)],
+        "ip_reachability": lambda: [harness_probes.probe("ip", parameters, resource_scope, network=network)],
+        "network_path": lambda: [harness_probes.probe("trace", parameters, resource_scope, network=network)],
+        "tcp_port": lambda: [harness_probes.probe("tcp", parameters, resource_scope, network=network)],
         "sctp_association": probe_sctp,
-        "dns": lambda: [harness_probes.probe("dns", parameters, resource_scope)],
-        "http_service": lambda: [harness_probes.probe("http", parameters, resource_scope)],
+        "dns": lambda: [harness_probes.probe("dns", parameters, resource_scope, network=network)],
+        "http_service": lambda: [harness_probes.probe("http", parameters, resource_scope, network=network)],
         "routes": lambda: query_routes(parameters),
         "interfaces": lambda: query_interfaces(parameters),
         "sockets": lambda: query_sockets(parameters),
@@ -861,11 +862,31 @@ def snapshot(request: dict) -> dict:
     value.update(topology=topology_status(), production_network=False)
     if request.get("purpose") in {"pre_action_snapshot", "post_action_verification",
                                   "post_rollback_verification"}:
-        verification = harness_probes.business_verification(dict(value.get("resource_scope") or {}))
+        verification = harness_probes.business_verification(
+            dict(value.get("resource_scope") or {}), NETWORK_PROFILE)
         value["business_verification"] = verification
         # Product health is independently sampled business availability.
         value["healthy"] = verification["passed"]
     return {key: response[key] for key in ("ok", "operation", "observed_at", "fingerprint") if key in response} | {"snapshot": value}
+
+
+def business_verify(request: dict) -> dict:
+    """Independent business truth for the active Trial, never a scenario score.
+
+    ``ok`` says whether the laboratory could observe the data path at all.
+    ``business_verification.passed`` is the business verdict: True, False, or
+    None when the probes themselves were unavailable.
+    """
+    module = load_base_module()
+    state = module.load_state()
+    trial_id = str(request["trial_id"])
+    if not state or state.get("trial_id") != trial_id:
+        raise PermissionError("business verification does not belong to the active Trial")
+    verification = harness_probes.business_verification(
+        module.public_resource_scope(trial_id), NETWORK_PROFILE)
+    return {"ok": verification["passed"] is not None, "operation": "business-verify",
+            "trial_id": trial_id, "business_verification": verification,
+            "observed_at": verification["observed_at"]}
 
 
 def reset(request: dict) -> dict:
@@ -979,10 +1000,6 @@ def parse_json_list(value: str) -> list:
     return parsed
 
 
-def last_lines(value: str, count: int) -> list[str]:
-    return [line[:500] for line in (value or "").splitlines()[-count:]]
-
-
 def error(operation: str, code: str, message: str) -> dict:
     return {"ok": False, "operation": operation, "error": {"code": code, "message": message[:500]}}
 
@@ -1031,10 +1048,15 @@ def manage(arguments: list[str]) -> dict:
         if not ID_RE.fullmatch(trial_id) or not trial_id.startswith("ah-"):
             raise ValueError("manager trial_id must start with ah-")
         return reset({"trial_id": trial_id})
+    if command == "business-verify" and len(arguments) == 2:
+        trial_id = arguments[1]
+        if not ID_RE.fullmatch(trial_id) or not trial_id.startswith("ah-"):
+            raise ValueError("manager trial_id must start with ah-")
+        return business_verify({"trial_id": trial_id})
     raise ValueError(
         "use manage-status, manage-prepare <ah-trial-id> <scenario-id> <seed> "
         "<agent_harness_direct|evalos_trial> [evalos-trial-id], "
-        "or manage-reset <ah-trial-id>"
+        "manage-reset <ah-trial-id>, or business-verify <ah-trial-id>"
     )
 
 

@@ -1,4 +1,9 @@
-"""Bounded probes for the currently leased laboratory UE; no routing mutations."""
+"""Bounded probes for the currently leased laboratory UE; no routing mutations.
+
+Shared by every candidate adapter. The caller always names its own network
+profile: there is no default candidate, and a scenario score is never a
+substitute for the business verification below.
+"""
 from __future__ import annotations
 
 import datetime as dt
@@ -13,6 +18,8 @@ import sys
 import time
 
 MANIFEST = Path("/etc/opsmind-twin/stack.manifest.json")
+HARNESS_NETWORK = "harness_network"
+LANGGRAPH_NETWORK = "langgraph_network"
 
 
 def now():
@@ -23,8 +30,20 @@ def run(args, *, timeout=10):
     return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
 
 
-def topology():
-    return json.loads(MANIFEST.read_text())["harness_network"]
+def topology(profile):
+    """One candidate's network facts, validated before any probe uses them."""
+    if profile not in {HARNESS_NETWORK, LANGGRAPH_NETWORK}:
+        raise ValueError("unknown laboratory network profile")
+    network = json.loads(MANIFEST.read_text())[profile]
+    ue_network = ipaddress.ip_network(network["ue_network"])
+    service_network = ipaddress.ip_network(network["service_network"])
+    if ue_network.overlaps(service_network):
+        raise ValueError("UE and service networks overlap in the component manifest")
+    for key, subnet in (("mec_address", service_network), ("dns_address", service_network),
+                        ("ue_gateway", ue_network)):
+        if ipaddress.ip_address(network[key]) not in subnet:
+            raise ValueError("component manifest address is outside its own network: " + key)
+    return network
 
 
 def ue_source(scope, network, runner=run):
@@ -128,9 +147,8 @@ def trace_result(result, target):
             "diagnostic": result.stderr[-400:]}
 
 
-def probe(kind, parameters, scope, *, runner=None, network=None):
+def probe(kind, parameters, scope, *, network, runner=None):
     runner = runner or run
-    network = network or topology()
     started_at, started = now(), time.monotonic()
     success_key = {"ip": "reachable", "trace": "complete", "tcp": "connected",
                    "dns": "resolved", "http": "healthy"}[kind]
@@ -210,9 +228,9 @@ def probe(kind, parameters, scope, *, runner=None, network=None):
             "duration_ms": round((time.monotonic() - started) * 1000, 3)}
 
 
-def business_verification(scope):
+def business_verification(scope, profile):
     """Fresh sampling by the verifier; no model results or cached booleans."""
-    network = topology()
+    network = topology(profile)
     dns = probe("dns", {}, scope, network=network)
     http = probe("http", {}, scope, network=network)
     expected_address = network["mec_address"]
