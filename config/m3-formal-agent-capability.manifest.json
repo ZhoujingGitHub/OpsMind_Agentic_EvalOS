@@ -248,8 +248,8 @@
       "architecture": "LANGGRAPH_PRODUCT",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "372d6dcbe371f0fa35bb9ec1f95190239cda4950",
-      "artifact_digest": "sha256:4c3c6c7e9391ead062ba5ae705fec049e36ce8a3da3b2d29e3b033c907798681",
+      "source_revision": "697a826a7ace116836a5a1b02623647f8af54f4a",
+      "artifact_digest": "sha256:2feb34ed707bd36fa1216fd8a30b36b2436181a42fcb05a4e81138b56464c55a",
       "runtime_digest": "sha256:252e9ba645df827216948d23a8a45d8f32585af0c46fa6f12c94dc8590de7cec",
       "runtime_manifest_digest": "sha256:0f5b8a35e098ce7bad29e09b95fd86543fdc03a6dcf68714d1a4179767dbb238",
       "capability_contract_digest": "sha256:65f27c9d6568fc540fdd1252eb7960f6041c956a4cf18c090633166622c2b03e",
@@ -424,9 +424,9 @@
         "provenance": {
           "status": "product_public_maximum",
           "method": "candidate_public_runtime_contract",
-          "source_revision": "372d6dcbe371f0fa35bb9ec1f95190239cda4950",
-          "artifact_digest": "sha256:4c3c6c7e9391ead062ba5ae705fec049e36ce8a3da3b2d29e3b033c907798681",
-          "evidence_ref": "business-truth-contract-20260914:observed-public-contract:372d6dcbe371:758d1bbaa5cb1d0e29a1d8fed4d0c30bc33c108980ef12b5158d4e247f56ac65"
+          "source_revision": "697a826a7ace116836a5a1b02623647f8af54f4a",
+          "artifact_digest": "sha256:2feb34ed707bd36fa1216fd8a30b36b2436181a42fcb05a4e81138b56464c55a",
+          "evidence_ref": "business-truth-contract-20260914:observed-public-contract:697a826a7ace:54137b345c095453269114f1208199ae3af46b6c89220ee755c24c76ed124010"
         }
       }
     ]
