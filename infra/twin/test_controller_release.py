@@ -569,7 +569,7 @@ class ControllerBuilderTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "not on a remote branch"):
                 self.module.main(["--adoption-ref", "a" * 40])
 
-    def test_adoption_archive_uses_unchanged_migration_files_without_new_probe_module(self):
+    def test_adoption_archive_uses_unchanged_migration_files_for_the_whole_inventory(self):
         revision = "a" * 40
         def git(*args):
             if args[0] == "rev-parse":
@@ -594,10 +594,12 @@ class ControllerBuilderTest(unittest.TestCase):
             with tarfile.open(result["archive"]) as archive:
                 metadata = json.loads(archive.extractfile("controller/RELEASE.json").read())
                 names = {item["path"] for item in metadata["files"]}
-                self.assertEqual(names, set(self.module.BASE_RELEASE_FILES + self.module.HARNESS_RELEASE_FILES))
+                # Adoption differs from a normal release only in which commit it reads,
+                # so every live entry can be matched against what the host already runs.
+                self.assertEqual(names, set(self.module.RELEASE_FILES))
                 self.assertTrue(metadata["adoption_archive"])
                 self.assertFalse(metadata["baseline_archive"])
-                self.assertNotIn("harness_probes.py", names)
+                self.assertIn("opsmind_langgraph_labctl.py", names)
 
 
 if __name__ == "__main__":

@@ -72,7 +72,7 @@ def canonical_digest(value: object) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline-ref", help="accepted/prod Twin tag for the first-registration recovery archive only")
-    parser.add_argument("--adoption-ref", help="exact remote migration commit for byte-identical AH adoption")
+    parser.add_argument("--adoption-ref", help="exact remote migration commit for byte-identical component adoption")
     arguments = parser.parse_args(argv)
     if arguments.baseline_ref and arguments.adoption_ref:
         raise RuntimeError("choose only one recovery source")
@@ -82,8 +82,9 @@ def main(argv: list[str] | None = None) -> int:
         ref = arguments.adoption_ref
         if len(ref) != 40 or any(c not in "0123456789abcdef" for c in ref):
             raise RuntimeError("adoption requires an exact migration commit")
+        # Adoption carries the complete current inventory; only its bytes are older,
+        # so every live entry can be matched against what the host already runs.
         source_ref = ref
-        release_files = BASE_RELEASE_FILES + HARNESS_RELEASE_FILES
     if arguments.baseline_ref:
         tag = arguments.baseline_ref
         if not tag.startswith(("accepted-twin-controller-", "prod-twin-")) or any(word in tag for word in ("abandoned", "temporary")):
