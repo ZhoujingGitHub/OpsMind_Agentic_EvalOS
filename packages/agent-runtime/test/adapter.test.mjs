@@ -4,6 +4,12 @@ import test from "node:test";
 import { BLIND_JUDGE_RUNTIME, DEEPSEEK_AGENT_RUNTIME, EVALOS_LEAD_RUNTIME, blindJudgePromptMaterial, deepSeekEnvironment, isolatedBashCommand, judgeAttentionDecision, normalizeInvestigatorReport, toMcpToolResult, toolPolicy } from "../src/index.mjs";
 import { CASES } from "../../kernel/src/index.mjs";
 
+// deepSeekEnvironment falls back to the ambient provider variables, so a shell that
+// exports ANTHROPIC_BASE_URL would decide what these assertions observe. Drop them
+// once, before any test runs; the cases that need a value set it themselves.
+const PROVIDER_ENVIRONMENT = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL"];
+for (const name of PROVIDER_ENVIRONMENT) delete process.env[name];
+
 test("runtime uses Claude Agent SDK over DeepSeek Anthropic endpoint without a graph framework", () => {
   assert.equal(DEEPSEEK_AGENT_RUNTIME.sdk, "@anthropic-ai/claude-agent-sdk");
   assert.equal(DEEPSEEK_AGENT_RUNTIME.model, "deepseek-v4-flash");

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -11,9 +11,22 @@ const installer = readFileSync(path.join(root, "infra/deploy/install-m31-release
 const doubles = readFileSync(new URL("./fixtures/installer-sandbox.sh", import.meta.url), "utf8").replaceAll("\r\n", "\n");
 const releaseId = "m31-20260903-1111111111";
 const previousId = "m31-20260902-2222222222";
-const bash = process.platform === "win32"
-  ? path.resolve(path.dirname(execFileSync("where.exe", ["git"], { encoding: "utf8" }).trim().split(/\r?\n/)[0]), "../bin/bash.exe")
-  : "bash";
+// Git for Windows ships bash in <install>/bin, but `where git` answers with whichever
+// git is first on PATH: from PowerShell that is <install>/cmd/git.exe, from Git Bash it
+// is <install>/mingw64/bin/git.exe, whose sibling bin/ holds no bash. Trusting the first
+// hit made the whole installer suite fail depending on which shell launched it, so probe
+// the candidates and take one that exists.
+function windowsBash() {
+  const candidates = execFileSync("where.exe", ["git"], { encoding: "utf8" })
+    .split("\n").map((hit) => hit.trim()).filter(Boolean)
+    .flatMap((hit) => ["../bin/bash.exe", "../../bin/bash.exe"]
+      .map((relative) => path.resolve(path.dirname(hit), relative)));
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) throw new Error("no bash.exe found near git: " + candidates.join(", "));
+  return found;
+}
+
+const bash = process.platform === "win32" ? windowsBash() : "bash";
 const posix = value => value.replaceAll("\\", "/").replace(/^([A-Za-z]):/, (_, letter) => "/" + letter.toLowerCase());
 
 function runInstaller(t, failure = "", recoveryFailure = "") {
