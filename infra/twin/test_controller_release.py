@@ -23,6 +23,29 @@ SCRIPT = Path(__file__).with_name("install-controller.sh")
 SOURCE = SCRIPT.read_text().split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
 
 
+ACKNOWLEDGE_SKIPPED_INSTALLER = "OPSMIND_TWIN_ALLOW_SKIPPED_INSTALLER_TESTS"
+
+
+class InstallerCoverageTest(unittest.TestCase):
+    """The installer is deployed to Linux, so a green Windows run proves nothing.
+
+    Every case below is skipped when ``fcntl`` is missing. A skip keeps the suite
+    green, which on 2026-09-14 let all 39 installer cases disappear silently right
+    before the controller was installed on the laboratory host. Fail loudly instead,
+    and require an explicit acknowledgement to proceed without that coverage.
+    """
+
+    def test_installer_cases_actually_run_here(self):
+        if fcntl is not None:
+            return
+        self.assertEqual(
+            os.environ.get(ACKNOWLEDGE_SKIPPED_INSTALLER), "1",
+            "installer tests cannot run on this platform; rerun under Linux or WSL, "
+            f"or set {ACKNOWLEDGE_SKIPPED_INSTALLER}=1 to record that this run has no "
+            "installer coverage",
+        )
+
+
 @unittest.skipIf(fcntl is None, "installer tests require Linux file locks and symbolic links")
 class ControllerReleaseTest(unittest.TestCase):
     def setUp(self):
