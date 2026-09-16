@@ -1,5 +1,10 @@
 set -eu
-# EvalOS 控制 API 统一入口（在 EvalOS 机上跑，控制 API 只监听 127.0.0.1:3000）。
+# EvalOS 控制 API 统一入口（在 EvalOS 机上跑）。
+# 注：本脚本走 127.0.0.1:3000，那是**控制台**，它把 /api/workbench/* 代理到控制 API。
+# 控制 API 本身在 127.0.0.1:8787（systemd 里 PORT=8787）。像
+# /api/candidate-adapters/discover、/api/experiments 这类非 workbench 路由
+# 控制台不代理，必须直连 8787 并带 EVALOS_API_TOKEN（在 /etc/opsmind-evalos/evalos.env）。
+# 2026-09-16 因为原注释写成"控制 API 只监听 3000"，在这里白绕了一圈。
 #
 # 参数化于 2026-09-16。原先三处写死，每一处都是静默陷阱：
 #   1. 版本守卫钉死 EvalOS 提交 41d99bc4（2026-09-10 的发布），线上一升级就 fail-closed，
