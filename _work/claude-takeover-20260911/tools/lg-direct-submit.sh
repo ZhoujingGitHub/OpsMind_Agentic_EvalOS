@@ -8,12 +8,16 @@ set -eu
 # 公开症状原文留在内嵌模板里并自校验 sha256，与 AH 那条链路逐字节一致（这是四条链路
 # 可比的前提）。
 #
-#   NS            实验室命名空间 / run_context.trial_id / environment_ref，本轮唯一
-#   REQID         client_request_id，本轮唯一（产品侧据此去重）
+# LG 的 API 强制 run_context.trial_id == client_request_id（不符会 422），而实验室
+# manage-prepare 又是用同一个值做 runtime_trial_id。所以这三者必须是同一个值，
+# 只需一个参数。2026-09-16 第一次拆成 NS/REQID 两个参数提交，被 422 拒掉，据此收敛。
+#
+#   NS            本轮唯一标识：实验室命名空间 = client_request_id
+#                 = run_context.trial_id = environment_ref
 #   EXPECT_LG_REV 期望的 LG 镜像 org.opencontainers.image.revision（取生产标签指向的提交）
-: "${NS:?用法: NS=<命名空间> REQID=<client_request_id> EXPECT_LG_REV=<提交号>}"
-: "${REQID:?必须指明 client_request_id（本轮唯一，产品侧据此去重）}"
+: "${NS:?用法: NS=<本轮唯一标识> EXPECT_LG_REV=<提交号>}"
 : "${EXPECT_LG_REV:?必须指明期望的 LG 镜像提交号（守卫：防止对着不认识的版本下发调查）}"
+REQID="$NS"
 
 python3 - "$NS" "$REQID" "$EXPECT_LG_REV" <<'PY'
 import base64,datetime,hashlib,json,pathlib,subprocess,sys,urllib.error,urllib.request
