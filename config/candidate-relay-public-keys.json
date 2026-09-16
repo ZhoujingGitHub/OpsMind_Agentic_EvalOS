@@ -21,10 +21,10 @@
       "tenant_id": "tenant-ctyun-ops-demo",
       "deployment_attestation": {
         "contract_version": "evalos-deployment-attestation/1.0",
-        "source_revision": "697a826a7ace116836a5a1b02623647f8af54f4a",
-        "artifact_digest": "sha256:2feb34ed707bd36fa1216fd8a30b36b2436181a42fcb05a4e81138b56464c55a",
-        "verification_method": "evalos_trusted_read_only_git_oci",
-        "verified_evidence_ref": "business-truth-contract-20260914:deployment-proof:697a826a7ace:a0e8a4070463c19f6dc2adf7b076c0ec903639073094e1c451247b98e6bc4605"
+        "source_revision": "6bdbe60b3d615b6b47a4f23d12e261cc50400bdc",
+        "artifact_digest": "sha256:08167f721b989a6c4a06ef4f942eeaf4e4242ecbe8d49e031a3507800ebf8a80",
+        "verification_method": "evalos_trusted_runtime_config",
+        "verified_evidence_ref": "gate-publication-fix-20260916:deployment-proof:6bdbe60b3d61:c1c90b1a855db17623783b122e560cdb3935e5a27e4497d943991ebf58091147"
       },
       "evaluation_limits": {
         "contract_version": "opsmind-job-runtime-limits:2.0",
