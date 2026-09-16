@@ -2,8 +2,31 @@
 
 固化日期：2026-09-14
 最后校订：2026-09-16（对齐 `docs/HANDOFF_四条链路收口与控制台开放_ClaudeCode_20260916.md`）
-用途：新会话直接照此驱动四条链路，无需再从历史脚本反推流程。
-所有脚本在本目录，已从会话临时目录固化到 D 盘。
+用途：驱动四条链路。所有脚本在本目录。
+
+> ### 2026-09-16：这里原先有一句假承诺，已作废
+>
+> 原文写的是"**新会话直接照此驱动四条链路，无需再从历史脚本反推流程**"。
+> 那句话当时**不成立**，而且骗了两轮人：
+>
+> - `ah-*` / `lg-*` / `cmp.sh` 里把 **09-11 那一轮的调查编号、action 编号、trial 编号**
+>   当字面量写死了。最坏的不是跑不起来，是 `ah-progress.sh` 会**不报错**地返回
+>   09-11 那条已完成调查的状态——你会以为今天这次跑完了。
+> - `evalos-op.sh` 的版本守卫钉死 EvalOS 提交 `41d99bc4`（2026-09-10 的发布），
+>   线上一升级就在调 preflight 之前 fail-closed。
+> - 它的 `idempotency_key` 也写死：复用同一个键再提交，EvalOS 会**返回上次那个请求**，
+>   看起来像"提交成功"，实则什么都没跑。
+> - `*-seal.sh` 把证据写进 `claude-takeover-20260911/` 这个旧批次目录。
+>
+> 所以 **2026-09-14/15 那一轮实际上没用这些脚本**——查证：那一轮的全部编号
+> （`inv-75d347b34b3b`、`inv-3e577111c1be4798ad53fa0f`、`trial_787ed2b2df7402e7d367`、
+> `trial_8be82e5264cb6a2fbc5d`、`exp_d3e867ec11bc04410b25`）在整个 `_work` 树里
+> **没有任何 `.sh` 文件带它们**，只出现在 markdown 文档里。那一轮是现场拼命令喂给
+> `ca.sh` 跑的，跟 09-11 一样。**每一轮都在重新推导流程，而这份手册声称不用。**
+>
+> **2026-09-16 已把这批脚本全部参数化**：写死的值改成必须传入的环境变量，
+> **不给默认值**（给默认值等于保留陷阱），缺参数就拒绝运行并打印用法。
+> 同时补上此前缺失的那块——统一启动器 `run-on.sh`。现在这句承诺才成立。
 
 > **2026-09-16 校订范围**：§0 SSH 不通的真实原因、§0.1 控制台访问方式（新增）、
 > §1.1 控制器身份断言、§2 冻结源实验 ID、§3 现行基线与 `task_success` 口径、
@@ -45,7 +68,36 @@
 - Python：`D:/install/anaconda3/python.exe`
 - Git：`D:/install/Git/cmd/git.exe`
 
-### 0.1 控制台访问（人要看页面时）
+### 0.1 怎么跑这套工具（统一入口）
+
+`ca.sh` 从**标准输入**读脚本、**不转发命令行参数**，所以传参的办法是"在脚本前面拼环境变量"。
+以前每轮都在手搓这段管道，现在用 `run-on.sh`：
+
+```bash
+./run-on.sh <product|evalos|lab> <脚本文件> [VAR=值 ...]
+./run-on.sh <product|evalos|lab> - '<直接执行的命令>'
+```
+
+```bash
+# 实验室状态与租约
+./run-on.sh lab - 'opsmind-harness-labctl manage-status'
+
+# AH 直连：轮询 / 看提案 / 审批 / 封存 / 复位
+./run-on.sh product ah-progress.sh INV=<inv-id>
+./run-on.sh product ah-inspect.sh  AID=<action-id>
+./run-on.sh product ah-approve.sh  AID=<action-id> INV=<inv-id> NS=<本轮命名空间>
+./run-on.sh product ah-seal.sh     INV=<inv-id> TAG=ah-chain1 BATCH=<证据批次目录>
+./run-on.sh product ah-reset.sh    INV=<inv-id> NS=<本轮命名空间>
+
+# EvalOS 链路：EXPECT_REV 取生产标签指向的提交，SRC_EXP 取当前冻结源
+./run-on.sh evalos evalos-op.sh OP=preflight REF=agent-harness-v2             EXPECT_REV=$(git rev-list -n1 prod-evalos-20260915-test-isolation)             SRC_EXP=exp_d3e867ec11bc04410b25
+./run-on.sh evalos evalos-op.sh OP=submit ... IDEM=<本轮唯一键>
+./run-on.sh evalos ev-seal.sh TID=<trial-id> TAG=ah-chain3-evalos BATCH=<证据批次目录>
+```
+
+**缺参数会被拒绝并打印用法**，不会悄悄用上一轮的编号。
+
+### 0.2 控制台访问（人要看页面时）
 
 **三个入口，常态关闭，演示前后开关**（2026-09-16 起）：
 

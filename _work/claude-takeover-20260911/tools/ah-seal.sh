@@ -1,23 +1,29 @@
 set -eu
-mkdir -p /srv/opsmind-evidence/claude-takeover-20260911
-python3 - <<'PY'
-import json,pathlib,urllib.request,hashlib
+# 封存 AH 直连调查的全量证据到服务器，本地只留摘要。
+# 参数化于 2026-09-16：原先调查编号、文件名前缀、证据批次目录三者全写死，
+# 会把新证据写进 claude-takeover-20260911 这个旧批次里。
+: "${INV:?用法: INV=<inv-id> TAG=<文件名前缀,如 ah-chain1> BATCH=<证据批次目录名>}"
+: "${TAG:?必须指明文件名前缀，例如 TAG=ah-chain1}"
+: "${BATCH:?必须指明证据批次目录名，例如 BATCH=business-truth-contract-20260914}"
+mkdir -p "/srv/opsmind-evidence/$BATCH"
+python3 - "$INV" "$TAG" "$BATCH" <<'PY'
+import gzip,hashlib,json,pathlib,sys,urllib.request
+INV,TAG,BATCH=sys.argv[1:4]
 cfg=dict(l.split('=',1) for l in pathlib.Path('/etc/opsmind-candidate-relay/agent-harness-v2.env').read_text().splitlines() if '=' in l and not l.startswith('#'))
 t=pathlib.Path(cfg['EVALOS_RELAY_TOKEN_DIR'],'candidate_submitter').read_text().strip()
 def get(p):
  r=urllib.request.Request(cfg['EVALOS_RELAY_PRODUCT_ORIGIN']+p,headers={'Authorization':'Bearer '+t,'x-tenant-id':'tenant-ctyun-ops-demo'})
  with urllib.request.urlopen(r,timeout=90) as x:return json.load(x)
-d=get('/v2/investigations/inv-608b343f5330')
+d=get('/v2/investigations/'+INV)
 raw=json.dumps(d,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
-out=pathlib.Path('/srv/opsmind-evidence/claude-takeover-20260911/ah-chain1-inv-608b343f5330.json')
+out=pathlib.Path('/srv/opsmind-evidence/%s/%s-%s.json'%(BATCH,TAG,INV))
 out.write_bytes(raw)
-import gzip
-gz=out.with_suffix('.json.gz'); gz.write_bytes(gzip.compress(raw))
+gz=pathlib.Path(str(out)+'.gz'); gz.write_bytes(gzip.compress(raw))
 a=(d.get('repair_delivery') or {}).get('actions',[{}])[0]
 bv=a.get('business_verification') or {}
-summary={'sealed_path':str(out),'bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest(),
+print(json.dumps({'sealed_path':str(out),'bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest(),
  'gz_bytes':gz.stat().st_size,'gz_sha256':hashlib.sha256(gz.read_bytes()).hexdigest(),
- 'investigation_id':d['investigation_id'],'status':d['status'],'status_semantics':d.get('status_semantics'),
+ 'investigation_id':d.get('investigation_id'),'status':d.get('status'),'status_semantics':d.get('status_semantics'),
  'conclusion_status':d.get('conclusion_status'),'stop_reason':d.get('stop_reason'),
  'error_message':d.get('error_message'),'started_at':d.get('started_at'),'completed_at':d.get('completed_at'),
  'n_events':len(d.get('events') or []),'n_evidence':len(d.get('evidence') or []),
@@ -27,6 +33,5 @@ summary={'sealed_path':str(out),'bytes':len(raw),'sha256':hashlib.sha256(raw).he
  'business_passed':bv.get('passed'),
  'report':{'root_cause':(d.get('report') or {}).get('root_cause'),'conclusion_status':(d.get('report') or {}).get('conclusion_status'),
    'delivery_status':((d.get('report') or {}).get('delivery_receipt') or {}).get('status'),
-   'report_digest':((d.get('report') or {}).get('delivery_receipt') or {}).get('report_digest')}}
-print(json.dumps(summary,ensure_ascii=False,indent=1))
+   'report_digest':((d.get('report') or {}).get('delivery_receipt') or {}).get('report_digest')}},ensure_ascii=False,indent=1))
 PY
