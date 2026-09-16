@@ -508,3 +508,35 @@ environmentRecoveryPassed = 契约不适用 || expected_behavior == "diagnose_on
     现在用 `lg-deploy.sh`：从线上当前 release `cp -a`，**只覆盖本次提交改动的文件**，
     逐个校验 sha256。好处是线上新旧的差异恰好是这次改动，实验结果才能归因，
     也顺带保住了线上与 Git 之间既有的行尾漂移（坑：CRLF 部署漂移）。
+
+21. **LG 的策略决策只有 30 分钟有效期，过期后执行会被安全边界拒绝** ——
+    2026-09-16 实测代价一次真实 Trial。`policy_decision` 里有
+    `decided_at` 和 `expires_at`（相隔 30 分钟）。**审批端点会收下过期的审批记录并返回
+    HTTP 200**，看着像成功；但 worker 恢复运行时会被拒：
+
+    ```
+    job.failed  error_code = runtime.security_boundary_rejected
+                error_chain = [{"code":"security.denied","type":"PermissionError"}]
+                retryable = false
+    execution_ticket = null,  attempt = null   ← 没走到下发执行票
+    ```
+
+    **所以"审批返回 200"不等于"动作会执行"。批完要接着确认
+    `action_lifecycle.attempt` 真的出现了。** 这条边界本身是对的——它拒绝在过期决策上动手；
+    要怪的是没在窗口内完成审批。
+
+    **跑 LG 链路时，从提交到 `waiting_approval` 大约 7 分钟，务必守在那儿。**
+
+22. **后台 Bash 只在"结束"时通知，Monitor 才在"每次输出"时通知** ——
+    同一天的失误：用 `Bash(run_in_background)` 挂轮询脚本，指望它在
+    `waiting_approval` 出现时叫我。它不会——`run_in_background` 只有完成通知。
+    结果脚本自己轮询到上限，30 分钟决策窗口就这么过掉了。
+
+    - **需要中途介入的运行**（LG 的人工审批、AH 的 pending_approval）→ 用 **Monitor**，
+      状态一变就是一个通知
+    - **只需要一个"完成了"** → `Bash(run_in_background)` 配一个条件满足就退出的命令
+
+    另外监视器的终态判断**必须覆盖所有失败态**，不能只盯成功路径：
+    只 grep 成功标记的监视器在崩溃时是静默的，**而静默跟"还在跑"看起来一模一样**。
+    `mon-lg-04.sh` 那个 `case` 分支可以照抄（含 `failed`/`error`/`denied`/
+    `human_takeover`/`budget_exhausted`/`cancelled`）。
