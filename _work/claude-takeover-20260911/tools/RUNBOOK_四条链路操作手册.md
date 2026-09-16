@@ -540,3 +540,64 @@ environmentRecoveryPassed = 契约不适用 || expected_behavior == "diagnose_on
     只 grep 成功标记的监视器在崩溃时是静默的，**而静默跟"还在跑"看起来一模一样**。
     `mon-lg-04.sh` 那个 `case` 分支可以照抄（含 `failed`/`error`/`denied`/
     `human_takeover`/`budget_exhausted`/`cancelled`）。
+
+
+23. **Git-Bash 会把参数里的 POSIX 路径改成 Windows 路径，`SendFile` 因此把文件送到
+    `/D:/install/Git/...`，而 API 一路报 Success** —— 2026-09-16 传 EvalOS 发布包实测。
+    157 块全部"提交成功"、`DescribeSendFileResults` 全 `Success`、拼起来 sha256 也对，
+    **但主机上那个目录是空的**：文件落在了 `/D:/install/Git/var/tmp/...` 底下。
+    `--TargetDir /var/tmp/x` 在交给 `aliyun.exe` 之前就被 MSYS 转换成了 Windows 路径。
+
+    ```bash
+    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$AL" ... ecs SendFile --TargetDir /var/tmp/x ...
+    ```
+
+    **凡是经 Git-Bash 把"看起来像 POSIX 路径"的参数传给 Windows 版 CLI，都要加这个。**
+    `send-file.sh` 已经带上了。排查提示：**在主机上 `find / -xdev -name <文件名>`**——
+    东西通常是传上去了，只是落在了一个字面的 `/D:` 目录里。
+
+24. **`opsmind-evalos-maint` 把整条命令当一个参数收** —— `raw_command="${1:-status}"`
+    然后自己按空格拆（配合 sudoers 的 `... opsmind-evalos-maint *`）。所以：
+
+    ```bash
+    ./run-on.sh evalos - '/usr/local/sbin/opsmind-evalos-maint "deploy <release> <sha256>"'
+    ```
+
+    不加引号会打印 `usage: deploy RELEASE SHA256`，看着像参数写错了，其实是形式不对。
+
+25. **EvalOS 发布安装也会活过云助手的 300 秒 Timeout** —— 同坑 19。看到
+    `exit=None status=Timeout` **千万不要重跑**：`opsmind-evalos-install-release`
+    此时正在停服务、做 SQLite 全量备份（实测吃掉 18G）、翻转 `current` 指针。
+    重跑一次发布安装可能是破坏性的。正确做法是查进程与状态：
+
+    ```bash
+    ./run-on.sh evalos - 'ps -ef | grep "[o]psmind-evalos-install-release"; /usr/local/sbin/opsmind-evalos-maint status'
+    ```
+
+    安装中的正常表象是：`evalos_api=inactive`、`console_ready=false`、
+    `current_release` 仍是旧版、新 release 目录已建。**安装器自带失败回滚**
+    （恢复上一版应用与 systemd/nginx 配置，且**绝不自动恢复数据库**），
+    另有 `maint "rollback"` 可手工回退。实测整个安装约 10 分钟。
+
+26. **EvalOS 发布包要在本机构建后经 `SendFile` 传（2.8 MB / 157 块）** ——
+    `node scripts/build-m31-release.mjs` 会先跑 `npm run m31:verify`
+    （238 个测试 + 架构/安全/能力检查 + 控制台构建），再算 `content_digest`、
+    生成 `release_id = m31-<日期>-<digest 前 10>`、打包。两个坑：
+
+    - 它**要求已跟踪文件无未提交改动**。仓库里长期有 3 个不属于本轮的改动
+      （`AGENTS.md` + 两份文档），要临时 `git stash`，且 **stash／构建／pop 必须写在同一条命令里**
+      ——分开做的话，构建还在读工作树时改动就被放回去了。
+    - 最后那步 `tar` 在 Git-Bash 下会失败（它把 Windows 路径的 `D:` 当成远程主机：
+      `tar (child): Cannot connect to D: resolve failed`）。**构建产物其实已经齐了**，
+      自己补一条即可（用 `/d/...` 路径）：
+
+    ```bash
+    tar -czf .deploy/<release>.tar.gz -C .deploy/m31-build evalos
+    ```
+
+27. **写多行文本进文档时，别用 Python heredoc 里的三引号字符串** ——
+    2026-09-16 实测：正文里出现 `\x`、`\u` 这类序列会让整个 heredoc 报
+    `SyntaxError: (unicode error) ... truncated \xXX escape`，**脚本一行都没执行**。
+    更坏的是当时那条命令用 `&&` 串了 `git commit`，于是**提交照样落了、只是没带上文档改动**，
+    提交信息却声称补了——提交信息成了假的。
+    **正文先用独立文件写好，再 `cat >>` 追加**；或者用 `r"""` 原始字符串。
