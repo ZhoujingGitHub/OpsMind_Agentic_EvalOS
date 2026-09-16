@@ -336,6 +336,28 @@ environmentRecoveryPassed = 契约不适用 || expected_behavior == "diagnose_on
     三台约 380 元/月。**余额预警（低于 100 元发短信）没有 OpenAPI，只能在控制台设**，
     步骤见 `_work/claude-takeover-20260911/余额预警设置步骤_20260916.md`。
 
+13. **"断言全绿"和"页面能用"是两件事** —— 2026-09-16 实测。nginx 漏配了 AH 的 `/health`
+    （`apps/web/src/api/client.ts:118`，它是 AH 唯一一个不在 `/v2/` 下的接口），
+    该请求落到静态 location 的 `try_files` 上拿回 `index.html`，前端把 HTML 当 JSON 解析，
+    页面上显示 `Unexpected token '<', "<!doctype "... is not valid JSON`。
+
+    这个缺陷**同时躲过了三道检查**：它被前端 `catch` 了所以不是未捕获异常；
+    它不影响首页的 HTTP 200；它不阻止 React 挂载。**那一轮 20/20 全绿，页面却是坏的。**
+
+    所以验收项里必须有一条**直接读页面文本、不允许出现可见报错**。
+    `tools/e2e-consoles.mjs` 里那条 "AH 页面上没有可见报错" 就是为此加的。
+
+    连带两条：
+    - **curl 永远抓不到这类问题**，因为它不执行页面 JS。混合了静态与反代的 vhost
+      （AH 是，LG 不是）必须用真浏览器验一遍。
+    - `node x.mjs | tail -40` 的退出码是 **`tail` 的**，不是 node 的。本轮差点把一次
+      未捕获异常当成通过。要取真实退出码就别接管道，或者用 `PIPESTATUS`。
+
+14. **`return 200` 不能用来做 nginx 访问控制的探针** —— `return` 属 rewrite 阶段，
+    **在 access 阶段之前**，会把 `deny`/`auth_basic` 整个绕过。用静态文件或 `proxy_pass`。
+    另外 `systemctl reload nginx` 是**异步**的，紧跟其后的请求可能还打在旧 worker 上，
+    验证前等几秒。两条都是 2026-09-16 踩过才知道的。
+
 12. **本机的网络环境会骗你，别用 `curl`/`nslookup` 判断线上可达性** —— 2026-09-16 实测：
     这台 Windows 机跑着 **TUN 模式代理全局接管**。DNS 解析器是 `198.18.0.2`，任何域名都被
     解析成 `198.18.0.x` 的 fake-IP；**真实出口在日本东京 `188.253.123.160`**。
