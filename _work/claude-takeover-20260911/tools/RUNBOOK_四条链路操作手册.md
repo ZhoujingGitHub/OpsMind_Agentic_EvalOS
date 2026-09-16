@@ -474,3 +474,37 @@ environmentRecoveryPassed = 契约不适用 || expected_behavior == "diagnose_on
     `investigation.conclusion` / `investigation.uncertainty`，以及
     `product-e2e` 的顶层 `root_cause` / `root_cause_confidence` / `task_result`。
     两个产品的 API 形状不同，**先 `sorted(obj.keys())` 再取字段。**
+
+18. **`ca.sh` 不管远端成功失败都 `exit 0`** —— 它只把 `### exit=N` 打在输出里。
+    所以在驱动脚本里 `set -eu` **拦不住远端的失败**：一个 sha256 校验不符的分块会被
+    直接放过去。凡是靠云助手串多步的脚本，**必须自己解析 `### exit=` 那一行**。
+    `lg-deploy.sh` 里的 `run()` 就是这么写的，可以照抄。
+    同理**别把 `run` 放进管道**——管道退出码是右侧命令的，守卫会白写（本轮踩过两次）。
+
+19. **云助手单次调用 300 秒 Timeout 会杀脚本壳，但 `docker build` 还在跑** ——
+    2026-09-16 部署 LG 实测：`### exit=None status=Timeout`，看着像构建失败，
+    其实 `ps -ef` 里 `docker build` 和 buildkit 都还活着，几分钟后镜像正常出现。
+    **看到 Timeout 先去查进程和镜像，不要重跑**（重跑会并起第二个构建）。
+    正确做法是 `setsid nohup docker build ... &` 脱离会话，再另起轮询等它，
+    见 `lg-deploy.sh` 的 5/6 步。
+
+20. **LG 的部署是"发布控制器 + 白名单"，不是 `docker compose up`** ——
+    控制器在 `/usr/local/sbin/opsmind-langgraph-release`，只有
+    `status | apply <release> | rollback` 三个子命令：
+
+    ```bash
+    ./run-on.sh product - '/usr/local/sbin/opsmind-langgraph-release status'
+    ./run-on.sh product - '/usr/local/sbin/opsmind-langgraph-release rollback'
+    ```
+
+    - release id 是**提交号前 12 位**，目录 `/srv/opsmind-langgraph/releases/<id>`，
+      镜像 `opsmind-langgraph-v1:<id>`
+    - **不在 `/etc/opsmind-langgraph/approved-releases` 里会 `target_release_not_approved`**
+    - 切换前它自己会核 `assert_database_compatible`（镜像 alembic head vs 线上 DB revision）
+    - 切换失败会**自动切回上一个 release** 并报 `activation_failed_previous_restored`
+    - `current` / `previous` 是软链接，回滚就是一条 `rollback`
+
+    仓库里**没有** staging 脚本（主机上那堆 `incoming/parts-<release>` 是历史现场拼装的痕迹）。
+    现在用 `lg-deploy.sh`：从线上当前 release `cp -a`，**只覆盖本次提交改动的文件**，
+    逐个校验 sha256。好处是线上新旧的差异恰好是这次改动，实验结果才能归因，
+    也顺带保住了线上与 Git 之间既有的行尾漂移（坑：CRLF 部署漂移）。
