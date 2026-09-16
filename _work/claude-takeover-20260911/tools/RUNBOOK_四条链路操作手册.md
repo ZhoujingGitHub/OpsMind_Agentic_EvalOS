@@ -47,14 +47,30 @@
 
 ### 0.1 控制台访问（人要看页面时）
 
+**三个入口，常态关闭，演示前后开关**（2026-09-16 起）：
+
 ```
-https://121-40-223-202.sslip.io/     ← 必须 https；http 会撞阿里云 ICP 备案拦截页
-账号 opsmind
-口令 在服务器 /etc/nginx/opsmind-console.htpasswd（口令不入 Git，问运营方）
+https://121-40-223-202.sslip.io/        EvalOS 控制台（考场）  账号 opsmind
+https://lg.114-55-40-170.sslip.io/      LG 工作台（考生甲）    账号 opsmind-lg
+https://ah.114-55-40-170.sslip.io/      AH 工作台（考生乙）    账号 opsmind-ah
 ```
 
-2026-09-15 起改为 nginx **Basic 认证 + `limit_req` 限速**，**不再限 IP**：换 WiFi / 换 VPN /
-换设备 / 给别人用都不受影响。排障的三道关见第 5 节坑 9。
+一律 **必须 https**（产品机不开 80，漏打会"连接被拒绝"；EvalOS 的 80 是 301 跳转）。
+口令哈希在服务器 `/etc/nginx/opsmind-*.htpasswd`，**口令不入 Git**。
+
+```bash
+./demo-window.sh status      # 看三个入口当前开/关
+./demo-window.sh open        # 演示前（也可只开一个：open lg）
+./demo-window.sh close       # 演示后
+./check-certs.sh             # 证书到期与续期状态（两台机）
+```
+
+**关闭态是硬 403，不是 401**：`deny all;` 与 `auth_basic` 同时存在时，nginx 的 access
+阶段先于认证阶段生效，带正确口令也拿不到内容（实测 7 种组合确认）。
+**关页面入口不影响链路③④**——`/api/candidate-relay/` 与 `/api/candidate-presence`
+不含开关也无认证（日志实证 42 万次认领全部来自产品机）。但注意
+`/api/trials/.../judge` **是带认证和开关的**，它不受影响只是因为评测走机内
+`127.0.0.1:3000` 不经 nginx。排障的三道关见第 5 节坑 9。
 
 **产品机上的 AH 前端与 LG 工作台目前浏览器够不着**：产品机对外只开 22 端口、无 nginx。
 LG 的 `/app` 在机上已经在跑（裸 python 进程，监听 `127.0.0.1:8081`，`/app` 返回 200；
