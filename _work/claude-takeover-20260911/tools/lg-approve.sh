@@ -59,7 +59,8 @@ pol=life.get("policy_decision") or {}
 assert cur.get("action_id")==AID, (cur.get("action_id"),AID)
 assert cur.get("proposal_digest")==PDIGEST, '提案摘要不符，可能是串票或提案已被替换'
 assert life.get("attempt") is None and not life.get("escalation_reason"), life
-assert pol.get("decision")=="require_human", {'decision':pol.get('decision'),
+# 实测返回是大写 REQUIRE_HUMAN（2026-09-16 链路② 现场确认），这里大小写不敏感比较
+assert str(pol.get("decision")).lower()=="require_human", {'decision':pol.get('decision'),
   'hint':'策略决策不是 require_human，不该由人在这里批。'}
 targets=prop.get("target_ids") or []
 scope_ns=[x for x in (prop.get("namespace_ids") or [NS]) ]
