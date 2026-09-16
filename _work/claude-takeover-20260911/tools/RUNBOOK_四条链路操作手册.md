@@ -73,8 +73,13 @@ https://ah.114-55-40-170.sslip.io/      AH 工作台（考生乙）    账号 op
 `127.0.0.1:3000` 不经 nginx。排障的三道关见第 5 节坑 9。
 
 **产品机上的 AH 前端与 LG 工作台目前浏览器够不着**：产品机对外只开 22 端口、无 nginx。
-LG 的 `/app` 在机上已经在跑（裸 python 进程，监听 `127.0.0.1:8081`，`/app` 返回 200；
-**不是** compose 默认的 8080），AH 的 API 在 `127.0.0.1:8000`（`/v2/auth/me` 返回 401）。
+LG 的 `/app` 在机上已经在跑（监听 `127.0.0.1:8081`，`/app` 返回 200；**不是** compose
+默认的 8080），AH 的 API 在 `127.0.0.1:8000`（`/v2/auth/me` 返回 401）。
+
+> **2026-09-16 更正**：这两个**是容器，不是裸进程**——`opsmind-langgraph-api` 与
+> `opsmind-agent-harness-api`，都用 **`net=host`**。所以 `ss -ltnp` 里显示的是裸
+> `python` 而没有 `docker-proxy`（cgroup 已确证），很容易误判成宿主机进程。
+> 对比：`mysql`/`redis`/`postgres` 走 bridge 网络，`ss` 里能看到 `docker-proxy`。
 整机只有 22 端口是 `0.0.0.0`，其余全在回环；宿主机 iptables 是空策略 ACCEPT，
 **安全组是唯一的网络边界**。
 
