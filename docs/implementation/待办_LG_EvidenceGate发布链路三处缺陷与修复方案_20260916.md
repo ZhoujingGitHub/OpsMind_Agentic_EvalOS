@@ -225,7 +225,45 @@ const rootCauseConfirmed = gatePassed(gate) &&
 | 4 | 重跑链路② → 若到 CONFIRMED，再跑链路④ | 中。占用单一物理租约，串行 | 看 `evidence_gate.status` 与 `terminal_result.conclusion_level` |
 | 5 | **F3 暂不做**，等你拍板 | 高（改考试标准） | 若要做：对称改 + 重跑 ③ 证 AH 不受影响 |
 
-## 6. 明确不做的事
+## 6. 实施状态（2026-09-16 已落地 F1+F2+F4，未部署、未重跑链路）
+
+LG 仓提交 `200af9a`，分支 `codex/langgraph-feature-business-truth-contract-20260914`。
+`+292 / -4`，6 个文件。ruff 全过；全量 pytest 与基线**逐条一致**
+（0 failed；47 个 error 是 Windows 下 `--basetemp` 清理的 `PermissionError`，
+`ERROR at setup` 的 `tmp_path` fixture，干净检出一样报，与代码无关）。
+
+| 项 | 落点 | 新增测试 |
+|---|---|---|
+| F1 | `builder.py` 新增 `_verification_evidence`，接到 `verify_effect` 返回的 `evidence` 键 | Gate 级 2 个 + builder 级 2 个（含重放幂等） |
+| F2 | `builder.py` `terminal_result` 增 `conclusion_level` / `probable_root_causes`，`root_cause` 与 `outcome` 分档 | 改写 `test_failure_recovery` 的断言 + 图级 2 个 |
+| F4b | `builder.py` `quality_gate` 新增 `gap_collection_allowed` 出口 + `_only_causal_gate_checks_failed` / `_blocking_evidence_gaps`；`state.py` 增 `gap_collection_grants` | 图级 2 个（授权生效 / 一次性防循环）+ helper 单测 2 个 |
+| F4a | `deepseek.py` REVISE 提示词；`investigation_memory.py` 补 `gate_override_reason` 与 `gap_collection_grants` | 由 F4b 的图级测试间接覆盖 |
+
+### 实施中发现的两件事，都推翻了本文原先的写法
+
+1. **F4b 在链路② 不会被触发。** F1 之后 Gate 在 PROBABLE **通过**，
+   于是走的是 `evidence_gate.publication_allowed` 分支，根本到不了那个判停的 `else`。
+   **所以 F1+F2 把链路② 收在 `probable` + 非空 `root_cause`，而不是 `confirmed`。**
+   F4b 是"Gate 真判不过时别只剩出门"这个独立缺陷的修复，不是链路② 的解药。
+   要够到 CONFIRMED，靠的是 F4a 让模型自己选 `continue`——引擎不该去推翻一个
+   Gate 已经批准的停止决定，那正是把原问题反向再犯一次。
+2. **原文 F4a 写的"待确认 `compact_public_state` 有没有带 `blocking_evidence_gaps`"——
+   它带了。** `hypotheses` 是完整 dict，`evidence_gate`（含 reasons）、
+   `available_evidence_opportunities`、`budget_headroom` 也都在。
+   **所以不是"模型没被告知缺口"，是它拿到了这些仍然选了 finalize。**
+   真正缺的两样：REVISE 提示词里没有一句讲"能补的缺口就该补"
+   （泛化指引反而说那些机会"是选项不是清单"），以及
+   **`gate_override_reason` / `gap_collection_grants` 根本没进 `public_state`——
+   引擎改判了模型却不告诉它，模型只会重复刚被否掉的那个决定。** 两样都已补。
+
+### 还没做的
+
+- **未部署**，线上镜像仍是旧版；**未重跑链路②④**（产品经理决定先看代码与单测）
+- **F3 未做**，等决策。注意：F1+F2 让链路② 能发出 probable 根因，但
+  **链路④ 的分数不会变**——EvalOS 的 LG 分支读 `outcome`，
+  而 `root_cause_probable` 不在它的白名单里
+
+## 7. 明确不做的事
 
 - **不改评分权重**，不动 `grader.mjs` 的维度与分值
 - **不放宽 Gate 的任何一条检查**——D1 的防伪造过滤器原样保留
