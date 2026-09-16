@@ -160,7 +160,20 @@ assert.match(nginx, /location \^~ \/api\/candidate-relay\//);
 assert.match(nginx, /location = \/api\/candidate-presence/);
 assert.match(nginx, /location ~ \^\/api\/trials\/\[A-Za-z0-9_-\]\+\/judge\$/);
 assert.match(nginx, /location ~ \^\/api\/trials\/[\s\S]*proxy_read_timeout 900s;/);
-assert.match(nginx, /location \/ \{[\s\S]*allow 111\.55\.79\.0\/24;[\s\S]*deny all;/);
+// Console access moved from a carrier /24 network allowlist to a default-closed
+// demo window plus a credential (commit c1a43df). This check was left asserting
+// the old shape, which silently blocked every EvalOS release build until now.
+// Assert the two layers that actually guard the console, and that network
+// location is no longer accepted as a credential. The demo-window file itself
+// lives only on the host (managed by demo-window.sh), so its default `deny all`
+// is verified there, not from this repo.
+const consoleRoot = nginx.slice(nginx.indexOf("    location / {"));
+assert.match(consoleRoot, /include \/etc\/nginx\/opsmind-console-access\.conf;/,
+  "Console root must include the default-closed demo window");
+assert.match(consoleRoot, /auth_basic_user_file \/etc\/nginx\/opsmind-console\.htpasswd;/,
+  "Console root must require a credential before the application is reached");
+assert.doesNotMatch(consoleRoot, /\ballow\s+[0-9]/,
+  "Console access must not fall back to a network allowlist");
 assert.doesNotMatch(nginx, /candidate-observation/);
 assert.match(deploymentSmoke, /m3-l2-agentic-formal@3\.1\.0/);
 assert.match(deploymentSmoke, /case_count, 80/);
