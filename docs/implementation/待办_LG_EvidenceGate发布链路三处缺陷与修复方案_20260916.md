@@ -263,7 +263,87 @@ LG 仓提交 `200af9a`，分支 `codex/langgraph-feature-business-truth-contract
   **链路④ 的分数不会变**——EvalOS 的 LG 分支读 `outcome`，
   而 `root_cause_probable` 不在它的白名单里
 
-## 7. 明确不做的事
+## 7. 部署与重跑链路② 的实测结果（2026-09-16）
+
+**已部署**：LG 线上 release `697a826a7ace` → `200af9af6591`，`previous` 指向 `697a826a7ace`，
+回滚一条 `/usr/local/sbin/opsmind-langgraph-release rollback`。
+交付可归因：`diff -rq` 确认新 release 与基线**恰好只差那 7 个文件**，
+4 个源文件 sha256 与本地 git blob 逐一相符。
+
+### 第一次尝试：失败（我的操作失误，不是改动问题）
+
+`inv-af9210cf075c45a3b94d9bb9` → `status: failed`、`phase: runtime_failure`、
+`error_code: runtime.security_boundary_rejected`、`execution_ticket: null`、`attempt: null`。
+
+策略决策 `expires_at` 只有 **30 分钟**（`13:28:39` → `13:58:39`），我 `13:59` 才批。
+**审批端点收下了并返回 HTTP 200，但执行路径拒绝了**——安全控制是生效的。
+根因是我用 `Bash(run_in_background)` 挂监视器，它只在结束时通知、不在状态变化时通知，
+所以 `waiting_approval` 出现时我不在。已封存（`98e8c6e8…`）、写进 RUNBOOK 坑 21/22。
+
+### 第二次：`completed`，而且到了 CONFIRMED
+
+`inv-d4c7945dafd24cc195954e1d`。同场景 `sctp-blocked`、同种子 `2026081601`、
+公开症状 sha256 `fb0dbd53…` 逐字节一致。
+
+| | 修复前（`inv-ebbd65…`） | 修复后（`inv-d4c794…`） |
+|---|---|---|
+| `status` | `insufficient_evidence` | **`completed`** |
+| `task_result.outcome` | `safe_stop_without_confirmed_root_cause` | **`root_cause_confirmed`** |
+| `root_cause` | **null** | **非空**，confidence **0.98** |
+| `confirmed_root_causes` | `[]` | **`["H4-policy-drop"]`** |
+| Gate 未过的检查 | `root_cause_supported`、`causal_confirmation` | **无** |
+| `tool_calls` | 16 | 30 |
+| 耗时 / 成本 | 1018s / $1.42 | 1009s / $1.22 |
+
+### 归因：是 F4a，不是 F4b
+
+动作后路径（事件 98–117）：
+
+```
+ 98 investigation.reopened
+100 revise_hypotheses   qd=continue   ← 模型自己说"继续"（旧版此处两次都说 finalize）
+101 quality_gate        qd=continue   ← 引擎没推翻，是接受了模型的决定
+102-106 采集 probe_sctp_association / capture_protocol_summary /
+        query_terminal_state / query_pdu_sessions / run_candidate_readonly_diagnostic
+115 revise_hypotheses   qd=finalize   ← 补完证据才说发布
+117 investigation.completed
+```
+
+补的正是旧版 `unresolved_questions` 里点名缺的那两样。**F4b 全程没触发**
+（Gate 一次都没判不过），与 §6 的推演一致。
+
+**F1 是必要条件**：`H4-policy-drop` 引用了
+`protocol-lab:business-verification:2ed02acca0f4460b1235`，
+这条现在在 `evidence[]` 里（`quality=verified`、`partial=False`、`coverage=complete`）。
+**旧代码下这一条引用会把整个 H4 作废**，即使多采了证据也一样。
+
+**F2 这一轮没被用到**：本次到了 CONFIRMED 档，`root_cause` 由既有的
+`confirmed_conclusion` 路径填的。F2 管的是**只到 probable 档**那条路，
+所以"三处修复都验证过"这句话**不成立**——已验证的是 F1 与 F4a。
+
+### 这次重跑暴露了 F2 自己的一个漏接（已修，未部署）
+
+`product_e2e` 的 `task_result` 是 `app.py:1232` **逐键构造的白名单**，
+所以 F2 写进 `terminal_result` 的 `conclusion_level` 与 `probable_root_causes`
+**从没进过 API**（实测 `outcome` 有值、这两个键是 null）。
+confirmed 路上不影响（`outcome` 已能区分档位），但 probable 路上消费者
+读到 `root_cause` 却看不出档位——正是加这一档要消除的含混。
+
+两处投影已补齐，`test_demo_flow` 加了断言并把投影**钉在 `terminal_result` 上**
+（不钉具体值，这样也能挡住同类漏接）。提交 `6bdbe60`，**尚未部署**。
+建议在下次让 LG 走 EvalOS（链路④）之前部署，因为那条路上档位必须可见。
+
+### 证据
+
+`/srv/opsmind-evidence/four-chain-reacceptance-20260916/`
+- `lg-chain2-attempt1-expired-policy-inv-af9210cf075c45a3b94d9bb9.json` 914739 B
+  sha256 `98e8c6e80d99361643038da3f8030ef5d20faba1d4535704769701526b8c010e`（真实失败，原样保留）
+- `lg-chain2-postfix-inv-d4c7945dafd24cc195954e1d.json` 1204416 B
+  sha256 `86dba72aaf76d853e36fd2fb78333a9ef9d267b7ea97e34bbe401627be4b8538`
+
+实验室两次都已交还：`clean: true`、9 项基线全过、租约 `idle`。
+
+## 8. 明确不做的事
 
 - **不改评分权重**，不动 `grader.mjs` 的维度与分值
 - **不放宽 Gate 的任何一条检查**——D1 的防伪造过滤器原样保留
