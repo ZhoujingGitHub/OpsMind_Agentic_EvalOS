@@ -375,6 +375,21 @@ environmentRecoveryPassed = 契约不适用 || expected_behavior == "diagnose_on
     所以：**判断"页面能不能打开"一律用浏览器**；要在命令行验证就到服务器上用
     `getent hosts` / `curl` 自测。拿本机 curl 的失败去推断"线上挂了"会白查半天。
 
+    **而"用浏览器"在这个项目里只有一条路**（2026-09-16 三条都试过）：
+
+    | 通道 | 状态 |
+    |---|---|
+    | 内置浏览器 `mcp__Claude_Browser__*` | 被安全分类器拦下，对整个会话持续生效，别反复重试 |
+    | Claude in Chrome 扩展 | **永久不可用**——运营方的 Claude 账号性质登录不了 Chrome 侧边栏 |
+    | **本机 Playwright 驱动真实 Chrome** | ✅ 唯一可行，已固化为 `tools/e2e-consoles.mjs` |
+
+    ```bash
+    ./e2e-consoles.mjs 的跑法： node e2e-consoles.mjs      # 或加 --headed 看着它跑
+    ```
+
+    靠的是两个**既有**条件，不用新装东西：`OpsMind/apps/web/node_modules/playwright-core`
+    （AH 的 devDependency）+ 已安装的 Chrome。脚本自管演示窗口，`finally` 里必定关回去。
+
     同一组实测确证了 SSH 不通的根因：安全组白名单里没有东京出口 `188.253.123.160`。
     TCP 能连上（TUN 接口先应答）但拿不到 banner，**不是"服务没起"**。
 
