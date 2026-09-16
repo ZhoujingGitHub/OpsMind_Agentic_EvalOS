@@ -1,0 +1,9 @@
+[Unit]
+Description=OpsMind console certificate renewal (acme.sh, TLS-ALPN-01)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/opsmind-renew-cert.sh
+TimeoutStartSec=600
