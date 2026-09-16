@@ -453,3 +453,24 @@ environmentRecoveryPassed = 契约不适用 || expected_behavior == "diagnose_on
     **sslip.io 子域可用**（服务器侧 `getent hosts` 实测）：
     `lg.114-55-40-170.sslip.io` 与 `ah.114-55-40-170.sslip.io` 都解析到 `114.55.40.170`，
     所以两个工作台各占一个主机名的根路径，不需要路径前缀或 `sub_filter` 改写。
+
+15. **LG 的终态不只有 `resolved`/`failed`，还有 `insufficient_evidence`** —— 2026-09-16 链路②
+    实测。轮询脚本的终态判断必须把它算进去，否则会一直转到轮询上限，看起来像"卡住了"。
+    （同一天 AH 那个 watcher 也漏了 `resolved`，同样的毛病。**写轮询前先去 API 里把终态枚举
+    列全，不要凭印象写 case 分支。**）
+
+    更重要的是别把这个状态误读成"链路失败"：那一轮 LG 实际上
+    **改对了、业务真值过了、独立只读验证器判 `effective`**，只是它自己的 Evidence Gate
+    不允许发布结构化根因。链路通与结论合格是两件事，报告里要分开写。
+    机制见 `docs/implementation/待办_编排方式对比与批量故障评测_20260916.md` §1.4.1。
+
+16. **`lg-progress.sh` 看到的 `root_cause` 会在终态被清空** —— 跑到一半它是有值的
+    （`autonomy_policy_decision` 阶段），`finalize_and_learn` 之后变 `null`，正文搬到了
+    `investigation.conclusion` 和 `task_result.best_available_conclusion`。
+    **中途截图当成终态证据会得出相反结论。**
+
+17. **LG 的 `report` 字段不存在，别照 AH 的形状去读** —— 2026-09-16 我按 `report.root_cause`
+    去查，拿回一堆空值，差点报成"LG 什么都没产出"。LG 的投影里对应的是
+    `investigation.conclusion` / `investigation.uncertainty`，以及
+    `product-e2e` 的顶层 `root_cause` / `root_cause_confidence` / `task_result`。
+    两个产品的 API 形状不同，**先 `sorted(obj.keys())` 再取字段。**
