@@ -601,3 +601,97 @@ environmentRecoveryPassed = 契约不适用 || expected_behavior == "diagnose_on
     更坏的是当时那条命令用 `&&` 串了 `git commit`，于是**提交照样落了、只是没带上文档改动**，
     提交信息却声称补了——提交信息成了假的。
     **正文先用独立文件写好，再 `cat >>` 追加**；或者用 `r"""` 原始字符串。
+
+28. **AH 镜像是 overlay 覆盖构建，不是从头构建——判据在 `image.base.digest` 标签里** ——
+    2026-09-18 部署实测，代价是一次失败的激活。仓里有两个 Dockerfile：
+
+    - `deploy/docker/agent-service.Dockerfile` —— 从零建整个运行时，**线上不用它**
+    - `deploy/docker/agent-service-offline-overlay.Dockerfile` —— **线上用的是这个**
+
+    挑错一个，会同时出三个看起来无关的症状，根因只有一个：
+
+    | 症状 | 为什么 |
+    |---|---|
+    | 构建联网下载 48 分钟 | overlay 用 `--no-index --require-hashes` 的离线锁，从头建那个会拉全部依赖 |
+    | 镜像 `Entrypoint` 是 `null` | **entrypoint 脚本在冻结的 `runtime-base` 里**，应用镜像自己不带 |
+    | 启动即 `OPSMIND_ACTION_CONTROL_SECRET is required in production` | **正是那个 entrypoint 从 `/run/secrets/action_control_secret` 读出来 `export` 的**。没有它，密钥永远是空 |
+
+    **注意 `docker exec` 看不到这个变量**（它不继承 entrypoint 的 export），所以
+    "容器里 `printenv` 是空的但服务健康"不是矛盾，别顺着这条去怀疑 compose。
+
+    **怎么一开始就判对**：看线上镜像的标签——
+
+    ```bash
+    docker image inspect opsmind-agent-harness:<线上release> \
+      --format '{{index .Config.Labels "org.opencontainers.image.base.digest"}}'
+    ```
+
+    **只有 overlay 会写 `image.base.digest`**（它是 `ARG RUNTIME_BASE_DIGEST` → `LABEL`）。
+    有值就是 overlay 构建，而且那个值必须等于 `opsmind-agent-harness:runtime-base` 的 `Id`。
+
+    **正确的构建命令**（标签是 `ARG`→`LABEL`，必须用 `--build-arg`，`--label` 不生效；
+    `image.source` 由基础镜像提供，不要重复设）：
+
+    ```bash
+    docker build -t opsmind-agent-harness:<rel> \
+      --build-arg BASE_IMAGE=opsmind-agent-harness:runtime-base \
+      --build-arg OCI_REVISION=<完整提交号> \
+      --build-arg OCI_VERSION=<rel> \
+      --build-arg RUNTIME_BASE_DIGEST=<runtime-base 的 Id> \
+      -f deploy/docker/agent-service-offline-overlay.Dockerfile .
+    ```
+
+    以上已固化进 `ah-deploy.sh`：第 1 步反推线上配方（没有 `base.digest` 就拒绝继续、
+    基础镜像漂了就拒绝继续），建完再拿新镜像与线上镜像**逐项比形状**
+    （`base.digest`、**`Entrypoint`**、运行身份、`import main`）。
+    **控制器的 7 道断言不查 entrypoint**，而 entrypoint 缺失正是唯一会致命的那条，
+    所以这一层必须自己补。
+
+    **更一般的教训**：不要为一个自己没做过的部署路径发明配方。
+    **先从线上产物反推它是怎么来的**（镜像标签、entrypoint、base digest），再照着做。
+    本轮这三样我都提前打印过，只是没读——信息不是拿不到，是拿到了没用。
+
+29. **别把长跑脚本接 `head`／`grep` —— 管道末端的退出码会骗你，`head` 还会把脚本 SIGPIPE 掐死** ——
+    2026-09-18：`./ah-deploy.sh ... | grep -E ... | head -30`，
+    `head` 收满 30 行就退出，SIGPIPE 把脚本杀在建镜像那一步之前，
+    而整条命令的退出码是 `head` 的 **0**，看着像成功。
+    去主机一查：12 个文件都传到了，**构建根本没起来**。
+    同类还有：`grep -c` 没匹配时退出码非零，配 `|| echo 0` 会打出两个 0，读起来像"确认为 0"。
+    **长跑脚本一律 `> 日志文件 2>&1`，跑完再读文件**；判断成败只认脚本自己打的标记，
+    不认管道末端的退出码（同坑 13）。
+
+30. **手工对照实验要用控制器自己的 compose 项目名，否则撞容器名冲突** ——
+    2026-09-18：想复现激活失败，手敲 `docker compose -p opsmind-agent-harness ... up -d`，
+    报 `Conflict. The container name "/opsmind-agent-harness-api" is already in use`。
+    原因是控制器用的项目名是 **`opsmind-agent-harness-evaluation`**（脚本第 10 行 `PROJECT=`），
+    `container_name` 又是固定的，于是 compose 认为那个容器"不是我的"。
+    **好处是它在动手之前就失败了，线上没受影响**；坏处是白花一轮，还差点把锅算到部署上。
+    要手工复现，先 `grep -nE "^PROJECT=|^SERVICE=" /usr/local/sbin/opsmind-agent-harness-release`。
+    而且这种复现会真的切走线上容器——**做完必须显式恢复并验证 `health=healthy`**。
+
+31. **本地跑测试前先找仓自带的虚拟环境，不要用全局 python** ——
+    2026-09-18：直接 `python -m pytest` 报 `No module named 'pymysql'`，
+    我误判成"项目的环境债"，还 `pip install` 装进了全局 anaconda。
+    实际上 `OpsMind/` 下有 `.venv`、`.venv-d1`、`.venv-pinned` 三个现成环境，
+    `.venv` 里 Python 3.12.14、依赖齐全且在 `pyproject.toml` 约束内。
+    LG 侧同理：`report-evidence/.venv`。
+    **跑测试前先 `ls -d .venv*`**；装进全局的东西记得卸掉（`pip uninstall`）。
+
+32. **AH 有两个查动作的端点，`/v2/evaluation/actions/{id}` 是考试作答端点、故意脱敏** ——
+    2026-09-18：查提案里的举证字段，读 `/v2/evaluation/actions/{id}` 全是 `None`，
+    差一步就要下"字段没写进去"的结论。
+    真相是那个端点（`main.py` 的 `evaluation_answer()`）只返回
+    `proposal_version / proposal_digest / action_type / action_version / target_entity_id / scope / parameters`，
+    **脱敏是对的**——不能让考生从作答接口反查自己的完整提案。
+    换成审批人角色 `approval_oracle` 拿到的还是同一份脱敏视图，实测确认，**不是权限问题**。
+    运维视角的完整记录在 **`/v2/actions/{id}`**（`action_detail()` → `detail()`，41 个字段），
+    `risk_level`、`justification`、`rollback_plan_json`、`verification_plan_json`
+    以及 018 新增的 `target_hypothesis_id` / `supporting_evidence_ids_json` /
+    `alternatives_considered_json` 都在这里。
+    `ah-inspect.sh` 原先读错了端点，长期把回滚计划打成 `null`、验证计划打成 `""`，
+    **看着像"AH 的提案没有回滚计划"，其实都有**。已于 2026-09-18 改到 `/v2/actions/{id}`，
+    脚本头部写了"不要改回去"。
+    判据：字段是不是真的空，去库里核（`opsmind_v23.action_proposals`，**注意不是 `opsmind` 库**，
+    那个库里没有 `action_proposals` 表）。
+    还有一个辨认窍门：如果连 `risk_level`、`justification` 这种老字段也一起是 `None`，
+    那基本就是**读错了地方**，而不是新字段没落盘。
