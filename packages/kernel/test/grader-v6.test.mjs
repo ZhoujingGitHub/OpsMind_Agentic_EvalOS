@@ -305,3 +305,61 @@ test("事实编号从两个产品各自的假设形状里读出来，不要求�
     ] } } };
   assert.equal(gradeObservableOutcome(OBS, outcome, evidence).factGrade.verdict, "exact_fact_match");
 });
+
+test("噪声分区的干扰规则真的会变成第二条事实，只会挑唯一异常的会因此判否", () => {
+  // The kernel snapshot the read-only diagnostic returns in the noise
+  // partition: the injected fault with a climbing counter, plus one harmless
+  // DROP rule on an unused port whose counter never moves.
+  const snapshot = {
+    evidence_id: "ev-policy", source_type: "protocol_lab_resource_observation",
+    source_lineage: "lab.resource_observation.sandboxed_readonly_diagnostic",
+    quality: "verified", freshness: "live", completeness: "complete", substantive: 1,
+    protocol_trial_id: "trial-noise",
+    scope_json: { namespace: "trial-noise", resource_refs: [{ identifier_domain: "opsmind-twin",
+      namespace: "trial-noise", resource_type: "service", resource_id: "amf" }] },
+    raw_value_json: { trial_id: "trial-noise", partial: false, production_network: false,
+      source_lineage: "lab.resource_observation.sandboxed_readonly_diagnostic",
+      records: [{ resource_id: "amf", resource_type: "service", namespace_id: "trial-noise",
+        resolution: "resolved", diagnostic_profile: "network_policy", read_only: true,
+        contract_version: "opsmind-network-observation/1.0", sampling_mode: "kernel_policy_snapshot",
+        kernel_namespace: "host", policy_scope: "kernel_namespace_only", policy_backend: "iptables",
+        causal_conclusion: "not_computed",
+        source_ref: "protocol-lab:trial-noise:network_policy:host",
+        observed_at: "2026-09-19T09:00:00Z", policy_digest: "b".repeat(64),
+        tables: [{ table: "filter", chains: [{ name: "OPSMIND_TWIN_IN", policy: "-" }], rules: [
+          { chain: "OPSMIND_TWIN_IN", position: 1, protocol: "sctp", destination_port: "38412",
+            target: "DROP", has_negation: false, packets: 15, bytes: 1020 },
+          { chain: "OPSMIND_TWIN_IN", position: 2, protocol: "udp", destination_port: "9999",
+            target: "DROP", has_negation: false, packets: 0, bytes: 0 },
+        ] }] }] },
+  };
+  const NOISE = "policy:udp:9999:drop-rule-present";
+  const trace = [{ seq: 1, record_type: "SPAN_EVENT", name: "candidate.raw_event",
+    payload: { payload: snapshot } }];
+  const hidden = M3_OBSERVATION_CASES["M3-OBS-HID-008"];
+  assert.equal(hidden.environment.observation_profile, "hidden-benign-noise");
+  assert.deepEqual(hidden.ground_truth.root_cause_fact_refs, [RULE]);
+
+  const answer = (refs) => ({ status: hidden.ground_truth.expected_status,
+    root_cause: "受管策略 DROP 规则阻断 N2 SCTP 端口 38412。",
+    evidence_refs: ["ev-policy"], exclusions: [],
+    recommendation_evaluation: { hypothesis_context: { leading_hypothesis_ids: ["H1"],
+      hypotheses: [{ hypothesis_id: "H1", status: "leading",
+        supporting_evidence_ids: ["ev-policy"], root_cause_fact_refs: refs }] } } });
+
+  // Reads the hit counters: nominates only the rule that actually matched.
+  const careful = gradeObservableOutcome(hidden, answer([RULE]), trace);
+  assert.equal(careful.factGrade.verdict, "exact_fact_match");
+  assert.equal(careful.rootCauseHit, true);
+  // Picks "the anomalies" without reading counters: nominates both.
+  const sloppy = gradeObservableOutcome(hidden, answer([RULE, NOISE]), trace);
+  assert.equal(sloppy.factGrade.verdict, "imprecise_nomination");
+  assert.equal(sloppy.rootCauseHit, false);
+  // Picks the wrong one outright.
+  const wrong = gradeObservableOutcome(hidden, answer([NOISE]), trace);
+  assert.equal(wrong.factGrade.verdict, "fact_miss");
+  assert.equal(wrong.rootCauseHit, false);
+  // The noise rule is never part of the truth.
+  assert.equal(hidden.ground_truth.root_cause_fact_refs.includes(NOISE), false);
+  assert.equal(hidden.ground_truth.required_evidence.includes(NOISE), false);
+});
