@@ -1,0 +1,496 @@
+{
+ "ah": {
+  "investigation_id": "inv-7ef9eeae82bf",
+  "status": "resolved",
+  "conclusion_status": "confirmed",
+  "report_root_cause": null,
+  "report_evidence_ids": [
+   "ev-f867f5854ac44263c7004449",
+   "ev-0d6f3b94351e6803f560ed39",
+   "ev-ab287010739888c9fa2ea4e0",
+   "ev-ed07cd6e47b97d1a9dd5aa46",
+   "ev-e78e054d50c65fdd9862fc83",
+   "ev-c27629d9ed381ce91bef02af",
+   "ev-764421dde37a9f68f40d969e",
+   "ev-4339e679d1ef2178ee28d55a",
+   "ev-8057ca7c1d48d9a8cf0938b3",
+   "ev-35c444b3a981ada19838aa79",
+   "ev-8cbe5443ac917ba5a885290b",
+   "ev-66d958769fe84792e7055939",
+   "ev-9d41aa0d9b243f647e13f6e7",
+   "ev-64d3f7be807e8c0eb016e911",
+   "ev-1a6beb561cdafa47d5ad2ea7",
+   "ev-7e310d8a83ad4288e2c92981",
+   "ev-b60cbacf276d17c3b4db55b2",
+   "ev-ab5fbf239d6a56e2c35f6b27",
+   "ev-293368f672dbbe41b8985f3c",
+   "ev-1e23a52b460a67d7b9d97a89",
+   "ev-e0a3c2b0efa0bf00d7926247",
+   "ev-f486b3c54864e721088c7acf",
+   "ev-671174b2e33949174742fd60",
+   "ev-5bddb18b6c9ddd61857813a5",
+   "ev-896ad45b6a0b6f9f2965c696",
+   "ev-c1ef11d8d7f9b181633ab6c3"
+  ],
+  "hypotheses": [
+   {
+    "hypothesis_id": "H1",
+    "status": "leading",
+    "confidence": 0.95,
+    "cause": "实验环境主机内核 netfilter filter 表 INPUT 链转入的自定义链 OPSMIND_TWIN_IN 中被注入规则 -A OPSMIND_TWIN_IN -p sctp -m sctp --dport 38412 -j DROP（命中 packets=15 bytes=1020），丢弃了 gNB(127.0.0.1)→AMF(127.0.0.5:38412) 的 NGAP/N2 SCTP 建链报文，使 SCTP 关联停在 COOKIE_WAIT、N2 无法建立，UE 因此无法完成注册、无法建立 PDU 会话（无 10.45.0.x 用户面地址），到 MEC 10.47.0.80 的业务不可达。",
+    "supporting_evidence_ids": [
+     "ev-8057ca7c1d48d9a8cf0938b3",
+     "ev-ed07cd6e47b97d1a9dd5aa46",
+     "ev-e78e054d50c65fdd9862fc83",
+     "ev-764421dde37a9f68f40d969e",
+     "ev-35c444b3a981ada19838aa79",
+     "ev-8cbe5443ac917ba5a885290b",
+     "ev-66d958769fe84792e7055939",
+     "ev-f486b3c54864e721088c7acf",
+     "ev-e0a3c2b0efa0bf00d7926247",
+     "ev-671174b2e33949174742fd60",
+     "ev-5bddb18b6c9ddd61857813a5",
+     "ev-896ad45b6a0b6f9f2965c696",
+     "ev-c1ef11d8d7f9b181633ab6c3",
+     "ev-1e23a52b460a67d7b9d97a89",
+     "ev-293368f672dbbe41b8985f3c"
+    ],
+    "counter_evidence_ids": [],
+    "root_cause_fact_refs": null
+   },
+   {
+    "hypothesis_id": "H2",
+    "status": "rejected",
+    "confidence": 0.05,
+    "cause": "gNB/RAN 侧配置错误（错误的 AMF 地址或 NGAP 参数）导致无法与 AMF 建立 N2。",
+    "supporting_evidence_ids": [
+     "ev-0d6f3b94351e6803f560ed39"
+    ],
+    "counter_evidence_ids": [
+     "ev-e78e054d50c65fdd9862fc83",
+     "ev-ed07cd6e47b97d1a9dd5aa46",
+     "ev-8057ca7c1d48d9a8cf0938b3",
+     "ev-1a6beb561cdafa47d5ad2ea7"
+    ],
+    "root_cause_fact_refs": null
+   },
+   {
+    "hypothesis_id": "H3",
+    "status": "rejected",
+    "confidence": 0.05,
+    "cause": "签约数据或鉴权参数不一致（SUPI/密钥/切片签约）导致 UE 注册被拒。",
+    "supporting_evidence_ids": [],
+    "counter_evidence_ids": [
+     "ev-4339e679d1ef2178ee28d55a",
+     "ev-ed07cd6e47b97d1a9dd5aa46",
+     "ev-8057ca7c1d48d9a8cf0938b3"
+    ],
+    "root_cause_fact_refs": null
+   },
+   {
+    "hypothesis_id": "H4",
+    "status": "rejected",
+    "confidence": 0.05,
+    "cause": "5GC 网元进程自身故障（AMF/SMF/UPF/NRF/数据库崩溃或未监听）导致终端无法注册。",
+    "supporting_evidence_ids": [],
+    "counter_evidence_ids": [
+     "ev-0d6f3b94351e6803f560ed39",
+     "ev-ed07cd6e47b97d1a9dd5aa46",
+     "ev-c27629d9ed381ce91bef02af"
+    ],
+    "root_cause_fact_refs": null
+   },
+   {
+    "hypothesis_id": "H5",
+    "status": "rejected",
+    "confidence": 0.05,
+    "cause": "用户面 N3/N4/N6 通路或 MEC 侧故障直接导致业务访问失败。",
+    "supporting_evidence_ids": [],
+    "counter_evidence_ids": [
+     "ev-9d41aa0d9b243f647e13f6e7",
+     "ev-8057ca7c1d48d9a8cf0938b3",
+     "ev-5bddb18b6c9ddd61857813a5",
+     "ev-c1ef11d8d7f9b181633ab6c3"
+    ],
+    "root_cause_fact_refs": null
+   }
+  ],
+  "missing_evidence": [
+   {
+    "blocks_root_cause": false,
+    "gap": "OPSMIND_TWIN_IN 中该条 sctp/38412 DROP 规则的注入主体、注入时刻与关联变更单：这属于事后溯源，不影响对故障机制的判断（机制已由规则内容、命中计数与处置后对比闭合）。",
+    "unavailable_reason": "not_retained"
+   },
+   {
+    "blocks_root_cause": false,
+    "gap": "NGAP/N2 报文逐帧细节（SCTP 重传次数、NGAP Cause IE）：已保留协议摘要的单值超出视图预算，压缩帧数后仍不可读，故未声称已检查帧内容。",
+    "unavailable_reason": "budget_exhausted"
+   },
+   {
+    "blocks_root_cause": false,
+    "gap": "AH 产品库存与告警数据域对本次 twin 标识域（twin-t1、gnb-1、ue-1、amf 等 13 项）的解析能力：该数据源不覆盖本实验标识域，无法据此交叉印证。",
+    "unavailable_reason": "no_data_source"
+   }
+  ],
+  "evidence_canonical_sample": [],
+  "changes": 1
+ },
+ "lg": {
+  "investigation_id": "inv-4fd3f9e1678c46df8c860e70",
+  "status": "completed",
+  "conclusion_level": "confirmed",
+  "root_cause": "受管 iptables 策略 OPSMIND_TWIN_IN 链存在 `-p sctp -m sctp --dport 38412 -j DROP`，丢弃 gNB 发往 AMF 的 SCTP/N2 握手报文，导致 SCTP 关联停留在 UNCONN/COOKIE_WAIT 而未进入 ESTAB，NGAP 初始 UE 消息无法送达 AMF，终端注册失败并阻断后续业务。执行 network.restore_policy 移除该规则后，独立业务验证显示端到端恢复。\n受管策略 DROP 规则阻断 N2 SCTP 端口 38412，导致控制面 SCTP 关联无法建立。该机制与 H1-control-plane-n2 相同，已并入 H1 作为根因行动目标。",
+  "conclusion": "受管 iptables 策略 OPSMIND_TWIN_IN 链存在 `-p sctp -m sctp --dport 38412 -j DROP`，丢弃 gNB 发往 AMF 的 SCTP/N2 握手报文，导致 SCTP 关联停留在 UNCONN/COOKIE_WAIT 而未进入 ESTAB，NGAP 初始 UE 消息无法送达 AMF，终端注册失败并阻断后续业务。执行 network.restore_policy 移除该规则后，独立业务验证显示端到端恢复。\n受管策略 DROP 规则阻断 N2 SCTP 端口 38412，导致控制面 SCTP 关联无法建立。该机制与 H1-control-plane-n2 相同，已并入 H1 作为根因行动目标。",
+  "best_available_conclusion": "受管 iptables 策略 OPSMIND_TWIN_IN 链存在 `-p sctp -m sctp --dport 38412 -j DROP`，丢弃 gNB 发往 AMF 的 SCTP/N2 握手报文，导致 SCTP 关联停留在 UNCONN/COOKIE_WAIT 而未进入 ESTAB，NGAP 初始 UE 消息无法送达 AMF，终端注册失败并阻断后续业务。执行 network.restore_policy 移除该规则后，独立业务验证显示端到端恢复。\n受管策略 DROP 规则阻断 N2 SCTP 端口 38412，导致控制面 SCTP 关联无法建立。该机制与 H1-control-plane-n2 相同，已并入 H1 作为根因行动目标。",
+  "report_evidence_ids": [
+   "ev-58ba8e37ecd120ed60055248",
+   "ev-2729577e1c90b4a7335d6534",
+   "ev-a4f1a3990c05be5081e9907a",
+   "ev-2c8451b3cceabdf9717d18d6",
+   "ev-e0d2969e9a5528f920a93a15",
+   "protocol-lab:business-verification:a9fd9103ea7e4a9c1c50",
+   "ev-da1de66d1d255bfbc53892d3",
+   "ev-da4f63b65d57af46cad441cd"
+  ],
+  "hypotheses": [
+   {
+    "hypothesis_id": "H1-control-plane-n2",
+    "status": "supported",
+    "confidence": 0.98,
+    "statement": "受管 iptables 策略 OPSMIND_TWIN_IN 链存在 `-p sctp -m sctp --dport 38412 -j DROP`，丢弃 gNB 发往 AMF 的 SCTP/N2 握手报文，导致 SCTP 关联停留在 UNCONN/COOKIE_WAIT 而未进入 ESTAB，NGAP 初始 UE 消息无法送达 AMF，终端注册失败并阻断后续业务。执行 network.restore_policy 移除该规则后，独立业务验证显示端到端恢复。",
+    "supporting_evidence_ids": [
+     "ev-58ba8e37ecd120ed60055248",
+     "ev-2729577e1c90b4a7335d6534",
+     "ev-a4f1a3990c05be5081e9907a",
+     "ev-2c8451b3cceabdf9717d18d6",
+     "ev-e0d2969e9a5528f920a93a15",
+     "protocol-lab:business-verification:a9fd9103ea7e4a9c1c50",
+     "ev-da1de66d1d255bfbc53892d3"
+    ],
+    "contradicting_evidence_ids": [],
+    "blocking_evidence_gaps": [],
+    "missing_evidence": [
+     "mysql.shared.terminal_states 无记录，未从数据库直接确认 UE 注册状态；但 protocol-lab SCTP ESTAB 与 HTTP 200 已提供独立互证。"
+    ],
+    "root_cause_fact_refs": null
+   },
+   {
+    "hypothesis_id": "H2-subscriber-profile",
+    "status": "rejected",
+    "confidence": 0,
+    "statement": "UE 订阅者认证配置与权威参考不一致，导致鉴权失败、注册被拒。",
+    "supporting_evidence_ids": [],
+    "contradicting_evidence_ids": [
+     "ev-da4f63b65d57af46cad441cd"
+    ],
+    "blocking_evidence_gaps": [],
+    "missing_evidence": [],
+    "root_cause_fact_refs": null
+   },
+   {
+    "hypothesis_id": "H3-user-plane-path",
+    "status": "rejected",
+    "confidence": 0,
+    "statement": "用户面路径（N3/N6 或 UPF 转发）中断，导致注册后业务访问失败。",
+    "supporting_evidence_ids": [],
+    "contradicting_evidence_ids": [
+     "ev-da1de66d1d255bfbc53892d3",
+     "protocol-lab:business-verification:a9fd9103ea7e4a9c1c50"
+    ],
+    "blocking_evidence_gaps": [],
+    "missing_evidence": [],
+    "root_cause_fact_refs": null
+   },
+   {
+    "hypothesis_id": "H4-policy-drop",
+    "status": "supported",
+    "confidence": 0.98,
+    "statement": "受管策略 DROP 规则阻断 N2 SCTP 端口 38412，导致控制面 SCTP 关联无法建立。该机制与 H1-control-plane-n2 相同，已并入 H1 作为根因行动目标。",
+    "supporting_evidence_ids": [
+     "ev-58ba8e37ecd120ed60055248",
+     "ev-2729577e1c90b4a7335d6534",
+     "ev-2c8451b3cceabdf9717d18d6",
+     "ev-e0d2969e9a5528f920a93a15",
+     "protocol-lab:business-verification:a9fd9103ea7e4a9c1c50",
+     "ev-da1de66d1d255bfbc53892d3"
+    ],
+    "contradicting_evidence_ids": [],
+    "blocking_evidence_gaps": [],
+    "missing_evidence": [],
+    "root_cause_fact_refs": null
+   }
+  ],
+  "evidence_canonical_sample": [],
+  "evidence_gate": {
+   "accepted_conclusion": "受管 iptables 策略 OPSMIND_TWIN_IN 链存在 `-p sctp -m sctp --dport 38412 -j DROP`，丢弃 gNB 发往 AMF 的 SCTP/N2 握手报文，导致 SCTP 关联停留在 UNCONN/COOKIE_WAIT 而未进入 ESTAB，NGAP 初始 UE 消息无法送达 AMF，终端注册失败并阻断后续业务。执行 network.restore_policy 移除该规则后，独立业务验证显示端到端恢复。\n受管策略 DROP 规则阻断 N2 SCTP 端口 38412，导致控制面 SCTP 关联无法建立。该机制与 H1-control-plane-n2 相同，已并入 H1 作为根因行动目标。",
+   "accepted_hypothesis_ids": [
+    "H1-control-plane-n2",
+    "H4-policy-drop"
+   ],
+   "checks": [
+    {
+     "check": "evidence_present",
+     "detail": "发布结论必须引用可追溯、非空的真实证据。",
+     "passed": true
+    },
+    {
+     "check": "scope_match",
+     "detail": "存在超出当前租户或 Scope 的证据。",
+     "passed": true
+    },
+    {
+     "check": "quality_and_completeness",
+     "detail": "没有完整且质量已知的证据。",
+     "passed": true
+    },
+    {
+     "check": "root_cause_supported",
+     "detail": "还没有一个具体到故障对象和因果机制的根因假设, 得到可核验的直接证据或相互印证的观测支持, 且不存在未解决反证。",
+     "passed": true
+    },
+    {
+     "check": "causal_alternatives_resolved",
+     "detail": "同一证据仍支持另一项未解决机制, 需沿用假设复核或降低结论确定性。",
+     "passed": true
+    },
+    {
+     "check": "causal_confirmation",
+     "detail": "可信观测不等于因果确认: 需明确结论层级, 并处理会改变该机制判断的阻断缺口。",
+     "passed": true
+    },
+    {
+     "check": "tool_failures_accounted_for",
+     "detail": "存在失败或不完整的取证, 但最终结论没有说明这个未验证范围。",
+     "passed": true
+    },
+    {
+     "check": "no_unresolved_contradiction",
+     "detail": "所有证据充分的根因假设都仍存在未解决的反证。",
+     "passed": true
+    }
+   ],
+   "confirmed_conclusion": "受管 iptables 策略 OPSMIND_TWIN_IN 链存在 `-p sctp -m sctp --dport 38412 -j DROP`，丢弃 gNB 发往 AMF 的 SCTP/N2 握手报文，导致 SCTP 关联停留在 UNCONN/COOKIE_WAIT 而未进入 ESTAB，NGAP 初始 UE 消息无法送达 AMF，终端注册失败并阻断后续业务。执行 network.restore_policy 移除该规则后，独立业务验证显示端到端恢复。\n受管策略 DROP 规则阻断 N2 SCTP 端口 38412，导致控制面 SCTP 关联无法建立。该机制与 H1-control-plane-n2 相同，已并入 H1 作为根因行动目标。",
+   "confirmed_hypothesis_ids": [
+    "H1-control-plane-n2",
+    "H4-policy-drop"
+   ],
+   "environment_evidence_domains": [
+    "business_verification",
+    "configuration_authority",
+    "control_plane",
+    "sandboxed_diagnostic",
+    "service_health",
+    "service_path"
+   ],
+   "environment_evidence_present": true,
+   "environment_evidence_required": true,
+   "environment_evidence_sources": [
+    "protocol-lab.business-verification",
+    "protocol-lab.http_service",
+    "protocol-lab.sandboxed_readonly_diagnostic",
+    "protocol-lab.sctp_association",
+    "protocol-lab.service_health",
+    "protocol-lab.subscriber_auth_consistency"
+   ],
+   "evidence_ids": [
+    "ev-2729577e1c90b4a7335d6534",
+    "ev-da4f63b65d57af46cad441cd",
+    "ev-bfb240f9786048b7b4fc835a",
+    "ev-eb732aaf8754f2111ba54f2e",
+    "ev-efcd4ce9f36ce7fa749370f3",
+    "ev-f4036cd1a9d95aa5c7b4de16",
+    "ev-b16895351965ee18e17926e2",
+    "ev-2a4c6772ae8d18e91d6336e1",
+    "ev-58ba8e37ecd120ed60055248",
+    "ev-a4f1a3990c05be5081e9907a",
+    "protocol-lab:business-verification:a9fd9103ea7e4a9c1c50",
+    "ev-2c8451b3cceabdf9717d18d6",
+    "ev-da1de66d1d255bfbc53892d3",
+    "ev-6ff4a571a745d6266e931e46",
+    "ev-e0d2969e9a5528f920a93a15"
+   ],
+   "open_hypothesis_ids": [],
+   "open_issues": [],
+   "passed": true,
+   "policy_version": "evidence-gate-5.1.0",
+   "reasons": [],
+   "remaining_evidence_opportunities": [
+    {
+     "description": "按协议、时间和端点筛选本次实验已保留抓包；不启动新采样。返回原始采集位置、时间、覆盖与引用。",
+     "evidence_domain": "protocol_trace",
+     "tool_name": "capture_protocol_summary"
+    },
+    {
+     "description": "Read only the registered authorized subgraph. Depth never expands authorization. Explicit bundle also reads scoped metrics, logs and alarms; no probes or actions.",
+     "evidence_domain": "inventory",
+     "tool_name": "collect_diagnostics"
+    },
+    {
+     "description": "Discover exact scoped inventory objects; no alias or source fallback.",
+     "evidence_domain": "inventory",
+     "tool_name": "discover_entities"
+    },
+    {
+     "description": "Read only the registered authorized subgraph. Depth never expands authorization. Unknown seeds remain unregistered; no name guessing.",
+     "evidence_domain": "inventory",
+     "tool_name": "expand_topology"
+    },
+    {
+     "description": "按 result_ref 在当前租户和 Scope 内续取已保存的规范化 MCP 结果；支持分页、精确字段过滤或指定字段的显式分块，不扩大原调查范围。",
+     "evidence_domain": "stored_mcp_result",
+     "tool_name": "fetch_stored_result_page"
+    },
+    {
+     "description": "Read one exact inventory entity in the current Scope.",
+     "evidence_domain": "inventory",
+     "tool_name": "get_entity"
+    },
+    {
+     "description": "Read an existing scoped probe record; does not run a new probe.",
+     "evidence_domain": "inventory",
+     "tool_name": "get_probe_result"
+    },
+    {
+     "description": "Read a registered business service path; service_id is not a network-function alias.",
+     "evidence_domain": "inventory",
+     "tool_name": "get_service_path"
+    },
+    {
+     "description": "Read actual tool contracts. Registration does not grant object authorization or prove data coverage.",
+     "evidence_domain": "tool_catalog",
+     "tool_name": "list_data_capabilities"
+    },
+    {
+     "description": "从实验终端发起受控域名解析，判断故障是不是出在 DNS。",
+     "evidence_domain": "name_resolution",
+     "tool_name": "probe_dns"
+    },
+    {
+     "description": "从实验终端访问固定的 MEC HTTP 健康接口，验证端到端业务而不只是网络连通。",
+     "evidence_domain": "service_path",
+     "tool_name": "probe_http_service"
+    },
+    {
+     "description": "从实验终端或指定网元对授权目标做受控 Ping，确认 IP 层是否真正能到达。",
+     "evidence_domain": "data_path",
+     "tool_name": "probe_ip_reachability"
+    },
+    {
+     "description": "查看 gNB 与 AMF 之间的 SCTP/N2 关联，确认基站控制面是否真的连上核心网。",
+     "evidence_domain": "control_plane",
+     "tool_name": "probe_sctp_association"
+    },
+    {
+     "description": "测试授权服务的 TCP 端口能否建立连接，区分网络不通与应用没有监听。",
+     "evidence_domain": "service_path",
+     "tool_name": "probe_tcp_port"
+    },
+    {
+     "description": "Read scoped network-function inventory, not live process health.",
+     "evidence_domain": "inventory",
+     "tool_name": "query_5gc_nf_state"
+    },
+    {
+     "description": "Query normalized active and historical alarms.",
+     "evidence_domain": "alarms",
+     "tool_name": "query_alarms"
+    },
+    {
+     "description": "读取本次实验租约内精确资源的进程、服务或工作负载状态；不接受别名或跨实验查询。",
+     "evidence_domain": "runtime_state",
+     "tool_name": "query_candidate_runtime_state"
+    },
+    {
+     "description": "读取本次实验租约内精确服务的健康和就绪状态；不执行管理操作。",
+     "evidence_domain": "service_health",
+     "tool_name": "query_candidate_service_health"
+    },
+    {
+     "description": "Query tenant change records.",
+     "evidence_domain": "changes",
+     "tool_name": "query_changes"
+    },
+    {
+     "description": "Query normalized operational events.",
+     "evidence_domain": "events",
+     "tool_name": "query_events"
+    },
+    {
+     "description": "读取授权节点的网卡、地址和链路状态，判断端口是否存在、是否启用。",
+     "evidence_domain": "network_state",
+     "tool_name": "query_interfaces"
+    },
+    {
+     "description": "Query normalized network and application logs.",
+     "evidence_domain": "logs",
+     "tool_name": "query_logs"
+    },
+    {
+     "description": "Query actual metric points for exact scoped resources, metrics and time window.",
+     "evidence_domain": "metrics",
+     "tool_name": "query_metrics"
+    },
+    {
+     "description": "Query observed PDU Session state.",
+     "evidence_domain": "pdu_sessions",
+     "tool_name": "query_pdu_sessions"
+    },
+    {
+     "description": "读取终端、用户面和承载节点的路由表，检查数据下一步被送到哪里。",
+     "evidence_domain": "network_state",
+     "tool_name": "query_routes"
+    },
+    {
+     "description": "Read observed slice, DNN and QoS fields from scoped PDU sessions.",
+     "evidence_domain": "inventory",
+     "tool_name": "query_slice_qos"
+    },
+    {
+     "description": "读取授权节点正在监听和已经建立的网络连接，确认服务和协议会话是否真实存在。",
+     "evidence_domain": "runtime_state",
+     "tool_name": "query_sockets"
+    },
+    {
+     "description": "比较终端认证配置与本次实验的权威参考配置，只返回是否一致及不一致的字段名。不会返回 K、OPc 等任何密钥值。",
+     "evidence_domain": "configuration_authority",
+     "tool_name": "query_subscriber_auth_consistency"
+    },
+    {
+     "description": "Query observed terminal registration and reachability state.",
+     "evidence_domain": "terminal_states",
+     "tool_name": "query_terminal_state"
+    },
+    {
+     "description": "在本次实验租约内运行预注册的只读诊断档案；不提供 shell、任意命令或 root 权限。",
+     "evidence_domain": "sandboxed_diagnostic",
+     "tool_name": "run_candidate_readonly_diagnostic"
+    },
+    {
+     "description": "Search LG's own terminal investigations in the authorized resource, service and namespace scope. Historical summaries are leads requiring current verification. Use next_source_page to continue.",
+     "evidence_domain": "historical_lead",
+     "tool_name": "search_investigations"
+    },
+    {
+     "description": "读取到授权业务目标的逐跳路径和每跳时延，用来定位中断或变慢发生在哪一段。",
+     "evidence_domain": "data_path",
+     "tool_name": "trace_network_path"
+    }
+   ],
+   "source_systems": [
+    "mysql.shared.alarms",
+    "mysql.shared.changes",
+    "mysql.shared.entities",
+    "mysql.shared.terminal_states",
+    "protocol-lab.business-verification",
+    "protocol-lab.http_service",
+    "protocol-lab.sandboxed_readonly_diagnostic",
+    "protocol-lab.sctp_association",
+    "protocol-lab.service_health",
+    "protocol-lab.sockets",
+    "protocol-lab.subscriber_auth_consistency"
+   ],
+   "status": "probable"
+  },
+  "actions": 1
+ }
+}

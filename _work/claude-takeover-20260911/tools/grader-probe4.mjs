@@ -68,8 +68,12 @@ for (const [label, exclusions] of Object.entries({
   "写了一条无关的 exclusions": ["天气不好"],
 })) {
   const r = gradeTrial(CASE, { status: "resolved", root_cause: RIGHT, evidence_refs: [], exclusions }, TRACE, { tool_calls: 2 }, CONTEXT);
-  console.log(`  根因维度 ${r.assertions.rca_quality.value} | 总分 ${String(r.total).padStart(6)} | ${label}`);
+  const detail = r.assertions.remediation_quality.evidence.competing_exclusion;
+  console.log(`  排除竞争得分 ${String(detail.score).padStart(4)} | 处置质量 ${String(Number(r.assertions.remediation_quality.value.toFixed(3))).padStart(5)}`
+    + ` | 总分 ${String(r.total).padStart(6)} | 覆盖到的禁止主张 ${JSON.stringify(detail.covered)} | ${label}`);
 }
+console.log();
+console.log("  （2026-09-19 起：写什么都给满分的老判据已换掉——必须真的排除掉本题的禁止主张。）");
 console.log();
 console.log("  考生可见的任务契约里有没有提过要写 exclusions：");
 console.log("  ", JSON.stringify(CASE.visible.task_contract, null, 0).slice(0, 300));

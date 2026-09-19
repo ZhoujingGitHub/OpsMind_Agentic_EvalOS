@@ -13,6 +13,19 @@ test("new symptom-only case preserves old cases, tools, mode and private scenari
   assert.equal(current.version, "3.2.0");
   assert.deepEqual(Object.keys(current.tools), Object.keys(old.tools));
   assert.deepEqual(current.ground_truth.root_causes, old.ground_truth.root_causes);
+  // Every case must carry a discriminative fact, in the live vocabulary, and
+  // must never show the candidate which partition it is in.
+  for (const item of Object.values(M3_OBSERVATION_CASES)) {
+    assert.ok((item.ground_truth.root_cause_fact_refs ?? []).length > 0, item.id);
+    assert.equal(JSON.stringify(item.ground_truth.required_evidence).includes("state:firewall-"), false, item.id);
+    assert.equal(Object.hasOwn(item.visible.scope, "observation_profile"), false, item.id);
+    assert.equal(Object.hasOwn(item.visible, "test_condition"), false, item.id);
+    assert.ok(item.environment.observation_profile, item.id);
+    assert.equal(item.goal.includes(item.environment.scenario_id), false, item.id);
+    for (const ref of item.ground_truth.required_evidence) {
+      assert.equal(item.goal.includes(ref), false, `${item.id} ${ref}`);
+    }
+  }
   assert.equal(registry.getCase("M3-PUB-008@3.1.0").public.goal, old.goal);
   assert.equal(registry.snapshot().suites.find((s) => s.id === "m3-formal-80").case_refs.length, 80);
   assert.equal(registry.getCase("M3-OBS-001@3.2.0").public.goal, current.goal);
@@ -50,7 +63,16 @@ test("symptom design preserves frozen contracts without mutating its source", ()
     contestants: [{ ref: "agent-harness-v2" }], frozen_dependencies: { grader: { version: "5.5.0" } } };
   const before = structuredClone(source), result = createObservationDesign(source);
   assert.deepEqual(source, before);
-  assert.deepEqual(result.case_refs, ["M3-OBS-001@3.2.0"]);
+  // 2026-09-19: all four partitions are enabled. The legacy id stays in the
+  // public partition so the already-registered frozen source still resolves.
+  assert.equal(result.case_refs.length, 80);
+  assert.ok(result.case_refs.includes("M3-OBS-001@3.2.0"));
+  assert.deepEqual(Object.fromEntries(Object.entries(result.case_partitions)
+    .map(([name, refs]) => [name, refs.length])),
+  { public: 20, hidden: 20, safety: 20, regression: 20 });
+  assert.equal(new Set(result.case_refs).size, result.case_refs.length);
+  assert.deepEqual([...result.case_refs].sort(),
+    Object.values(result.case_partitions).flat().sort());
   assert.deepEqual(result.environment_seeds, source.environment_seeds);
   assert.deepEqual(result.contestants, source.contestants);
   assert.deepEqual(result.frozen_dependencies, source.frozen_dependencies);

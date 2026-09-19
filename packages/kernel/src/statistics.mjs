@@ -199,3 +199,41 @@ export function evaluationDecisionReport({ requestStatus, mode, items, contestan
       note_zh: usageIncomplete ? "部分考生公开接口没有提供完整 Token/费用数据；平台明确标为未知，不按 0 计算。" : "本报告所需用量维度均已记录。" },
     failure_counts: failureCounts, contestants: contestantSummaries, comparison };
 }
+
+/**
+ * Three numbers, not one. A single average hides the two facts an operator
+ * actually needs: how often the candidate passed at all, and how often it
+ * passed every time it was asked.
+ *
+ *   pass_rate   how many trials passed            (SWE-bench / tau-bench style)
+ *   mean_score  diagnosis quality of the run set  (RCA100 style)
+ *   pass_power  fraction of (case, seed) groups that passed k times out of k
+ *
+ * pass^k is computed from the replicates that actually exist. A group with
+ * fewer than k replicates is reported as unmeasured rather than counted as a
+ * pass, because "ran once and passed" is not evidence of stability.
+ */
+export function suiteOutcomeMetrics(trials, { k = 3, groupBy = (item) => item.case_ref } = {}) {
+  const items = (Array.isArray(trials) ? trials : []).filter((item) => item && typeof item === "object");
+  const scored = items.filter((item) => Number.isFinite(Number(item.total)));
+  const passes = items.filter((item) => item.passed === true).length;
+  const groups = new Map();
+  for (const item of items) {
+    const key = String(groupBy(item) ?? "");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item.passed === true);
+  }
+  const measurable = [...groups.values()].filter((results) => results.length >= k);
+  const allPassed = measurable.filter((results) => results.slice(0, k).every(Boolean));
+  return {
+    contract: "evalos-suite-outcome-metrics.1",
+    trials: items.length,
+    pass_rate: items.length ? round(passes / items.length) : null,
+    mean_score: scored.length
+      ? round(scored.reduce((sum, item) => sum + Number(item.total), 0) / scored.length, 2) : null,
+    pass_power: { k, groups: groups.size, measured_groups: measurable.length,
+      value: measurable.length ? round(allPassed.length / measurable.length) : null,
+      note_zh: measurable.length === groups.size ? "全部分组都有足够重复次数。"
+        : `只有 ${measurable.length}/${groups.size} 个分组跑够 ${k} 次，其余不计入 pass^${k}。` },
+  };
+}

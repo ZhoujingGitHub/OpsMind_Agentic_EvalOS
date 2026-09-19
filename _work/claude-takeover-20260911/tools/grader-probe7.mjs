@@ -1,78 +1,104 @@
-// 只读探针 7：过了 8 道硬门之后，分数还能在什么范围里浮动。
+// 只读探针 7：过门之后，分数到底由什么决定？逐项拆给人看。
 //
-// 探针 6 算的是「下限」（过门最低分）。产品经理追问：过了门是不是就固定 90.36？
-// 不是。下限之上还有两个变量在动，本脚本把每道题的下限和上限都算出来。
+// 2026-09-19 重写：老版本推算"过门后的分数区间"，用的是抄来的权重表。
+// 现在从「标准答案答卷」出发，每次只弄坏一个细项，量它真实值多少分——
+// 这张表就是"区分度来自哪里"的直接答案，不是推的。
 //
 // 用法（EvalOS 仓根目录）： node _work/claude-takeover-20260911/tools/grader-probe7.mjs
 
-import { M3_CASES } from "../../../packages/kernel/src/m3-cases.mjs";
+import { gradeTrial } from "../../../packages/kernel/src/grader.mjs";
 import { M3_OBSERVATION_CASES } from "../../../packages/kernel/src/m3-observation-cases.mjs";
+import { buildBaselineSubmission } from "./grader-baseline-agents.mjs";
 
-const WEIGHTS = { task_success: 25, rca_quality: 15, evidence_quality: 15, trajectory_quality: 15,
-  open_world: 15, proactive_capability: 5, resource_cost: 5, engineering_agility: 5 };
+const CASE = M3_OBSERVATION_CASES["M3-OBS-001"];
 
-function band(item) {
-  const gt = item.ground_truth;
-  const expectedStatus = gt.expected_status ?? "resolved";
-  const recoveryRequired = Boolean(gt.requires_tool_recovery);
-  const n = (gt.required_evidence ?? []).length;
-  const hasForbidden = (gt.forbidden_claims ?? []).length > 0;
+function grade(mutate) {
+  const base = buildBaselineSubmission(CASE, "reference");
+  const submission = mutate(structuredClone(base));
+  return gradeTrial(CASE, submission.outcome, submission.trace, submission.usage,
+    { ...submission.context, resourceUsageAffectsScore: false });
+}
 
-  const openWorldApplicable = recoveryRequired || expectedStatus === "inconclusive";
-  const proactiveApplicable = Boolean(item.visible?.trigger_type === "proactive" || gt.proactive_expected);
-  const applicable = { task_success: true, rca_quality: true, evidence_quality: true,
-    trajectory_quality: true, open_world: openWorldApplicable,
-    proactive_capability: proactiveApplicable, resource_cost: false, engineering_agility: false };
+const identity = (submission) => submission;
 
-  // 过门之后，两个变量还在动：
-  //   rca_quality      : 写了 exclusions = 1.0 ；没写且本题有禁止主张 = 0.8
-  //   evidence_quality : (1 + 召回率)/2 ，召回率从硬门最低线一直到 1.0
-  const minRecall = Math.min(1, 2 / Math.max(1, n));
-  const lo = { task_success: 1, rca_quality: hasForbidden ? 0.8 : 1,
-    evidence_quality: (1 + minRecall) / 2, trajectory_quality: 1,
-    open_world: openWorldApplicable ? 1 : 0, proactive_capability: proactiveApplicable ? 1 : 0,
-    resource_cost: 0, engineering_agility: 0 };
-  const hi = { ...lo, rca_quality: 1, evidence_quality: 1 };
-
-  const score = (v) => {
-    let num = 0, den = 0;
-    for (const [k, w] of Object.entries(WEIGHTS)) {
-      if (!applicable[k]) continue;
-      den += w; num += v[k] * w;
+const MUTATIONS = {
+  "标准答案（对照）": identity,
+  "不填 root_cause_fact_refs（退回文本判据）": (submission) => {
+    delete submission.outcome.root_cause_fact_refs;
+    for (const item of submission.outcome.recommendation_evaluation.hypothesis_context.hypotheses) {
+      delete item.root_cause_fact_refs;
     }
-    return Number((num / den * 100).toFixed(2));
-  };
-  return { id: item.id, den: Object.entries(WEIGHTS).reduce((s, [k, w]) => s + (applicable[k] ? w : 0), 0),
-    n, lo: score(lo), hi: score(hi) };
-}
+    return submission;
+  },
+  "只说到接口层：填 n2 而不是那条规则": (submission) => {
+    submission.outcome.root_cause_fact_refs = ["n2"];
+    submission.outcome.recommendation_evaluation.hypothesis_context.hypotheses[0].root_cause_fact_refs = ["n2"];
+    return submission;
+  },
+  "倒豆子：把看到的编号全填成根因": (submission) => {
+    const all = [...CASE.ground_truth.required_evidence];
+    submission.outcome.root_cause_fact_refs = all;
+    submission.outcome.recommendation_evaluation.hypothesis_context.hypotheses[0].root_cause_fact_refs = all;
+    return submission;
+  },
+  "少引根因那条证据（召回 2/3，但根因没了依据）": (submission) => {
+    const kept = submission.outcome.evidence_refs.slice(0, 2);
+    submission.outcome.evidence_refs = kept;
+    submission.trace = submission.trace.filter((record) => record.name !== "candidate.raw_event"
+      || kept.includes(record.payload.payload.evidence_id));
+    submission.outcome.recommendation_evaluation.hypothesis_context.hypotheses[0].supporting_evidence_ids = kept;
+    submission.outcome.recommendation_evaluation.report_evidence_ids = kept;
+    return submission;
+  },
+  "少引一条旁证（召回 2/3，根因依据仍在）": (submission) => {
+    const kept = [submission.outcome.evidence_refs[0], submission.outcome.evidence_refs[2]];
+    submission.outcome.evidence_refs = kept;
+    submission.trace = submission.trace.filter((record) => record.name !== "candidate.raw_event"
+      || kept.includes(record.payload.payload.evidence_id));
+    submission.outcome.recommendation_evaluation.hypothesis_context.hypotheses[0].supporting_evidence_ids = kept;
+    submission.outcome.recommendation_evaluation.report_evidence_ids = kept;
+    return submission;
+  },
+  "证据全来自同一条血缘": (submission) => {
+    submission.trace = submission.trace.map((record) => (record.name === "candidate.raw_event"
+      ? { ...record, payload: { payload: { ...record.payload.payload, source_lineage: "lab.single-authority" } } }
+      : record));
+    return submission;
+  },
+  "不写已排除的竞争假设": (submission) => {
+    submission.outcome.exclusions = [];
+    return submission;
+  },
+  "写了排除项但不对路": (submission) => {
+    submission.outcome.exclusions = ["天气不好"];
+    return submission;
+  },
+  "不给缺口分级": (submission) => {
+    submission.outcome.next_checks = [];
+    for (const item of submission.outcome.recommendation_evaluation.hypothesis_context.hypotheses) {
+      item.blocking_evidence_gaps = []; item.missing_evidence = []; item.unknowns = [];
+    }
+    return submission;
+  },
+  "处置后不回头看现场，只信动作返回": (submission) => {
+    submission.trace = submission.trace.filter((record) => record.name !== "candidate.recovery.observed");
+    return submission;
+  },
+};
 
-const all = [...Object.values(M3_CASES), ...Object.values(M3_OBSERVATION_CASES)];
-const rows = all.map(band);
-
-const obs = rows.find((r) => r.id === "M3-OBS-001");
-console.log("=== 今天在用的那道题 M3-OBS-001 ===");
-console.log(`  分母 ${obs.den} 分 | 要求证据 ${obs.n} 条`);
-console.log(`  过门后的分数区间：${obs.lo} ~ ${obs.hi} 分`);
+const baseline = grade(identity);
+console.log("题目:", CASE.id, "（今天在用的那道）");
+console.log("对照满分:", baseline.total, " passed =", baseline.passed);
 console.log();
-
-console.log("=== 过门之后，分数由这两件事决定 ===");
-console.log("  1) 有没有写「已排除的其他可能」  → 写了 15 分拿满，没写只拿 12 分");
-console.log("  2) 三条必需证据引全了几条        → 引全 15 分，只引 2 条 12.5 分");
-console.log();
-
-const byDen = {};
-for (const r of rows) {
-  byDen[r.den] = byDen[r.den] ?? { n: 0, lo: Infinity, hi: 0 };
-  byDen[r.den].n += 1;
-  byDen[r.den].lo = Math.min(byDen[r.den].lo, r.lo);
-  byDen[r.den].hi = Math.max(byDen[r.den].hi, r.hi);
+console.log("=== 每次只弄坏一个细项，看掉多少分、会不会掉出通过 ===");
+for (const [label, mutate] of Object.entries(MUTATIONS)) {
+  const result = grade(mutate);
+  const delta = Number((result.total - baseline.total).toFixed(2));
+  const failed = Object.entries(result.hard_gates).filter(([, ok]) => !ok).map(([name]) => name);
+  console.log(`  ${String(result.total).padStart(6)} 分 | ${String(delta).padStart(7)} | `
+    + `${result.passed ? "仍通过" : "判否   "} | ${label}`);
+  if (failed.length) console.log(`              └─ 未过硬门: ${failed.join(", ")}`);
 }
-console.log("=== 全部 81 道题，过门后的分数区间 ===");
-for (const [den, v] of Object.entries(byDen).sort((a, b) => Number(a[0]) - Number(b[0]))) {
-  console.log(`  分母 ${String(den).padStart(3)} | ${String(v.n).padStart(2)} 道 | ${v.lo} ~ ${v.hi} 分`);
-}
-const globalLo = Math.min(...rows.map((r) => r.lo));
-const globalHi = Math.max(...rows.map((r) => r.hi));
 console.log();
-console.log(`>>> 全题库过门后的分数范围：${globalLo} ~ ${globalHi} 分（及格线 75）`);
-console.log(">>> 所以 90.36 是「地板」，不是「结果」。满分 100 是够得着的。");
+console.log("读法：掉分但仍通过的，是「诊断质量」；直接判否的，是「不可补偿的硬门」。");
+console.log("      改动前这张表只有两种结局——100 分通过，或者 21 分判否，中间是空的。");

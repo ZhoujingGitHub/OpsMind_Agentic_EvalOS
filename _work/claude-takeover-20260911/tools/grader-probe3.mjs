@@ -1,8 +1,11 @@
 // 只读探针 3：量 M3-OBS-001 在真实考试车道下的实际分母，以及"换个措辞"的真实代价。
 //
-// 为什么要跑完整 gradeTrial：分母不是 100。gradeTrial 会把 applicable===false 的维度
-// 从分子分母里同时剔除，再按剩下的权重归一化到 100。开放资源车道下有 4 个维度不适用，
-// 所以"根因 15 分"这种说法是错的——必须实测。
+// 为什么要跑完整 gradeTrial：分母不一定是 100。gradeTrial 会把 applicable===false 的
+// 维度从分子分母里同时剔除，再按剩下的权重归一化到 100。
+//
+// 2026-09-19：Grader 换成 RCA100 三维后，同一批措辞再跑一遍——对照组是**不填**
+// root_cause_fact_refs（退回文本判据），实验组是**填了**事实编号。前者仍然被措辞左右，
+// 后者一个字都不看。这就是「四个毛病一起消失」的直接证据。
 //
 // 用法（EvalOS 仓根目录）： node _work/claude-takeover-20260911/tools/grader-probe3.mjs
 
@@ -40,8 +43,11 @@ const TRACE = [
   { seq: 7, name: "verification.completed", payload: {} },
 ];
 
-function run(label, rootCause) {
-  const outcome = { status: "resolved", root_cause: rootCause, evidence_refs: [], exclusions: [] };
+const FACT = "policy:sctp:38412:drop-rule-present";
+
+function run(label, rootCause, { withFactRefs = false } = {}) {
+  const outcome = { status: "resolved", root_cause: rootCause, evidence_refs: [], exclusions: [],
+    ...(withFactRefs ? { root_cause_fact_refs: [FACT] } : {}) };
   const result = gradeTrial(CASE, outcome, TRACE, { tool_calls: 2 }, CONTEXT);
   const applicable = Object.entries(result.assertions)
     .filter(([name]) => name !== "recommendation_quality")
@@ -66,23 +72,29 @@ for (const item of base.applicable) {
   console.log(`  ${item.applicable ? "计分" : "不计"} | ${item.name.padEnd(22)} | 权重 ${String(item.weight).padStart(2)} | 本次得分率 ${item.value}`);
 }
 console.log();
-console.log(`  >>> 真实分母 = ${denom}（不是 100）。声明权重合计 100，其中 ${100 - denom} 分在这道题上从不参与计分。`);
+console.log(`  >>> 真实分母 = ${denom}。声明权重合计 100，其中 ${100 - denom} 分在这道题上不参与计分。`);
 console.log();
 
-console.log("=== 同一份正确结论，只改措辞 ===");
-for (const [label, text] of Object.entries({
+const WORDINGS = {
   "真值原话": GOOD,
   "换动词：丢弃（同样正确）": REWORDED,
   "加括注：注入主体尚未确认": WITH_CAVEAT,
   "同时如实报告了处置结果": WITH_FIX_REPORTED,
-})) {
-  const { result } = run(label, text);
-  const rc = result.assertions.rca_quality.value;
-  const ts = result.assertions.task_success.value;
-  console.log(`  总分 ${String(result.total).padStart(6)} | passed=${String(result.passed).padEnd(5)} | 根因维度 ${rc} | 任务维度 ${ts} | ${label}`);
-  const failed = Object.entries(result.hard_gates).filter(([, ok]) => !ok).map(([name]) => name);
-  if (failed.length) console.log(`           失败的硬门: ${failed.join(", ")}`);
+};
+
+for (const [title, withFactRefs] of [["A 组：不填事实编号（退回文本判据）", false],
+  ["B 组：填了事实编号（新判据）", true]]) {
+  console.log(`=== ${title} ===`);
+  for (const [label, text] of Object.entries(WORDINGS)) {
+    const { result } = run(label, text, { withFactRefs });
+    const rc = result.assertions.root_cause_localization.value;
+    const verdict = result.assertions.root_cause_localization.evidence.fact_grade.verdict;
+    console.log(`  总分 ${String(result.total).padStart(6)} | passed=${String(result.passed).padEnd(5)}`
+      + ` | 根因维度 ${String(rc).padStart(4)} | 判定 ${verdict.padEnd(20)} | ${label}`);
+    const failed = Object.entries(result.hard_gates).filter(([, ok]) => !ok).map(([name]) => name);
+    if (failed.length) console.log(`           失败的硬门: ${failed.join(", ")}`);
+  }
+  console.log();
 }
-console.log();
-console.log("注：证据维度在本探针里是 0，因为没有合成通过 product-evidence-semantics 校验的 raw_event。");
-console.log("    所以上面的绝对分数偏低；有意义的是同一基线下的差值与硬门通过情况。");
+console.log("注：证据维度在本探针里偏低，因为没有合成通过 product-evidence-semantics 校验的 raw_event。");
+console.log("    所以上面的绝对分数偏低；有意义的是 A 组与 B 组在同一批措辞下的差异。");

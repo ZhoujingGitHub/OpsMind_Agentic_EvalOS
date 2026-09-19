@@ -756,15 +756,18 @@ test("M3冻结设计可用于新建评测预检但不能绕过门禁直接启动
     const headers = { authorization: "Bearer control-secret" };
     const templates = await (await app.handler(new Request("http://local/api/workbench/run-templates", { headers }))).json();
     assert.equal(templates.items.length, 2);
-    const frozen = templates.items.find((item) => item.case_refs.length === 80);
+    // Since 2026-09-19 both designs carry 80 cases, so they are told apart by
+    // dataset membership rather than by size.
+    const frozen = templates.items.find((item) => item.case_refs.includes("M3-PUB-001@3.1.0"));
     const observation = templates.items.find((item) => item.case_refs.includes("M3-OBS-001@3.2.0"));
     assert.equal(observation.status, "FROZEN");
+    assert.equal(observation.case_refs.length, 80);
     assert.equal(app.store.listTrials().length, 0);
     assert.equal(app.store.listEvaluationRunRequests().length, 0);
     const symptomPreflight = await app.handler(new Request("http://local/api/workbench/run-requests/preflight", {
       method: "POST", headers: { ...headers, "content-type": "application/json" },
       body: JSON.stringify({ request_kind: "NEW_EVALUATION", evaluation_purpose: "SINGLE_SYSTEM_REGRESSION",
-        mode: "QUICK_VALIDATION", source_experiment_id: observation.id, case_refs: observation.case_refs,
+        mode: "QUICK_VALIDATION", source_experiment_id: observation.id, case_refs: ["M3-OBS-001@3.2.0"],
         contestant_refs: ["agent-harness-v2"], environment_seeds: [formalM3Manifest.environment_seeds[0]],
         repetitions: 1, requested_by: "api-test-operator", reason: "检查无提示题面可选择且不会自动开考" }) }));
     assert.equal(symptomPreflight.status, 200);

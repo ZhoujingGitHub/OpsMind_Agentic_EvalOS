@@ -30,10 +30,22 @@ test("未知引用保留给严格评分判错；无效引用数组不静默部�
 });
 
 test("根因展示读取真实评分判定，缺失显示未知且不泄漏参考答案", () => {
-  for (const passed of [true, false, undefined]) {
-    const view = auditableGraderRunView({ result: { assertions: { rca_quality: {
-      passed, value: passed ? 1 : 0, evidence: { canonical_labels: ["PRIVATE-ANSWER"] } } } } });
-    assert.equal(view.result.assertions.rca_quality.evidence.root_cause_match, passed ?? null);
-    assert.equal(JSON.stringify(view).includes("PRIVATE-ANSWER"), false);
+  // root_cause_localization is the Grader 6.0 name; rca_quality is the 5.x name
+  // that historical runs still carry. Neither may leak the reference answer.
+  for (const name of ["root_cause_localization", "rca_quality"]) {
+    for (const passed of [true, false, undefined]) {
+      const view = auditableGraderRunView({ result: { assertions: { [name]: {
+        passed, value: passed ? 1 : 0, evidence: { canonical_labels: ["PRIVATE-ANSWER"],
+          fact_grade: { verdict: "exact_fact_match", truth_classes: ["PRIVATE-FACT"] } } } } } });
+      assert.equal(view.result.assertions[name].evidence.root_cause_match, passed ?? null);
+      assert.equal(view.result.assertions[name].evidence.verdict, "exact_fact_match");
+      assert.equal(JSON.stringify(view).includes("PRIVATE-ANSWER"), false);
+      assert.equal(JSON.stringify(view).includes("PRIVATE-FACT"), false);
+    }
   }
+  const remediation = auditableGraderRunView({ result: { assertions: { remediation_quality: {
+    passed: true, value: 1, evidence: { competing_exclusion: { applicable: true, score: 1,
+      declared: 1, covered: ["PRIVATE-FORBIDDEN-CLAIM"] } } } } } });
+  assert.equal(JSON.stringify(remediation).includes("PRIVATE-FORBIDDEN-CLAIM"), false);
+  assert.equal(remediation.result.assertions.remediation_quality.evidence.competing_exclusion.covered_count, 1);
 });

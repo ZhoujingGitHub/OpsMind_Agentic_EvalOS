@@ -94,9 +94,21 @@ export function blindGraderRunView(run) {
 
 function redactGraderEvidence(name, assertion) {
   const evidence = assertion.evidence ?? {};
-  if (name === "rca_quality") {
+  // "rca_quality" is the Grader 5.x name, kept so historical runs stay readable.
+  if (name === "root_cause_localization" || name === "rca_quality") {
     return { root_cause_match: assertion.applicable === false ? null : assertion.passed ?? null,
-      note: "私有参考根因不进入执行面或交互式分析上下文" };
+      fact_reference: evidence.fact_reference ?? null,
+      entity_localization: evidence.entity_localization ?? null,
+      criterion: evidence.criterion ?? null,
+      verdict: evidence.fact_grade?.verdict ?? null,
+      note: "私有参考根因与判别性事实编号不进入执行面或交互式分析上下文" };
+  }
+  if (name === "remediation_quality") {
+    // covered[] echoes the case's forbidden_claims, which are ground truth.
+    const exclusion = evidence.competing_exclusion ?? {};
+    return stripIdentity({ ...evidence,
+      competing_exclusion: { applicable: exclusion.applicable ?? null, score: exclusion.score ?? null,
+        declared: exclusion.declared ?? null, covered_count: (exclusion.covered ?? []).length } });
   }
   return stripIdentity(evidence);
 }

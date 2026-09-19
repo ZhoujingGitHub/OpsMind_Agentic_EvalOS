@@ -1,0 +1,1596 @@
+{
+ "source": "opsmind_v23.investigations",
+ "selection": "started_at >= 2026-09-01, limit 30",
+ "rows": [
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H-N2-SCTP-DROP",
+     "status": "leading",
+     "confidence": 0.72,
+     "cause": "实验网络(防火墙)策略丢弃 N2 路径 SCTP,阻断 gNB↔AMF N2/NGAP,使 UE 无法完成 NAS 注册与 PDU 会话建立;UE 无用户面默认路由,导致 DNS/MEC 等业务不可达",
+     "supporting_evidence_ids": [
+      "ev-6a034cc8d49aace99130bae7",
+      "ev-c3f06a5f4b1722d6ddaa68cc",
+      "ev-68ca39663dfafb28a8399258",
+      "ev-835cc006d13624a0d6e93e5a",
+      "ev-061eb8c27a1b08afb89f896d",
+      "ev-510a02c2d5c1e87c0d852831",
+      "ev-d0005e3d4c6e7958c4acaa62",
+      "ev-35dc936434efca109c56ac99",
+      "ev-fa6e18077b0462cae419d769"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H-AMF-N2-CFG",
+     "status": "possible",
+     "confidence": 0.22,
+     "cause": "gNB↔AMF N2 目标配置或 AMF N2 监听异常(可能独立或与SCTP丢弃叠加),导致 NGAP 无法完成",
+     "supporting_evidence_ids": [
+      "ev-9a9e29ea5f68c08b906d05df",
+      "ev-6a034cc8d49aace99130bae7"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H-USERPLANE-N6",
+     "status": "weakened",
+     "confidence": 0.12,
+     "cause": "用户面/N6 独立故障(如 UPF N6 路由或 GTP 隧道)导致业务不可达",
+     "supporting_evidence_ids": [
+      "ev-1565174a4cbbf1d9e8917216",
+      "ev-45d96ded06f083039c296ee0"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H-SUB-AUTH",
+     "status": "rejected",
+     "confidence": 0.03,
+     "cause": "UE 订阅或鉴权资料不一致导致注册被拒",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H-NF-DOWN",
+     "status": "weakened",
+     "confidence": 0.05,
+     "cause": "核心网网元未运行或未就绪导致注册失败",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-04 10:30:38.280175",
+   "investigation_id": "inv-03d350b34fe2",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.66,
+     "cause": "N2 承载路径上的防火墙丢弃 SCTP,阻断 gNB(127.0.0.1)→AMF(127.0.0.5:38412)的 NGAP/N2 SCTP 关联建立,INIT 无 INIT-ACK 应答,关联停留 COOKIE_WAIT,UE 无法注册",
+     "supporting_evidence_ids": [
+      "ev-00afe9cee2bf8f650e121065",
+      "ev-238f5a6b6126d7ab1f2d254d",
+      "ev-c1d7cbcacb706cda990d93fc",
+      "ev-fce117c2e478d2dc45d54a90",
+      "ev-ba7f516781adfe87b37ca125"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "possible",
+     "confidence": 0.2,
+     "cause": "AMF 进程健康但 NGAP 未在 127.0.0.5:38412 建立 SCTP LISTEN(如配置未生效或启动失败),导致无 INIT-ACK",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "gNB 或 5GC 进程/服务故障导致 N2 不可用(提示前提被推翻的情形)",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "weakened",
+     "confidence": 0.09,
+     "cause": "更广的网络层阻断(全部流量/路由黑洞)导致 N2 不通",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-04 01:03:40.392314",
+   "investigation_id": "inv-0c938de225fe",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.78,
+     "cause": "AMF 服务进程停止/不可用(unhealthy、stopped)导致 5GC 接入与移动性控制面失效：gNB 无法建立 N2(SCTP/NGAP)关联而反复重连，UE 无法完成注册。",
+     "supporting_evidence_ids": [
+      "ev-13616de1200e5b0d17a3b944",
+      "ev-cf4014d43cf521163aed3af5",
+      "ev-fc37dd0815dcb2be7124b615",
+      "ev-35e3da09d696a62885e9d548",
+      "ev-b0be281656c98012ca4606d5"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "订阅者鉴权/签约数据不一致导致注册被拒绝。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "weakened",
+     "confidence": 0.15,
+     "cause": "NRF 服务发现异常使 AMF 控制面失效。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "weakened",
+     "confidence": 0.15,
+     "cause": "MongoDB(签约/状态库)异常导致核心网失效。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H5",
+     "status": "possible",
+     "confidence": 0.2,
+     "cause": "gNB/UE 侧无线或配置(如 AMF N2 地址、PLMN/TAC)导致重连，作为 AMF 停机之外可能的并发因素。",
+     "supporting_evidence_ids": [
+      "ev-35e3da09d696a62885e9d548",
+      "ev-b0be281656c98012ca4606d5"
+     ],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-02 16:14:37.933589",
+   "investigation_id": "inv-152e392a6719",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.95,
+     "cause": "本 5G 数字孪生实验主机 iptables filter 表 OPSMIND_TWIN_IN 链在 127.0.0.5:38412（AMF NGAP 监听端点）入方向对 SCTP 目的端口 38412 配置了 DROP 规则（`-A OPSMIND_TWIN_IN -p sctp -m sctp --dport 38412 -j DROP`，命中 31 包），使 gNB（127.0.0.1:55633）发往 AMF 的 SCTP INIT 无 INIT-ACK 回应、关联停在 COOKIE_WAIT；N2/NGAP 控制面无法建立，UE-1 无法注册、不产生 PDU 会话，MEC HTTP/DNS 业务不可达。受控动作移除该规则后，filter 规则数由 16 降为 15、DROP 消失，SCTP 在 127.0.0.1:39981↔127.0.0.5:38412 建立 ESTAB，MEC HTTP 200、DNS 解析 10.47.0.80，业务恢复。",
+     "supporting_evidence_ids": [
+      "ev-aa65dd75b66797d9898eef47",
+      "ev-a62dffbc28bee0fe8d8b95bf",
+      "ev-317061a30dd3ef3413f9d21d",
+      "ev-4252768f8611f8bba5a7f84a",
+      "ev-6ad8a0412c69c58517d05f83",
+      "ev-1fce05816ec7a581ae5a72db",
+      "ev-7e6c906edbfb55ecb87a21f2",
+      "ev-361e015420d2622d16b4c25e",
+      "ev-10fe80d5c46f783486ee408a"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "UE 订阅/鉴权参数（amf/key/op/supi）与权威参考不一致导致核心网鉴权失败，表现为 UE 无法注册。现场 subscriber_auth_consistency 显示 authentication_profile_consistent=true、mismatched_fields=[]，鉴权参数一致，故本假设被排除。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "AMF/SMF/UPF/NRF 等 5GC 网元宕机或未监听导致注册与业务失败。现场 protocol-lab 服务健康/运行状态观测显示网元健康、进程在、控制面端口在监听，网元侧不存在宕机证据，故本假设被排除。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "weakened",
+     "confidence": 0.15,
+     "cause": "用户面路径（N3/N4/N6）或 UPF 路由/MEC 侧故障是业务不可达的直接原因。修复仅移除控制面防火墙 DROP 规则，未改动任何用户面配置，业务即恢复（SCTP ESTAB、HTTP 200、DNS 正常），说明不存在独立的用户面故障；且修复前 UE 无数据面出口是注册失败的下游表现，故本假设被削弱。",
+     "supporting_evidence_ids": [
+      "ev-a9a0eee750ac08541c1979f7",
+      "ev-b9f3c3e3cfc13f6b3cca2c44"
+     ],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-07 08:28:24.179642",
+   "investigation_id": "inv-1c3aaaa64309",
+   "conclusion_status": "confirmed"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.85,
+     "cause": "本次 Trial 的主机 network namespace 中，iptables filter 表 OPSMIND_TWIN_IN 链被注入了针对 N2（SCTP 目的端口 38412）的丢弃规则，使 gNB（127.0.0.1）发往 AMF（127.0.0.5:38412）的 SCTP INIT 被丢弃、AMF 侧 INIT-ACK 不可达，gNB 到 AMF 的 N2 关联停留于 COOKIE_WAIT，NGAP 无法建立，进而 ue-1 注册失败、无法建立 PDU 会话，MEC 与 DNS 业务不可达。",
+     "supporting_evidence_ids": [
+      "ev-f83af2660427cca31e8fbeef",
+      "ev-0a984cc58f2ec3c75f5b0ef6",
+      "ev-f6df35bed33fa8e478b56e40",
+      "ev-934677ff876651438cc5ff16",
+      "ev-cb58800e3dedf02f118e8532",
+      "ev-dfeb34cddcbd2dfb6e1f5212",
+      "ev-7328ec8d1f3b1dd7121fdff1",
+      "ev-dad31b2651c83795e026e2d0",
+      "ev-4170a92cd2f826510e1ec671",
+      "ev-00875cf86aa02cec5976544c",
+      "ev-cc0b9242247b7d059187abe2",
+      "ev-ad8d80c2409c20591272245a",
+      "ev-461aa1b05721530e8b1f1e35",
+      "ev-771ec5d810413bb7ab404dbd",
+      "ev-91e9d176575af05d55811441",
+      "ev-39becf29c6a035edd0b40272"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "终端订阅数据（SUPI、K、OP、AMF 等鉴权字段）与实验室权威参考配置不一致，导致 ue-1 注册被核心网拒绝。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "weakened",
+     "confidence": 0.07,
+     "cause": "RAN 侧或终端侧组件故障（gNB/ue 进程退出、回环接口 down、终端路由缺失）导致无法接入。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "weakened",
+     "confidence": 0.1,
+     "cause": "N2 恢复后，N3/N6 用户面或承载路径仍存在独立故障，导致业务面不可达或质量劣化。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-14 12:51:55.255272",
+   "investigation_id": "inv-21367eae3212",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.78,
+     "cause": "gNB→AMF 的 N2 控制面 SCTP/NGAP 关联被实验网络策略阻断，导致 UE 无法注册、无 PDU 会话，业务全阻",
+     "supporting_evidence_ids": [
+      "ev-cf27171b18c975cf977950e1",
+      "ev-bd04cefddc2f9c5cc154d544",
+      "ev-83f91ca5292456f24bdc5759",
+      "ev-ce351a9d13a10ffae71a5748",
+      "ev-11f6a77a2dc145b6427f144d",
+      "ev-7fb0f2128657f60496eed80c",
+      "ev-4c26d7c996e78688470c468d",
+      "ev-80ef5b5cbee8b48bb5b7c275",
+      "ev-0e09f413f3fac607081eac35"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "weakened",
+     "confidence": 0.15,
+     "cause": "AMF 服务内部挂起（进程存活、监听但不处理 NGAP）",
+     "supporting_evidence_ids": [
+      "ev-3b9275a5ee1e29404156b7de"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "订阅/鉴权配置不一致导致终端无法通过鉴权",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "weakened",
+     "confidence": 0.1,
+     "cause": "gNB/UE 进程未运行或 RAN 侧进程故障",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H5",
+     "status": "weakened",
+     "confidence": 0.05,
+     "cause": "UPF 数据面 N6 路由/链路损伤导致业务失败",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-05 17:09:57.851241",
+   "investigation_id": "inv-28be0947d757",
+   "conclusion_status": "confirmed"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.9,
+     "cause": "gNB-1 与 AMF(127.0.0.5:38412) 的 N2/SCTP 关联未建立（gNB 01:43:52 'SCTP could not connect: Connection timed out'，无 NG 连接），gNB 将小区广播为 barred，UE-1 自 01:43 起持续小区选择失败([1] barred)，无法驻留/注册→无 PDU 会话与数据面→端到端业务失败。执行最小修复 network.restore_policy(action-7ec6ec86dbc4) 后 gNB 于 01:51:04 重建 SCTP 并 NG Setup 成功，UE 注册/数据面恢复，HTTP 200+DNS NOERROR。",
+     "supporting_evidence_ids": [
+      "ev-524ed903b8cd7ade52004132",
+      "ev-1052214b981b25a7be37dfcc",
+      "ev-59becfe17b4cbedb4de6e07f",
+      "ev-61e7636f3674cdcb10803b2c",
+      "ev-ca75484d34c8e23b12764ccc",
+      "ev-209c23c5a9efdee48c9bd014",
+      "ev-0ab00532cc007603cc8d5f50"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "weakened",
+     "confidence": 0.15,
+     "cause": "UE/订阅侧问题（如鉴权参数不一致、SIM 状态异常）导致注册失败。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "rejected",
+     "confidence": 0.1,
+     "cause": "核心网关键网元(AMF/SMF/UPF/NRF)进程未运行或监听缺失导致注册失败。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-05 17:39:49.382078",
+   "investigation_id": "inv-2b25c50f1a52",
+   "conclusion_status": "confirmed"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.8,
+     "cause": "AMF(open5gs-amfd)进程未运行/服务停止(stopped、unhealthy、process inactive),5GC 控制面在 AMF 处不可用,gNB 无法建立 N2 SCTP/NGAP 而反复重连,全部 UE 无法注册且无 PDU 会话",
+     "supporting_evidence_ids": [
+      "ev-f40f9628826681a0cabd0192",
+      "ev-32dccf89dbfd986383ffdb54",
+      "ev-b3c8b0f88b8958d547100eca",
+      "ev-13870902ebbc582115929053",
+      "ev-21517ff92b039e2e6fb31530"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "weakened",
+     "confidence": 0.15,
+     "cause": "gNB-1 配置的 AMF N2 目标地址/端口错误或漂移,导致无法建立 N2 连接",
+     "supporting_evidence_ids": [
+      "ev-21517ff92b039e2e6fb31530"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "weakened",
+     "confidence": 0.1,
+     "cause": "依赖服务(NRF/SMF/UPF/MongoDB)或 SBI 服务发现故障导致控制面不可用",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "订阅/鉴权配置不一致导致全部终端注册被拒",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H5",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "用户面/承载(UPF/N3/N6/MEC)故障导致注册失败",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-03 03:41:56.070901",
+   "investigation_id": "inv-2b8f4811b4c0",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.8,
+     "cause": "Open5GS AMF 进程已停止（runtime_state=stopped、active=false），gNB 无法建立 N2、UE 未注册、无 PDU 会话与用户面隧道，终端无法访问 MEC DNS 与业务",
+     "supporting_evidence_ids": [
+      "ev-31288001e7e931dd332bd089",
+      "ev-7d26edf2ddba6d36c72a636b",
+      "ev-bd9656fa023f61501143446f",
+      "ev-848dee998201552048a684c1",
+      "ev-d3cc6dffe8275b89f7eb1316",
+      "ev-86aa49a9964a4ffbed2e52d6",
+      "ev-3062dd27a39fe2bf9ec995be"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "possible",
+     "confidence": 0.35,
+     "cause": "AMF 停止由进程崩溃或启动配置错误触发，且无守护进程自动拉起",
+     "supporting_evidence_ids": [
+      "ev-31288001e7e931dd332bd089"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "weakened",
+     "confidence": 0.1,
+     "cause": "业务中断由 MEC/DNS 侧故障导致",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "订阅者鉴权配置不一致导致注册失败",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H5",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "核心网依赖（NRF/SMF/UPF/MongoDB）故障导致 AMF 不可用",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-01 16:39:00.356116",
+   "investigation_id": "inv-37e01b8c9192",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.72,
+     "cause": "实验主机 filter 表自定义链 OPSMIND_TWIN_IN 中的规则 `-p sctp -m sctp --dport 38412 -j DROP` 丢弃了 gNB(gnb-1/UERANSIM, 127.0.0.1→127.0.0.5:38412) 的 N2 SCTP INIT，使 N2 关联停留在 COOKIE_WAIT、NGAP 无法建立，导致 ue-1 初始注册失败且无法建立 PDU 会话（受影响实体：ue-1、gnb-1、网络路径 n2；故障位置：实验主机 filter 链网络策略）。",
+     "supporting_evidence_ids": [
+      "ev-a28d88aa5e37538e39f70d4c",
+      "ev-8482444044c680133bf05803",
+      "ev-e2c1f39f1fb06495a5826e39",
+      "ev-a9a85c553ba3d01f45e0356f",
+      "ev-09e4324c3f4c9037825bd205",
+      "ev-459ec1cad1ad3d0f49585156",
+      "ev-6c257b159f8afee869454c36",
+      "ev-1ad617b37064bcb93899cb42",
+      "ev-368dfdf0807e7840f82c7ca4"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "leading",
+     "confidence": 0.8,
+     "cause": "当前“终端无法注册、无 PDU 会话”的直接原因是 RAN 侧工作负载已停止：gnb-1 上的 ueransim-gnb 与 ue-1 上的 ueransim-ue 均 active=false/status=stopped，导致不存在 N2 SCTP 端点、无 NG Setup、无 UE 数据会话，UE 发起的全部探测不可用（受影响实体：gnb-1、ue-1；故障位置：实验 Trial 的 RAN 工作负载生命周期）。",
+     "supporting_evidence_ids": [
+      "ev-467e533c18d8291e400f4a3e",
+      "ev-c8e978e7023f5f41147ee5a9",
+      "ev-e1bf9ae8bf9c0004a65d62ed",
+      "ev-b4f24ce7fe81e9f638274272",
+      "ev-676531346f3b85c450f6c144",
+      "ev-a11729f3af8ce95f20f99a94",
+      "ev-af86842b48902bc72020e5ed"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "possible",
+     "confidence": 0.45,
+     "cause": "在 N2 与注册/PDU 会话均已恢复的情况下（16:31:41–42），面向 MEC 的业务访问仍失败：从 UE 数据出口 10.45.0.2(uesimtun0) 发往 MEC DNS 10.47.0.53:53 的查询在 network_probe 阶段超时、MEC HTTP 健康检查未通过，指向 N6/MEC 侧存在一个独立于 N2 的残留故障（受影响实体：ue-1 的用户面路径 n6 与 MEC 业务端点；故障位置：尚未定位到 N6 承载/MEC 服务中的具体位置）。",
+     "supporting_evidence_ids": [
+      "ev-6c257b159f8afee869454c36",
+      "ev-317f7d460cec85b52b5353f3",
+      "ev-df4032fec5db9245a8900bdc"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "weakened",
+     "confidence": 0.08,
+     "cause": "AMF 等 5GC 网元或终端签约配置故障导致注册失败（受影响实体：amf/smf/upf/nrf 与 ue-1 签约数据）。",
+     "supporting_evidence_ids": [
+      "ev-e2c1f39f1fb06495a5826e39"
+     ],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-14 16:27:59.130699",
+   "investigation_id": "inv-37e9847fe582",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.9,
+     "cause": "受影响对象：gNB(gnb-1) 与 AMF 的 N2 控制面（AMF N2 端点 127.0.0.5:38412/SCTP）。故障位置与机制：宿主机 iptables filter 表自定义链 OPSMIND_TWIN_IN 中存在注入规则 “-A OPSMIND_TWIN_IN -p sctp -m sctp --dport 38412 -j DROP”（命中 33 包），将 gNB→AMF 的 N2/SCTP INIT 静默丢弃，使 SCTP 关联无法建立（无 38412 ESTAB、NGAP 0 帧、gNB 日志 SCTP 连接超时），UE 由此无法经 N2 完成注册/建立 PDU 会话，MEC 业务端到端不可用。",
+     "supporting_evidence_ids": [
+      "ev-5002d6490e0817c7dcce6877",
+      "ev-d712013ef73b7ff7c1869636",
+      "ev-29898bf067f08119757145d9",
+      "ev-12031f5d0161d90c83169ad5",
+      "ev-011f109bab45b71e7361a1cf",
+      "ev-d4f401affb213685a283bcd4",
+      "ev-1a65d54320e6e44437f49299"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "possible",
+     "confidence": 0.5,
+     "cause": "受影响对象：UE(ue-1) 的小区选择/驻留。观察到的现象：gNB(gnb-1) 服务小区在 UE 视角被 SIB1 标记为 barred，UE 每 30s 报 “Suitable/Acceptable cell selection failed in [1] cells … [1] barred”，未进入 RRC/注册流程。该 barred 是独立注入的 RAN 小区配置故障、还是 gNB 因 N2 未建链而置为 barred 的连带表现，目前证据不足以判定；需在 N2 恢复后复查。",
+     "supporting_evidence_ids": [
+      "ev-e04bab18596d34edbd2b0fee",
+      "ev-b3e304d7b2d24600b7d10514"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "假设“5GC 网元进程/监听故障导致注册失败”，即 AMF/SMF/UPF/NRF/mongodb 进程未运行或端口未监听。该假设被观测否定：五个网元进程 active 且各自协议监听器在案（amf SCTP 38412、smf/upf GTP/PFCP、nrf TCP 7777、mongodb TCP 27017），订阅鉴权字段一致，排除为根因。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "weakened",
+     "confidence": 0.15,
+     "cause": "假设“MEC 应用故障导致业务不可用（DNS/HTTP/MQTT 应用层 DOWN）”。业务探测显示 MEC HTTP 在 source_resolution 阶段即因 “UE data session is missing or ambiguous” 失败，未到达 MEC 应用层，且既有观测表明 MEC 监听（dnsmasq/HTTP/MQTT）在案，故该假设被削弱。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-06 17:19:14.473149",
+   "investigation_id": "inv-3d1f0e2b461e",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.85,
+     "cause": "实验环境主机 host netns(filter 表 OPSMIND_TWIN_IN 链)中的注入规则 `-p sctp -m sctp --dport 38412 -j DROP` 丢弃了 gNB(127.0.0.1:46943)→AMF(127.0.0.5:38412) 的 N2/NGAP SCTP 报文，使 NG Setup 无法完成；gNB 因此将其小区宣告为 barred，UE-1 无法注册、无 PDU 会话，业务访问失败。",
+     "supporting_evidence_ids": [
+      "ev-dc9de870f5e187e845efad36",
+      "ev-bb63e16886bf4a857eadd912",
+      "ev-987680510f1482022d393fb4",
+      "ev-67776af3519e0e170197c7f9",
+      "ev-a47a334b94270ed0150836f3",
+      "ev-ffe850aafb7a81e88a47b706",
+      "ev-a700e58f095f4f86d01f919d",
+      "ev-98c84b563ad0ce662c2aa802",
+      "ev-ae80e8e23d1bda163c432f16",
+      "ev-bb56299898e5e01cbb818cb8"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "possible",
+     "confidence": 0.45,
+     "cause": "在 N2 与 PDU 会话均已恢复的前提下，UE-1(10.45.0.2，uesimtun0，ns opsmind-ue)→MEC 的用户面/DN 路径仍被阻断：到 10.47.0.53:53(DNS) 与 10.47.0.80:8080(HTTP) 均超时，而 N3 GTP-U(127.0.0.1↔127.0.0.7:2152) 与 PFCP 会话建立流量存在，故障位置应在 UPF 的 N6 侧或 DN/承载段。",
+     "supporting_evidence_ids": [
+      "ev-9fe550f4d3393550d9bef53b",
+      "ev-60579ca1b0c6ac628f40b0c2",
+      "ev-6feb18ae66355ad18305913f",
+      "ev-0d1314bedad5261221ebabb0"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "possible",
+     "confidence": 0.3,
+     "cause": "MEC 域中的应用服务本身未提供响应：DNS 10.47.0.53:53 与 HTTP 10.47.0.80:8080 均无应答，导致 mec_dns_answer/mec_http_health 业务检查失败；现有证据只能证明超时，无法区分是路径阻断还是服务未监听。",
+     "supporting_evidence_ids": [
+      "ev-9fe550f4d3393550d9bef53b"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "UE-1 的签约/认证参数与参考配置不一致导致注册被拒。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H5",
+     "status": "weakened",
+     "confidence": 0.15,
+     "cause": "RAN 侧存在独立的小区配置/射频故障，导致 UE 找不到可驻留小区。",
+     "supporting_evidence_ids": [
+      "ev-ffe850aafb7a81e88a47b706"
+     ],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-14 16:02:57.045184",
+   "investigation_id": "inv-423a0a2aaea0",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "h1",
+     "status": "leading",
+     "confidence": 0.85,
+     "cause": "核心网侧实验网络策略定向丢弃 gNB→AMF NGAP SCTP(127.0.0.5:38412) 的 INIT，使 N2 关联无法建立（COOKIE_WAIT→超时释放），进而阻断 UE 注册与 PDU 会话",
+     "supporting_evidence_ids": [
+      "ev-8d1fb76c507ee6502938aedf",
+      "ev-956f305e1637a2200c0bd657",
+      "ev-9df97d52c9d9500d29dfa3d2",
+      "ev-e16e2024da420a2760c35144",
+      "ev-d94478a83bdbb64a396ba78b",
+      "ev-dbd88916b36843dc7328e107",
+      "ev-a0560b43c18d56667c067b55",
+      "ev-fb86bfc08f5210f283d36f12"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "h2",
+     "status": "weakened",
+     "confidence": 0.15,
+     "cause": "AMF NGAP 未监听或监听地址/端口与 gNB 配置不匹配",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "h3",
+     "status": "weakened",
+     "confidence": 0.1,
+     "cause": "链路损伤/时延类实验故障导致 SCTP 握手缓慢或失败",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "h4",
+     "status": "rejected",
+     "confidence": 0.1,
+     "cause": "gNB 接入配置错误导致 N2 端点错误",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "h5",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "AMF/SMF/UPF 等 5GC 服务未运行导致 N2 不可达",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-05 06:21:17.424112",
+   "investigation_id": "inv-49652b61e7ae",
+   "conclusion_status": "confirmed"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.9,
+     "cause": "AMF/核心网侧注入的网络策略丢弃 gNB→AMF 的 SCTP/N2 INIT，使 N2 关联停留在 COOKIE_WAIT，NGAP/NGSetup 无法进展",
+     "supporting_evidence_ids": [
+      "ev-ee960e487015c223576cf78f",
+      "ev-d477cf1522525fec6ca038d0",
+      "ev-c0bb59d8369316f46b0dcc9b",
+      "ev-79a58aa24e6b9503c55a2d23",
+      "ev-1eb0e41bc7de03d6ffcd7689",
+      "ev-fe614725099840fe3438bd3d",
+      "ev-5e761c0abf9c2317ed5766eb"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "weakened",
+     "confidence": 0.1,
+     "cause": "gNB 配置了错误的 AMF 地址/端口导致 SCTP 连不上",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "AMF 进程或 SCTP 协议栈异常导致不响应 INIT",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-05 17:59:48.533861",
+   "investigation_id": "inv-4c636e86db5b",
+   "conclusion_status": "confirmed"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.9,
+     "cause": "在试验租户 ah-trial_d67622ca210bb9181a52 中，AMF 孪生主机宿主 netfilter filter 表 OPSMIND_TWIN_IN 链被注入 `DROP sctp --dport 38412` 规则（ev-a159ad92…，计数器 packets=25 bytes=1700），静默丢弃 gNB-1(127.0.0.1:53572) → AMF N2 接口(127.0.0.5:38412) 的 SCTP 关联建立报文：SCTP 关联停在 COOKIE_WAIT/UNCONN（ev-4a67cd94…/ev-98dbbc16…），gNB 卡在 “Trying to establish SCTP…”（ev-84401117…），N2/NGAP 无法建立，导致 UE-1 选网/注册失败、PDU Session 与 MEC 业务不可达。执行已审批的 network.restore_policy 后，规则 16→15 且 dport=38412 匹配为 0（ev-c448931…），SCTP 恢复 ESTAB（ev-235c5391…）、NG Setup successful 并建立 PDU session count[1]（ev-e964e7ac…），DNS NOERROR（ev-c758efd2…）、MEC HTTP 200（ev-d99036d2…）；独立验证器于 2026-09-07T09:32:07Z 完成业务验证（mec_dns_answer + mec_http_health 通过），动作 action_status=verified_effective、business_status=passed。",
+     "supporting_evidence_ids": [
+      "ev-a159ad92db2b1dcd87ef65ea",
+      "ev-84401117e2e22564f0a6c9e4",
+      "ev-4a67cd94f374129d1df4cb9f",
+      "ev-98dbbc167ad59ff1234a8dd6",
+      "ev-bb93c1af34e7105251296f58",
+      "ev-e964e7ac6a273b0d9252a4dc",
+      "ev-235c5391a02e0d1180ceb31f",
+      "ev-c448931de72601ba105fd9cb",
+      "ev-c758efd2bb1ebffdec0b42d5",
+      "ev-d99036d25f5d63ce25c4790e"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "weakened",
+     "confidence": 0.1,
+     "cause": "假设终端注册失败源于订阅认证资料与网络不一致导致 5G AKA 失败。现场证据显示 query_subscriber_auth_consistency 返回 authentication_profile_consistent=true、subscriber_present=true，终端认证配置与实验室权威参考一致；且该假设不能解释 SCTP/N2 层握手未完成的现象。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "假设 AMF/SMF/UPF/NRF 等 5GC NF 未运行或端口未监听导致注册失败。现场证据显示 AMF(open5gs-amfd pid=1432843) SCTP LISTEN 127.0.0.5:38412，SMF/UPF/NRF 各自监听正常，排除 NF 侧未就绪。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "weakened",
+     "confidence": 0.1,
+     "cause": "假设 MEC 侧 DNS/HTTP 服务自身故障导致业务访问失败。修复 N2 路径后，UE(uesimtun0/10.45.0.2)解析 mec-service→10.47.0.80 返回 NOERROR（ev-c758efd2…），MEC HTTP 健康接口返回 200 healthy（ev-d99036d2…），说明业务层服务自身正常；业务不可达是 PDU Session 无法建立的派生表现。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-07 09:24:36.725408",
+   "investigation_id": "inv-4ca0bb5e6de9",
+   "conclusion_status": "confirmed"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.82,
+     "cause": "目标网络路径 gNB(127.0.0.1:44059)→AMF(127.0.0.5:38412) 的 N2 SCTP 关联被实验环境网络策略丢弃:AMF 进程存活且 SCTP 监听端口 38412 处于 LISTEN,但抓包显示 gNB 持续发送 INIT 而 AMF 侧(source_port=38412)零帧回应,内核因未收到报文而不应答,关联停在 COOKIE_WAIT,NGAP 信令为 0,导致 ue-1 无法注册、PDU 会话与到 MEC 的业务访问全部失败;对 AMF 目标执行 network.restore_policy 后 SCTP 转 ESTAB、NGAP 恢复流动、UE→MEC HTTP 200,业务恢复。",
+     "supporting_evidence_ids": [
+      "ev-75baa377bf5e69026e6502b2",
+      "ev-105dfebd8e907627ec5b74cc",
+      "ev-498b8265beda16683c5c9d13",
+      "ev-234d8d282f734d0f5cd975cf",
+      "ev-0904977b43dad61cae18d824",
+      "ev-23532de903273cc5014fb9cc",
+      "ev-69d2a414a7d1e936579cd20d",
+      "ev-43b477faf6a1e0f13de18252",
+      "ev-fed8750bef3587a66238e2fb"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "weakened",
+     "confidence": 0.08,
+     "cause": "AMF 服务未运行或未监听导致 N2 SCTP 无法建立。反证:AMF 进程存活并在 127.0.0.5:38412 LISTEN,监听 socket 的 Linux 内核若收到 INIT 必回 INIT-ACK,故与观测到的零应答矛盾。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "UE 鉴权/签约参数与权威配置不一致导致注册在鉴权阶段失败。反证:query_subscriber_auth_consistency 返回 authentication_profile_consistent=true,检查字段 amf/key/op/supi 无不一致;且观测到的信令在 N2/NGAP 层面即为零,早于鉴权阶段。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "weakened",
+     "confidence": 0.05,
+     "cause": "gNB 将 SCTP 关联指向错误 AMF 地址或配置了错误端口。反证:抓包显示 INIT 目的端恰为 AMF 实际监听地址 127.0.0.5:38412,方向与端口均正确。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-07 01:28:07.829053",
+   "investigation_id": "inv-4e20d9a4d864",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.62,
+     "cause": "gNB↔AMF 的 N2(SCTP/NGAP,127.0.0.5:38412)控制面未建立/被阻断（最可能为 AMF 侧实验网络策略或过滤规则丢弃），导致 UE 无法完成注册、无 PDU 会话，进而 N6/MEC 业务不可达",
+     "supporting_evidence_ids": [
+      "ev-22fd607dfdd2c0813a0c42c5",
+      "ev-df2e0b87b5ec3b9ed4a09e46",
+      "ev-11fc5b8f29535f8449f1220a",
+      "ev-7e3ba628317af35f9bc9181f",
+      "ev-0fdda5a04e22c6369689dc76",
+      "ev-3637642d6936d089153f252e",
+      "ev-d4122457e03146447a55ce56",
+      "ev-b52e25faf80699c9c0e086b9"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "possible",
+     "confidence": 0.18,
+     "cause": "AMF NGAP 监听异常或未就绪（进程在但 N2 端点未响应 INIT），造成 gNB 关联无法建立（H1 的子因方向）",
+     "supporting_evidence_ids": [
+      "ev-22fd607dfdd2c0813a0c42c5",
+      "ev-df2e0b87b5ec3b9ed4a09e46",
+      "ev-11fc5b8f29535f8449f1220a"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "weakened",
+     "confidence": 0.15,
+     "cause": "数据面/路由（N6 到 MEC/DNS）或链路损伤作为独立根因导致业务不可达",
+     "supporting_evidence_ids": [
+      "ev-3637642d6936d089153f252e",
+      "ev-d4122457e03146447a55ce56"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "rejected",
+     "confidence": 0.03,
+     "cause": "UE 订阅或鉴权资料与实验室不一致导致注册被拒",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-05 05:51:30.483363",
+   "investigation_id": "inv-50fc2b06228b",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.92,
+     "cause": "主机防火墙入向策略规则 `-A OPSMIND_TWIN_IN -p sctp -m sctp --dport 38412 -j DROP`（位于 gNB 与 AMF 共同所在实验主机上）持续丢弃 gNB(127.0.0.1) 发往 AMF(127.0.0.5:38412) 的 NGAP over SCTP 入向报文，使 N2 的 SCTP 关联停在 COOKIE_WAIT、收不到 INIT-ACK，AMF 侧完全没有 NGAP；UERANSIM 因 N2 不可用将小区置为 barred，UE 无法选到合适小区并停在 MM-DEREGISTERED/NO-CELL-AVAILABLE，无法建立 PDU 会话，最终表现为终端注册失败、MEC 业务不可达。",
+     "supporting_evidence_ids": [
+      "ev-e91dd9e177868ce61a4369b6",
+      "ev-9fbd6ba3d4fcf4142047869f",
+      "ev-56f75e5efc8aba33cfffbb63",
+      "ev-127092120b9a647164a4c159",
+      "ev-7e193ff45cae3d012177aa04",
+      "ev-7ffa46f7c8258c92ca60d630",
+      "ev-493a917b736783d818184bca",
+      "ev-125b569b19bde947b07556c5",
+      "ev-e657b311b20b966fe40adb74",
+      "ev-680d8a1ea535888cdfbcb8c6",
+      "ev-5acb7f049c7d8909bfa5887f",
+      "ev-a586717a799388c9d2ffd431",
+      "ev-a3d94a6c6cdcdaaae31195c8",
+      "ev-3abb08b6da6dd3d36e319f1e",
+      "ev-cda31af3f8a9612599ca216e",
+      "ev-87bf3e61900edffc58401f71",
+      "ev-4645b5e57a05a3cd87e3fa0b"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "rejected",
+     "confidence": 0.03,
+     "cause": "终端签约或鉴权参数（AMF/KEY/OP/SUPI）与核心网不一致，导致鉴权失败而无法注册。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "rejected",
+     "confidence": 0.02,
+     "cause": "5GC 网元进程或监听端口异常（AMF/SMF/UPF/NRF 未运行或未监听），导致注册与业务失败。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "gNB 的 N2 目标地址配置错误，或 UE/MEC 侧业务配置与 N6 路由独立故障，导致 N2 无法建立或业务不可达。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-16 10:27:52.351282",
+   "investigation_id": "inv-54d92669ff27",
+   "conclusion_status": "confirmed"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1-n2-policy-block",
+     "status": "leading",
+     "confidence": 0.85,
+     "cause": "在本 Trial 中，gNB(127.0.0.1) 与 AMF(127.0.0.5:38412) 之间的 N2 SCTP 关联因网络策略/过滤而在到达 AMF 监听套接字之前被丢弃：gNB 反复发送 INIT 却未收到 INIT-ACK（COOKIE_WAIT），AMF 侧抓包 0 个 SCTP 帧，NGAP 因此无法建立，终端无法注册并进而无 PDU 会话、业务不可达；恢复 AMF 侧网络策略后关联变为 ESTAB，UE 接入且业务恢复。",
+     "supporting_evidence_ids": [
+      "ev-1dbe10b808830efaf0bf2c79",
+      "ev-62c6cfb63f7ddfb5931a4cc3",
+      "ev-dda50c0ecf7effdb0c7b0cae",
+      "ev-493a41cbb4769d45f812bf00",
+      "ev-a5e5354396fb604dfab2c86a",
+      "ev-e7390f0484c74a56e93040df",
+      "ev-db655cf54c13c604d61468bb",
+      "ev-0e05b5a95c3efa1ead0ab6bd",
+      "ev-00cadceed8a1226ddf9ebd26",
+      "ev-78dfb5e71c36c38af193df6a",
+      "ev-6407a38cf40e5b4114af4da7",
+      "ev-195d837ef801b6aa990befd0",
+      "ev-322e4dd7fb8a4af01a8cdbec"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2-ue-route-missing",
+     "status": "weakened",
+     "confidence": 0.12,
+     "cause": "终端侧网络配置缺失（UE 仅有 10.47.0.0/30 的 link 作用域路由且无默认路由）导致业务访问失败，与 N2 无关。",
+     "supporting_evidence_ids": [
+      "ev-160acf0b3fb122ea3be02178"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3-subscriber-credential-mismatch",
+     "status": "rejected",
+     "confidence": 0.02,
+     "cause": "终端签约/认证凭据与核心网不一致，导致注册被拒。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4-core-nf-or-transport-failure",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "5GC 网元进程（AMF/UPF）或承载层整体传输故障导致注册与业务失败。",
+     "supporting_evidence_ids": [
+      "ev-84d3d81f1a4f99b01a6f7652"
+     ],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-14 10:03:43.190358",
+   "investigation_id": "inv-5612343eaf65",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.85,
+     "cause": "UE-1 无法注册、业务不可用：gNB-1↔AMF 的 N2 SCTP(127.0.0.5:38412) 连接因实验网络策略被阻断而无法建立（gNB 日志 SCTP connect timed out、无 ESTAB、NGAP 未建立），RAN 小区同时广播为 barred，UE-1(PLMN 999/70) 无法驻留并发起注册，无 PDU 会话，MEC DNS/HTTP 业务不可达。执行 network.restore_policy(action-b4a1de895d12) 且未做其他变更后，N2 SCTP 恢复 ESTAB、UE 注册并建立 PDU、业务探测恢复，独立验证通过，确认该网络策略为根因。",
+     "supporting_evidence_ids": [
+      "ev-df3cba4a9346a42f4db228a3",
+      "ev-09267e0d1aee587638853afa",
+      "ev-237ba071a455e9ba39201518",
+      "ev-2d637f76331c064b9fccc653",
+      "ev-f477b50cd69d18141b439ff9",
+      "ev-cfbc6a7fe147bafe265a8acb",
+      "ev-0068cc47929450dcf6936cc2",
+      "ev-bf71264aa70199b41274202f",
+      "ev-0d5d589fc871c304b55df4c3",
+      "ev-6528fa6520de2004b29043d2",
+      "ev-7985c4d70b2e2e4508c623b5",
+      "ev-0988a703ec8c7db601c53d2b"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "weakened",
+     "confidence": 0.1,
+     "cause": "gNB-1 小区被静态配置为 barred（RAN 配置类故障）导致 UE-1 无法驻留。修复过程未对 RAN 配置做任何变更即恢复服务，反证小区 barred 并非独立静态配置故障，而是与 N2 状态耦合的现场表现。",
+     "supporting_evidence_ids": [
+      "ev-237ba071a455e9ba39201518",
+      "ev-2d637f76331c064b9fccc653"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "rejected",
+     "confidence": 0.02,
+     "cause": "5GC 网元未运行导致注册失败：AMF/SMF/UPF/NRF/MongoDB 进程与监听均健康，未发现网元宕机证据。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "rejected",
+     "confidence": 0.02,
+     "cause": "订阅鉴权参数不匹配导致注册被拒：amf/key/op/supi 一致性检查通过，未发现该机制故障。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H5",
+     "status": "rejected",
+     "confidence": 0.03,
+     "cause": "N6 用户面路径/链路损伤独立导致业务失败：仅在恢复 N2（未做任何 N6 动作）后 MEC DNS/HTTP 即恢复，说明不存在独立 N6 故障导致当前业务失败。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-05 19:36:24.866827",
+   "investigation_id": "inv-5996f9ba2fee",
+   "conclusion_status": "confirmed"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.9,
+     "cause": "本次 5G 数字孪生实验(Trial ah-network-evidence-20260907-04)中,UE(ue-1)无法注册、MEC 业务访问失败的根因位于 gNB(gnb-1)与 AMF(amf)之间的 N2 控制面:宿主网络策略丢弃了发往 AMF SCTP 端口 127.0.0.5:38412 的入站 N2 报文。修复前抓包显示 33 帧 SCTP 全部为入向 INIT(chunk type=1)约 3–6s 重传,始终无 INIT-ACK/响应,即 gNB 的 SCTP 关联请求未到达 AMF 应用;SCTP 关联无法建立→NGAP 无法进行→UE 无法完成注册,PDU 会话与 MEC 业务(DNS/MEC HTTP)随之失败。执行登记动作 network.restore_policy(action-17ffc182b349,未重启 AMF)移除该入站丢弃后,gNB↔AMF SCTP 关联建立并进入 ESTAB、NG Setup 成功、UE 完成注册(MM-REGISTERED/NORMAL-SERVICE)、PDU 会话建立(TUN uesimtun0 10.45.0.2),DNS 与 MEC HTTP 恢复,经独立验证器确认业务通过。",
+     "supporting_evidence_ids": [
+      "ev-410f0a1e9d9578334ecf4b67",
+      "ev-3a0c28451b70b7c41c6c47a2",
+      "ev-da12600837b6b289a37aef4b",
+      "ev-b3a2cce42cc7ed24e025475b",
+      "ev-ffc934c5b1ae35d98f7c26ad",
+      "ev-d4aa84f3cc501013e5967982",
+      "ev-a3184c0f374d29d64a181a58",
+      "ev-c96f0e3d8304dab4a2c7044b"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "UE 认证配置与实验室权威参考不一致(amf/key/op/supi 等)导致注册被拒、无法入网。经现场一致性检查,UE 认证配置与参考 profile 完全一致,无失配字段且签约存在,该机制不能解释本故障;且仅在恢复网络策略、未改动签约后注册即成功。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "weakened",
+     "confidence": 0.1,
+     "cause": "AMF/5GC 网元进程故障或服务不可用导致 N2 无响应。该假设被削弱:修复仅恢复网络策略、未重启或变更 AMF,即恢复 N2 与注册,说明 AMF 进程并非故障根因;且抓包显示只有 gNB 侧持续 INIT 而无任何 AMF 侧报文,与进程级不可用之外的外部丢弃更一致。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-07 00:58:25.577435",
+   "investigation_id": "inv-5f5dcbf9b9e1",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.85,
+     "cause": "受影响对象为 5G 数字孪生实验（namespace ah-trial_1f2fbacc91a74df4a824）的 gNB(127.0.0.1) 与 AMF(127.0.0.5:38412) 之间的 N2/SCTP 控制面链路。故障定位在宿主 netfilter filter 表自定义 OPSMIND_TWIN 链对 gNB→AMF 方向 N2 SCTP 报文的静默丢弃：故障期 AMF 侧 38412 socket 保持 LISTEN、进程存活，但 SCTP INIT 反复重传且 AMF 零回应（反向抓包匹配帧 0），行为与链路级丢包一致。机制为 N2 关联无法建立→小区 SIB1 置 barred→UE 无法驻留与 NAS 注册→无 PDU 会话→UE→MEC DNS/HTTP 业务失败。执行 network.restore_policy(AMF) 后 N2 ESTAB、UE 注册成功、DNS/HTTP 业务恢复，动作网关判定 verdict=effective，进一步支持该因果。",
+     "supporting_evidence_ids": [
+      "ev-0837b3718c114249da7dd373",
+      "ev-b8885ca625cd77d797ea4229",
+      "ev-3efeadda7f1b566db4169a1b",
+      "ev-40d8006dfd2d3d17d81dea82",
+      "ev-303f961dc1b01abfcc4c54ac",
+      "ev-912d0e2b533bb5e7e48ba01e",
+      "ev-25e824256ca3f8d69357ef6a",
+      "ev-56f66752ea61e8d2a10ec0ac",
+      "ev-f859dedea86e0490c92cd961",
+      "ev-09d229b2a762c3a3766d8b19",
+      "ev-bf009a223b1d15c4d0365578",
+      "ev-788f4adec64e8bf525407637",
+      "ev-ba2436f4ff6120941ec67ffb",
+      "ev-1c6fe03117dfe77d2ccc7d16",
+      "ev-c59f9c01c9b2a1ae4ce7c305",
+      "ev-5cecc15786b775f4b61ad1dc",
+      "ev-8b54937ba9e56b92c3829022",
+      "ev-c6a22be64f4f179548b666c6"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "AMF 进程/核心网服务故障（未运行或崩溃）导致 SCTP 不应答。证据不支持：故障期 AMF 侧 38412 处于 LISTEN、socket/进程存活；且执行 network.restore_policy 后无需重启 AMF 即重建 N2 关联并恢复业务。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "weakened",
+     "confidence": 0.05,
+     "cause": "gNB/小区无线配置（SIB1 barred 或 PLMN/小区参数）作为独立故障导致 UE 无法驻留。证据表明 barred 是 gNB 失去 N2 后的表象而非独立根因：恢复 N2 后小区不再 barred、UE 正常驻留注册，无线侧未做任何变更。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "rejected",
+     "confidence": 0.03,
+     "cause": "UE/SIM 或注册参数（终端侧）问题独立导致无法注册。证据不支持：修复控制面后未改动 UE/SIM 任何参数即完成注册并恢复 DNS/HTTP 业务。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-06 14:54:03.776342",
+   "investigation_id": "inv-5f695a5c5a02",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "failed",
+   "hypotheses": [],
+   "started_at": "2026-09-11 15:32:29.298662",
+   "investigation_id": "inv-608b343f5330",
+   "conclusion_status": "inconclusive"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.95,
+     "cause": "终端 ue-1 无法注册且业务失败的根因是 gNB-1↔AMF 的 N2/SCTP 关联无法建立。AMF 所在主机 filter 表注入链 OPSMIND_TWIN_IN 上存在规则 `-A OPSMIND_TWIN_IN -p sctp -m sctp --dport 38412 -j DROP`（命中计数 33，与抓包中持续发往 127.0.0.5:38412 的 SCTP INIT 帧数一致），内核在 AMF 收到报文前丢弃，AMF 不回 INIT-ACK，导致无 N2/NGAP，UE 无法注册与建立 PDU 会话，MEC 业务不可达；移除该规则后 N2/SCTP 38412 建立、NGAP 帧出现、UE→MEC DNS/HTTP 恢复，机制与现场证据吻合。",
+     "supporting_evidence_ids": [
+      "ev-326dc3c024dab3b72b3f1dff",
+      "ev-7507c593f1bd5e10fcdd8fd5",
+      "ev-a92ee5538e167b775b0eef65",
+      "ev-04053d50a987d26fff8c31f2",
+      "ev-74a2db3e2e6517b2f20e77f8",
+      "ev-1e607937c7a727568ab26423",
+      "ev-d6aa6ca06c8f2459f8247bd8",
+      "ev-a419129ff23fddb2a2d36786",
+      "ev-c8635ebe276ea8b778365cb1",
+      "ev-221673197284324d7f917a11",
+      "ev-f7d5d471c47913c6d9d72712"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "weakened",
+     "confidence": 0.05,
+     "cause": "5GC 网元（AMF/SMF/UPF/NRF/mongodb）进程或监听失效导致 AMF 无法接受 N2 而注册失败——已被现场观测削弱。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "weakened",
+     "confidence": 0.05,
+     "cause": "终端 ue-1 订阅/鉴权参数与核心网不一致导致注册被拒——已被订阅鉴权一致性检查削弱。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "weakened",
+     "confidence": 0.08,
+     "cause": "数据面/N6 或 MEC 侧单独故障导致业务访问失败（与 N2 无关）——已由修复前数据面物理路径存在且修复后端到端业务恢复削弱。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-06 18:00:51.049666",
+   "investigation_id": "inv-63eec6c5b25e",
+   "conclusion_status": "confirmed"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.78,
+     "cause": "5G 实验环境 host 命名空间 iptables filter 表自定义链 OPSMIND_TWIN_IN 中注入/残留了规则 `-A OPSMIND_TWIN_IN -p sctp -m sctp --dport 38412 -j DROP`（命中 26 包），在 INPUT 路径丢弃 gNB 发往 AMF N2 SCTP 监听端点 127.0.0.5:38412 的 INIT；AMF 从未收到 INIT 因此不产生 INIT-ACK/ABORT，N2 SCTP 关联保持 COOKIE_WAIT，NGAP 无任何帧，UE(ue-1) 无法注册、无法建立 PDU/业务。该机制能解释全部观测：gNB 反复重传 INIT、AMF 侧源端口 38412 帧为 0、SCTP 关联未 ESTAB、NGAP 0 帧、各网元进程 healthy 且订阅认证一致。",
+     "supporting_evidence_ids": [
+      "ev-6194fd01168b466635a602ce",
+      "ev-5e16cdb18ee63d4bbfdd9f7c",
+      "ev-3175ab693e3ddd79005c19e7",
+      "ev-bd42ede7600d5e96d7333545",
+      "ev-6ee2c3557d1b0df603a3b9bf",
+      "ev-6f0ac4b32916cc3fb47b2e3a"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "weakened",
+     "confidence": 0.05,
+     "cause": "UE 订阅认证资料（amf/key/op/supi）与 lab 权威配置不一致导致鉴权失败进而注册被拒。经核对，认证配置一致且 subscriber_present=true，无证据支持此假设。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "weakened",
+     "confidence": 0.07,
+     "cause": "5GC 网元进程/监听故障（AMF/SMF/UPF/NRF/MongoDB 宕机或未监听）导致注册信令无法处理。现场观测所有核心网服务进程 active、owned_protocol_listener=true、health=healthy，与假设矛盾。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "gNB(UERANSIM) 配置或运行异常导致未发起/无法发起 SCTP。现场 gNB 进程 running 且日志持续主动 Trying SCTP(127.0.0.5:38412)，说明 gNB 行为正常，故障位于到达 AMF 前的丢包。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-07 00:17:55.807672",
+   "investigation_id": "inv-69a84bff34c4",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.9,
+     "cause": "gnb-1(UERANSIM 工作负载) 到 amf(open5gs-amfd，监听 SCTP 127.0.0.5:38412) 的 N2 SCTP 关联在握手阶段被实验网络策略阻断：gNB 本地 127.0.0.1:50017 发出的 INIT 无法完成，关联在两个时间点均停留在 COOKIE_WAIT，抓包几乎无 NGAP 帧(2 帧)，UE 无法注册/无数据会话。执行最小修复动作 action-9ae95231341e(network.restore_policy, target=AMF, 独立审批通过、受控执行 production_execution=false)后，N2 SCTP 关联转为双向 ESTAB(127.0.0.5:38412↔127.0.0.1:39970)，NGAP 帧增至 17、UE 获 10.45.0.2 且 MEC DNS/HTTP 业务通过，服务端独立验证 verdict=effective，构成因果闭环。",
+     "supporting_evidence_ids": [
+      "ev-c8193655ce73cd24db05fd51",
+      "ev-0f9343121fa094f5f9d174e3",
+      "ev-73f76ae152382408b7c7c187",
+      "ev-46c191887eecd1723eabd5db",
+      "ev-6b17e142ff40c8ada53b18c9",
+      "ev-d6af5666fb645234dd0d8035",
+      "ev-399d1adb3369c2238d381d5c",
+      "ev-4dc9c2634266ddaac71021c5",
+      "ev-a01952070091868e6afdb24d",
+      "ev-334e620ee6dc73bf0b930f6d"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "weakened",
+     "confidence": 0.12,
+     "cause": "备选假设：AMF 的 NGAP 应用虽监听 SCTP 38412 但未及时接受/处理内核已建立的关联，导致 N2 握手不完成。该假设被削弱：内核 SCTP 握手由协议栈完成且同主机其它 SCTP 关联均 ESTAB，且仅执行网络策略恢复(不触碰 AMF 进程)后 N2 即恢复。",
+     "supporting_evidence_ids": [
+      "ev-14e6132f5188898cc754e156"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "rejected",
+     "confidence": 0.03,
+     "cause": "备选假设：gNB 配置错误指向了不存在的 AMF 地址导致 N2 无法建立。该假设被反证：gNB 的 SCTP 目标正是 AMF 实际监听地址 127.0.0.5:38412，且网络策略恢复后同一配置即成功建立 ESTAB 关联。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-05 19:51:39.115162",
+   "investigation_id": "inv-69a8640cf83d",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.9,
+     "cause": "数字孪生实验主机 iptables filter 链 OPSMIND_TWIN_IN 中存在 `-p sctp --dport 38412 -j DROP` 丢弃规则（gNB/AMF 两视角一致，命中 33 包/2244 字节），丢弃全部 gNB-1 → AMF(127.0.0.5:38412) 的 N2/SCTP 报文。表现为 gNB-1 SCTP 连接超时、无 38412 SCTP 关联、NGAP 抓包 0 帧；UE-1 无法注册、无法建立 PDU 会话，MEC 业务失败。AMF 进程存活且正常监听 38412，故故障位于实验网络策略层而非 5GC 网元软件。该定位已获定向修复验证：恢复策略动作 action-f385ad14bcb1 获批执行成功（verified_effective），独立验证器于 2026-09-07T08:15:02Z 从 ue-1（uesimtun0/10.45.0.2）验证 MEC DNS opsmind-mec.lab→10.47.0.80 返回 NOERROR、http://10.47.0.80:8080/health 返回 200 healthy，业务恢复。",
+     "supporting_evidence_ids": [
+      "ev-4ae9ab944cfb0891dfca854c",
+      "ev-2997bced436f38ba34b2d4b0",
+      "ev-f85c15d08cc433d56a80b353",
+      "ev-9713c783087db612c2215346",
+      "ev-f4220018778edd38d115c26c",
+      "ev-fb23b30d166564b5729a6640",
+      "ev-cc8e4c03983fc1be5bfdea0f"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "终端鉴权/订阅配置与核心网不一致导致注册被拒",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "5GC 网元(AMF/SMF/UPF)未运行或未监听 N2 端口导致无法注册",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "weakened",
+     "confidence": 0.15,
+     "cause": "数据面/承载路由缺失导致业务失败",
+     "supporting_evidence_ids": [
+      "ev-92d242873aa27086922e473f"
+     ],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-07 07:59:19.915306",
+   "investigation_id": "inv-6fe51b1bfdc3",
+   "conclusion_status": "confirmed"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.95,
+     "cause": "gNB-1↔AMF 的 N2/SCTP 关联被实验网络策略丢弃（state:firewall-sctp-drop），SCTP 停在 COOKIE_WAIT，UE 无法完成 5GC 注册与 PDU 建立，导致下游业务不可用。修复（network.restore_policy@AMF）后控制面恢复并被独立验证。",
+     "supporting_evidence_ids": [
+      "ev-2f27c9223e2823a84463b386",
+      "ev-71ce5b241bb3fc0e422b15ef",
+      "ev-2246313701e093a33e621731",
+      "ev-89c328091e1e46d115169217",
+      "ev-9608b04e10f4b6a7a942639f",
+      "ev-f882a2e74b8d6cbb533af010",
+      "ev-250323da56a2cf2079e6e3c5"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "rejected",
+     "confidence": 0.03,
+     "cause": "UE/签约鉴权参数与网络侧不匹配导致注册失败。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "rejected",
+     "confidence": 0.02,
+     "cause": "核心网 NF 或 gNB 进程崩溃/端口未监听导致注册失败。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "leading",
+     "confidence": 0.75,
+     "cause": "注册/PDU 恢复后，ue-1 路由表缺少到 MEC/DN(10.47.0.0/24)的默认/明细路由，DNS(10.47.0.53)与 MEC HTTP(10.47.0.80)从终端探测持续 network unreachable；MEC 服务进程与 UPF/MEC 侧路由均在，故障在 UE→DN 的用户面可达性（N6 业务路径）。",
+     "supporting_evidence_ids": [
+      "ev-0279fe8472f5d72d488417e5",
+      "ev-da7eb2dcd1e40339bde19937",
+      "ev-bac377b2104ad46584009205",
+      "ev-0fb615ba5228f0272e52e57c",
+      "ev-188779c01aee4363ce784563",
+      "ev-91a971e75a42c36f067a27e8",
+      "ev-7a845f6430df9ee38e216fc9",
+      "ev-a8b6d90a72f98f5057dec1e4"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H5",
+     "status": "rejected",
+     "confidence": 0.02,
+     "cause": "MEC 侧 DNS/HTTP 服务进程未运行或端口未监听导致业务不可达。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-04 11:45:34.032753",
+   "investigation_id": "inv-71bde7c4177c",
+   "conclusion_status": "probable"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.95,
+     "cause": "在数字孪生实验环境 ah-chain1-20260915-01 的宿主机(opsmind-twin host namespace)上，netfilter filter 表的 INPUT 链经自定义链 OPSMIND_TWIN_IN 存在规则 \"-A OPSMIND_TWIN_IN -p sctp -m sctp --dport 38412 -j DROP\"，丢弃了 gNB(gnb-1，源 127.0.0.1:52111) 发往 AMF(amf，127.0.0.5:38412) 的 N2/NGAP SCTP 报文；这使 SCTP 四向握手无法完成、关联停在 COOKIE_WAIT，N2 接口不可用，进而 UE(ue-1) 无法注册、无法建立 PDU 会话，MEC 业务访问失败。",
+     "supporting_evidence_ids": [
+      "ev-235ff350b6f49d7541cd0d23",
+      "ev-de069527104c150626850aa4",
+      "ev-e23ae41d4c463fb4f7c668af",
+      "ev-459f7c531c1a06dd8b937429",
+      "ev-c14f4c5c29028bfa38ae231a",
+      "ev-de915d060023faec3313b310",
+      "ev-79bca09d008347bcb5e542c6",
+      "ev-1068e2f4081acd42979156f1",
+      "ev-8e3b5aee3148438b0a434745"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "AMF(amf) 网元自身进程异常或 NGAP 监听失效，导致 127.0.0.5:38412 上的 N2 SCTP 关联无法建立，从而 UE 无法注册。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "rejected",
+     "confidence": 0.03,
+     "cause": "ue-1 的订阅认证资料与实验室权威参考配置不一致，导致注册阶段鉴权失败，进而无法建立 PDU 会话与访问业务。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "rejected",
+     "confidence": 0.02,
+     "cause": "gNB(gnb-1) 的 AMF 对端/接入配置错误，导致其无法与 AMF 建立 N2 关联并使 UE 注册失败。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-15 11:50:41.661248",
+   "investigation_id": "inv-75d347b34b3b",
+   "conclusion_status": "confirmed"
+  },
+  {
+   "status": "resolved",
+   "hypotheses": [
+    {
+     "hypothesis_id": "H1",
+     "status": "leading",
+     "confidence": 0.95,
+     "cause": "实验环境主机内核 netfilter filter 表 INPUT 链转入的自定义链 OPSMIND_TWIN_IN 中被注入规则 -A OPSMIND_TWIN_IN -p sctp -m sctp --dport 38412 -j DROP（命中 packets=15 bytes=1020），丢弃了 gNB(127.0.0.1)→AMF(127.0.0.5:38412) 的 NGAP/N2 SCTP 建链报文，使 SCTP 关联停在 COOKIE_WAIT、N2 无法建立，UE 因此无法完成注册、无法建立 PDU 会话（无 10.45.0.x 用户面地址），到 MEC 10.47.0.80 的业务不可达。",
+     "supporting_evidence_ids": [
+      "ev-8057ca7c1d48d9a8cf0938b3",
+      "ev-ed07cd6e47b97d1a9dd5aa46",
+      "ev-e78e054d50c65fdd9862fc83",
+      "ev-764421dde37a9f68f40d969e",
+      "ev-35c444b3a981ada19838aa79",
+      "ev-8cbe5443ac917ba5a885290b",
+      "ev-66d958769fe84792e7055939",
+      "ev-f486b3c54864e721088c7acf",
+      "ev-e0a3c2b0efa0bf00d7926247",
+      "ev-671174b2e33949174742fd60",
+      "ev-5bddb18b6c9ddd61857813a5",
+      "ev-896ad45b6a0b6f9f2965c696",
+      "ev-c1ef11d8d7f9b181633ab6c3",
+      "ev-1e23a52b460a67d7b9d97a89",
+      "ev-293368f672dbbe41b8985f3c"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H2",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "gNB/RAN 侧配置错误（错误的 AMF 地址或 NGAP 参数）导致无法与 AMF 建立 N2。",
+     "supporting_evidence_ids": [
+      "ev-0d6f3b94351e6803f560ed39"
+     ],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H3",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "签约数据或鉴权参数不一致（SUPI/密钥/切片签约）导致 UE 注册被拒。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H4",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "5GC 网元进程自身故障（AMF/SMF/UPF/NRF/数据库崩溃或未监听）导致终端无法注册。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    },
+    {
+     "hypothesis_id": "H5",
+     "status": "rejected",
+     "confidence": 0.05,
+     "cause": "用户面 N3/N4/N6 通路或 MEC 侧故障直接导致业务访问失败。",
+     "supporting_evidence_ids": [],
+     "root_cause_fact_refs": null
+    }
+   ],
+   "started_at": "2026-09-18 13:41:51.295261",
+   "investigation_id": "inv-7ef9eeae82bf",
+   "conclusion_status": "confirmed"
+  }
+ ]
+}

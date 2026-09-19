@@ -262,16 +262,16 @@ test("外部参评适配器的标准tool.call/tool.result事件进入轨迹审�
     evidence_refs: [...caseSpec.ground_truth.required_evidence],
     exclusions: ["gnb-radio-outage"],
   }, trace, { tool_calls: 2 }, { budget: { tool_calls: 24 } });
-  assert.equal(score.assertions.trajectory_quality.evidence.unique_tools_observed_for_audit_only, 2);
-  assert.equal(score.assertions.trajectory_quality.evidence.tool_names_affect_score, false);
-  assert.equal(score.assertions.trajectory_quality.evidence.recovered, true);
+  assert.equal(score.descriptive_signals.trajectory_activity.evidence.unique_tools_observed_for_audit_only, 2);
+  assert.equal(score.descriptive_signals.trajectory_activity.evidence.tool_names_affect_score, false);
+  assert.equal(score.descriptive_signals.trajectory_activity.evidence.recovered, true);
   const renamedTrace = trace.map((event) => ({ ...event, payload: { ...event.payload,
     tool: event.payload.tool === "query_logs" ? "observe_channel_a" : "observe_channel_b" } }));
   const renamedScore = gradeTrial(caseSpec, {
     status: "resolved", root_cause: "UDM subscriber provisioning",
     evidence_refs: [...caseSpec.ground_truth.required_evidence], exclusions: ["gnb-radio-outage"],
   }, renamedTrace, { tool_calls: 2 }, { budget: { tool_calls: 24 } });
-  assert.equal(renamedScore.assertions.trajectory_quality.value, score.assertions.trajectory_quality.value);
+  assert.equal(renamedScore.descriptive_signals.trajectory_activity.value, score.descriptive_signals.trajectory_activity.value);
   assert.equal(renamedScore.total, score.total);
 });
 
@@ -752,10 +752,11 @@ test("确定性评分不要求固定工具顺序且工程敏捷不从单Trial伪
     evidence_refs: [...caseSpec.ground_truth.required_evidence], exclusions: ["gnb-radio-outage"], next_checks: [] };
   const score = gradeTrial(caseSpec, outcome, [], { tool_calls: 4 }, { budget: { tool_calls: 24 } });
   assert.equal(score.hard_gates.no_forbidden_claim, true);
-  assert.equal(score.assertions.engineering_agility.applicable, false);
-  assert.equal(score.grader_contract_version, "5.3");
+  assert.equal(score.descriptive_signals.engineering_agility.applicable, false);
+  assert.equal(score.grader_contract_version, "6.0");
   assert.equal(score.official_score_source, "DETERMINISTIC_CODE_GRADER");
-  assert.match(score.scoring_contract, /approval, execution, independent verification and reset are non-compensable hard gates/);
+  assert.match(score.scoring_contract, /passing is decided entirely by the non-compensable hard gates/);
+  assert.equal(/\b75\b/.test(score.scoring_contract), false);
 });
 
 test("Grader 5.3开放资源模式不因耗时、Token、工具次数或费用不同改变成绩", () => {
@@ -769,10 +770,10 @@ test("Grader 5.3开放资源模式不因耗时、Token、工具次数或费用�
   const high = gradeTrial(caseSpec, outcome, [],
     { tool_calls: 120, wallclock_ms: 900000, cost_usd: 12 }, context);
   assert.equal(low.total, high.total);
-  assert.equal(low.grader_contract_version, "5.3");
-  assert.equal(low.assertions.resource_cost.applicable, false);
-  assert.equal(high.assertions.trajectory_quality.passed, true);
-  assert.equal(high.assertions.trajectory_quality.evidence.resource_usage_affects_score, false);
+  assert.equal(low.grader_contract_version, "6.0");
+  assert.equal(low.descriptive_signals.resource_usage.applicable, false);
+  assert.equal(high.descriptive_signals.trajectory_activity.passed, true);
+  assert.equal(high.descriptive_signals.trajectory_activity.evidence.resource_usage_affects_score, false);
   assert.equal(high.excluded_from_cross_architecture_cost_comparison, true);
 });
 
@@ -833,7 +834,7 @@ test("建议质量在资格阶段单独判定但权重为零且不改变总分",
     const graded = gradeTrial(caseSpec, pending, [], {}, context);
     assert.equal(graded.recommendation_quality.passed, true);
     assert.equal(graded.qualification_passed, false);
-    assert.equal(graded.assertions.task_success.passed, false);
+    assert.equal(graded.descriptive_signals.task_success.passed, false);
   }
   for (const diagnosis of ["possible", "inconclusive", "insufficient_evidence", "", "unknown"]) {
     const pending = structuredClone(base);
@@ -887,10 +888,10 @@ test("Grader 5.1按真实考生保全的证据内容评分而不要求内部证�
     recovery: { task_success: false }, business_verification: businessFact(false) } } });
   assert.equal(score.hard_gates.evidence_traceable, true);
   assert.equal(score.hard_gates.minimum_evidence_recall, true);
-  assert.equal(score.assertions.trajectory_quality.passed, true);
+  assert.equal(score.descriptive_signals.trajectory_activity.passed, true);
   assert.equal(score.evidence_resolution, "preserved-product-evidence-content");
   assert.deepEqual(score.evidence_hits, caseSpec.ground_truth.required_evidence);
-  assert.equal(score.assertions.trajectory_quality.evidence.tool_names_affect_score, false);
+  assert.equal(score.descriptive_signals.trajectory_activity.evidence.tool_names_affect_score, false);
 
   const unpreserved = gradeTrial(caseSpec, { ...outcome, evidence_refs: ["ev-not-preserved"] }, trace, {}, {
     environmentState: { remote: { changes: [], recovery: { task_success: false }, business_verification: businessFact(false) } },
@@ -920,7 +921,7 @@ test("Grader校准能区分真实恢复与只在结果里声称恢复", () => {
     changes: [], recovery: { task_success: false }, business_verification: businessFact(false),
   } } });
   assert.equal(recovered.hard_gates.recovery, true);
-  assert.equal(recovered.assertions.trajectory_quality.evidence.semantic_failures, 1);
+  assert.equal(recovered.descriptive_signals.trajectory_activity.evidence.semantic_failures, 1);
   assert.equal(claimedOnly.hard_gates.recovery, false);
   assert.equal(claimedOnly.passed, false);
 });
@@ -1198,7 +1199,7 @@ test("同一判定入口保留已有故障合同中的缺失状态，并返回�
   assert.equal(matched.matched, true);
   assert.equal(matched.reason, "affirmed_same_statement");
   assert.match(matched.statements[0].statement, /127\.0\.0\.5:38412/u);
-  assert.equal(gradeTrial({ ...spec, tools: {} }, outcome).assertions.rca_quality.evidence.match.matched, true);
+  assert.equal(gradeTrial({ ...spec, tools: {} }, outcome).assertions.root_cause_localization.evidence.text_match.matched, true);
   assert.equal(canonicalRootCauseMatch(spec, { root_cause: "未发现SCTP38412被阻断" }).reason, "denied");
   assert.equal(canonicalRootCauseMatch(spec, { root_cause: "待确认SCTP38412是否阻断" }).reason, "not_established");
   assert.equal(canonicalRootCauseHit(spec, {root_cause:
@@ -1216,19 +1217,19 @@ test("环境恢复硬门只认独立业务复测，场景分说通过也不算�
   const changes = [{ action_type: "subscriber_profile", parameters: { source: "reference_profile" } }];
   // The exact chain-2 shape: the scene reports success while the data path is dead.
   const scoreOnly = grade({ changes, recovery: { task_success: true } });
-  assert.equal(scoreOnly.assertions.task_success.evidence.environment_recovery, false);
+  assert.equal(scoreOnly.descriptive_signals.task_success.evidence.environment_recovery, false);
   assert.equal(scoreOnly.hard_gates.environment_task_success, false);
   const contradicted = grade({ changes, recovery: { task_success: true },
     business_verification: businessFact(false) });
   assert.equal(contradicted.hard_gates.environment_task_success, false);
-  assert.equal(contradicted.assertions.task_success.evidence.business_verification.passed, false);
+  assert.equal(contradicted.descriptive_signals.task_success.evidence.business_verification.passed, false);
   const unobservable = grade({ changes, recovery: { task_success: true },
     business_verification: businessFact(null) });
   assert.equal(unobservable.hard_gates.environment_task_success, false);
   const recovered = grade({ changes, recovery: { task_success: false },
     business_verification: businessFact(true) });
   assert.equal(recovered.hard_gates.environment_task_success, true);
-  assert.equal(recovered.assertions.task_success.evidence.business_verification.evidence_ref,
+  assert.equal(recovered.descriptive_signals.task_success.evidence.business_verification.evidence_ref,
     "protocol-lab:business-verification:0123456789abcdef0123");
   const wrongContract = grade({ changes, recovery: { task_success: true },
     business_verification: { ...businessFact(true), contract_version: "something-else/9.9" } });

@@ -12,6 +12,8 @@ const SCENARIOS = [
     anchors: [["udm", "subscriber", "missing"], ["udr", "supi", "缺少"]],
     required: ["log:amf-unknown-supi", "state:subscriber-absent", "pcap:ngap-observed"],
     forbidden: ["radio-signal-outage"],
+    causeFacts: ["state:subscriber-absent"],
+    causeEntity: { resource_type: "service", resource_id: "mongodb" },
   },
   {
     id: "M2-AUTH-002", scenario: "subscriber-key-mismatch", domain: "authentication",
@@ -20,6 +22,8 @@ const SCENARIOS = [
     anchors: [["authentication", "key", "mismatch"], ["鉴权", "密钥", "不一致"]],
     required: ["log:ausf-authentication-failure", "state:subscriber-present", "pcap:ngap-observed"],
     forbidden: ["subscriber-record-missing"],
+    causeFacts: ["log:ausf-authentication-failure"],
+    causeEntity: { resource_type: "workload", resource_id: "ue-1" },
   },
   {
     id: "M2-PDU-003", scenario: "unknown-dnn", domain: "session",
@@ -29,6 +33,8 @@ const SCENARIOS = [
       ["dnn", "未", "配置"], ["dnn", "配置", "错误"]],
     required: ["log:amf-dnn-not-supported", "state:ue-registered", "pcap:ngap-observed"],
     forbidden: ["amf-process-down"],
+    causeFacts: ["log:amf-dnn-not-supported"],
+    causeEntity: { resource_type: "workload", resource_id: "ue-1" },
   },
   {
     id: "M2-SLICE-004", scenario: "slice-mismatch", domain: "session",
@@ -37,6 +43,8 @@ const SCENARIOS = [
     anchors: [["s-nssai", "not", "allowed"], ["切片", "不", "允许"]],
     required: ["log:gnb-amf-selection-failed", "state:allowed-nssai-mismatch", "pcap:ngap-observed"],
     forbidden: ["dnn-not-provisioned"],
+    causeFacts: ["state:allowed-nssai-mismatch"],
+    causeEntity: { resource_type: "workload", resource_id: "ue-1" },
   },
   {
     id: "M2-TAI-005", scenario: "tracking-area-mismatch", domain: "ran",
@@ -45,6 +53,8 @@ const SCENARIOS = [
     anchors: [["tracking", "area", "amf"], ["tac", "amf", "服务"]],
     required: ["log:amf-tai-not-served", "state:gnb-sctp-connected", "pcap:ngap-observed"],
     forbidden: ["subscriber-authentication-failure"],
+    causeFacts: ["log:amf-tai-not-served"],
+    causeEntity: { resource_type: "workload", resource_id: "gnb-1" },
   },
   {
     id: "M2-AMF-006", scenario: "amf-process-down", domain: "core-control",
@@ -53,6 +63,8 @@ const SCENARIOS = [
     anchors: [["amf", "process", "unavailable"], ["amf", "进程", "停止"]],
     required: ["process:open5gs-amfd-inactive", "probe:sctp-38412-refused", "log:gnb-amf-connect-failed"],
     forbidden: ["single-subscriber-data-error"],
+    causeFacts: ["process:open5gs-amfd-inactive"],
+    causeEntity: { resource_type: "service", resource_id: "amf" },
   },
   {
     id: "M2-SMF-007", scenario: "smf-process-down", domain: "core-control",
@@ -61,6 +73,8 @@ const SCENARIOS = [
     anchors: [["smf", "process", "unavailable"], ["smf", "进程", "停止"]],
     required: ["process:open5gs-smfd-inactive", "state:ue-registered", "log:amf-smf-discovery-failed"],
     forbidden: ["amf-process-down"],
+    causeFacts: ["process:open5gs-smfd-inactive"],
+    causeEntity: { resource_type: "service", resource_id: "smf" },
   },
   {
     id: "M2-UPF-008", scenario: "upf-process-down", domain: "user-plane",
@@ -69,6 +83,8 @@ const SCENARIOS = [
     anchors: [["upf", "process", "unavailable"], ["upf", "进程", "停止"]],
     required: ["process:open5gs-upfd-inactive", "probe:user-plane-failed", "log:smf-pfcp-association-lost"],
     forbidden: ["dns-only-failure"],
+    causeFacts: ["process:open5gs-upfd-inactive"],
+    causeEntity: { resource_type: "service", resource_id: "upf" },
   },
   {
     id: "M2-NRF-009", scenario: "nrf-process-down", domain: "service-discovery",
@@ -77,6 +93,8 @@ const SCENARIOS = [
     anchors: [["nrf", "process", "unavailable"], ["nrf", "服务发现", "停止"]],
     required: ["process:open5gs-nrfd-inactive", "log:nf-discovery-failed", "metric:nrf-registration-zero"],
     forbidden: ["upf-only-failure"],
+    causeFacts: ["process:open5gs-nrfd-inactive"],
+    causeEntity: { resource_type: "service", resource_id: "nrf" },
   },
   {
     id: "M2-DB-010", scenario: "mongodb-process-down", domain: "subscriber-data",
@@ -85,6 +103,8 @@ const SCENARIOS = [
     anchors: [["mongodb", "process", "unavailable"], ["mongodb", "停止", "订阅"]],
     required: ["process:mongod-inactive", "log:udr-subscriber-query-failed", "state:subscriber-query-unavailable", "pcap:ngap-observed"],
     forbidden: ["single-subscriber-data-error"],
+    causeFacts: ["process:mongod-inactive"],
+    causeEntity: { resource_type: "service", resource_id: "mongodb" },
   },
   {
     id: "M2-N2-011", scenario: "sctp-blocked", domain: "n2",
@@ -93,6 +113,8 @@ const SCENARIOS = [
     anchors: [["sctp", "38412", "blocked"], ["sctp", "38412", "阻断"]],
     required: ["process:amf-healthy", "pcap:sctp-observed", "state:firewall-sctp-drop"],
     forbidden: ["amf-process-down"],
+    causeFacts: ["state:firewall-sctp-drop"],
+    causeEntity: { resource_type: "service", resource_id: "amf" },
   },
   {
     id: "M2-PFCP-012", scenario: "pfcp-blocked", domain: "n4",
@@ -101,6 +123,8 @@ const SCENARIOS = [
     anchors: [["pfcp", "8805", "blocked"], ["pfcp", "8805", "阻断"]],
     required: ["process:smf-upf-healthy", "pcap:pfcp-observed", "state:firewall-pfcp-drop"],
     forbidden: ["upf-process-down"],
+    causeFacts: ["state:firewall-pfcp-drop"],
+    causeEntity: { resource_type: "service", resource_id: "upf" },
   },
   {
     id: "M2-N3-013", scenario: "gtpu-blocked", domain: "n3",
@@ -109,6 +133,8 @@ const SCENARIOS = [
     anchors: [["gtp-u", "2152", "blocked"], ["n3", "2152", "阻断"]],
     required: ["state:pdu-session-active", "pcap:gtp-observed", "state:firewall-gtpu-drop"],
     forbidden: ["pdu-session-not-established"],
+    causeFacts: ["state:firewall-gtpu-drop"],
+    causeEntity: { resource_type: "service", resource_id: "upf" },
   },
   {
     id: "M2-N6-014", scenario: "n6-route-missing", domain: "n6",
@@ -117,6 +143,8 @@ const SCENARIOS = [
     anchors: [["n6", "route", "missing"], ["n6", "路由", "缺失"]],
     required: ["state:pdu-session-active", "probe:ue-tunnel-present", "state:n6-route-missing"],
     forbidden: ["gtpu-tunnel-failure"],
+    causeFacts: ["state:n6-route-missing"],
+    causeEntity: { resource_type: "service", resource_id: "upf" },
   },
   {
     id: "M2-DNS-015", scenario: "dns-blocked", domain: "application",
@@ -125,6 +153,8 @@ const SCENARIOS = [
     anchors: [["dns", "traffic", "blocked"], ["dns", "流量", "阻断"]],
     required: ["probe:ip-connectivity-ok", "probe:dns-resolution-failed", "state:dns-drop-rule"],
     forbidden: ["complete-user-plane-outage"],
+    causeFacts: ["state:dns-drop-rule"],
+    causeEntity: { resource_type: "service", resource_id: "dns" },
   },
   {
     id: "M2-LAT-016", scenario: "user-plane-latency", domain: "performance",
@@ -133,6 +163,8 @@ const SCENARIOS = [
     anchors: [["traffic", "control", "delay"], ["用户面", "注入", "时延"]],
     required: ["metric:user-plane-rtt-high", "state:tc-delay-active", "probe:packet-loss-low"],
     forbidden: ["packet-loss-outage"],
+    causeFacts: ["state:tc-delay-active"],
+    causeEntity: { resource_type: "service", resource_id: "upf" },
   },
   {
     id: "M2-GNB-017", scenario: "gnb-process-crash", domain: "ran",
@@ -141,6 +173,8 @@ const SCENARIOS = [
     anchors: [["ueransim", "gnb", "exited"], ["gnb", "进程", "退出"]],
     required: ["process:ueransim-gnb-inactive", "process:open5gs-core-healthy", "log:gnb-process-exit"],
     forbidden: ["amf-process-down"],
+    causeFacts: ["process:ueransim-gnb-inactive"],
+    causeEntity: { resource_type: "workload", resource_id: "gnb-1" },
   },
   {
     id: "M2-GAP-018", scenario: "observability-gap", domain: "observability",
@@ -149,6 +183,8 @@ const SCENARIOS = [
     anchors: [["insufficient", "evidence", "logs"], ["日志", "缺失", "证据不足"]],
     required: ["error:amf-log-source-unavailable", "state:protocol-symptom-ambiguous"],
     forbidden: ["confirmed-authentication-key-mismatch", "confirmed-subscriber-missing"],
+    causeFacts: ["error:amf-log-source-unavailable"],
+    causeEntity: { resource_type: "service", resource_id: "amf" },
     expectedStatus: "inconclusive",
     requiresRecovery: true,
   },
@@ -159,6 +195,8 @@ const SCENARIOS = [
     anchors: [["stale", "amf", "alarm"], ["amf", "恢复", "告警"]],
     required: ["alert:amf-down-stale", "process:amf-healthy", "probe:registration-success"],
     forbidden: ["current-amf-outage"],
+    causeFacts: ["alert:amf-down-stale"],
+    causeEntity: { resource_type: "service", resource_id: "amf" },
   },
   {
     id: "M2-PROACTIVE-020", scenario: "pcap-capacity-risk", domain: "proactive",
@@ -168,10 +206,29 @@ const SCENARIOS = [
     anchors: [["pcap", "disk", "threshold"], ["pcap", "磁盘", "阈值"], ["pcap", "磁盘", "门禁"]],
     required: ["metric:pcap-growth-high", "state:disk-current-safe", "forecast:disk-threshold-breach"],
     forbidden: ["active-service-outage"],
+    causeFacts: ["forecast:disk-threshold-breach"],
+    causeEntity: { resource_type: "runtime", resource_id: "twin-t1" },
     expectedStatus: "risk_detected",
     proactive: true,
   },
 ];
+
+// One fault, two vocabularies. The static case sheet names a curated state
+// label; the live laboratory mints the same fact from the kernel itself. They
+// are the same fact and must never be graded as two different answers.
+export const LIVE_FACT_EQUIVALENCE = Object.freeze({
+  "state:firewall-sctp-drop": "policy:sctp:38412:drop-rule-present",
+  "state:firewall-pfcp-drop": "policy:udp:8805:drop-rule-present",
+  "state:firewall-gtpu-drop": "policy:udp:2152:drop-rule-present",
+  "state:dns-drop-rule": "policy:udp:53:drop-rule-present",
+});
+
+// Topology comes from the laboratory's own resource scope: network_path refs
+// (n2/n3/n4/n6) are the upper layer, service/workload refs are the concrete
+// objects. Naming the path instead of the object is "close", never "correct".
+const NETWORK_PATH_BY_DOMAIN = Object.freeze({
+  n2: ["n2"], n3: ["n3"], n4: ["n4"], n6: ["n6"], ran: ["n2"], application: ["n6"],
+});
 
 const ACTION_TOOLS = Object.freeze({
   manage_subscriber_profile: {
@@ -283,6 +340,18 @@ function toolsFor(required) {
   return { ...observations, ...actions };
 }
 
+function causeFactRefs(definition) {
+  // Publish both vocabularies so a live answer and a static answer describing
+  // the same kernel fact are both accepted.
+  return [...new Set(definition.causeFacts.flatMap((ref) =>
+    LIVE_FACT_EQUIVALENCE[ref] ? [ref, LIVE_FACT_EQUIVALENCE[ref]] : [ref]))];
+}
+
+function adjacentRefs(definition) {
+  return [...new Set([definition.causeEntity.resource_id,
+    ...(NETWORK_PATH_BY_DOMAIN[definition.domain] ?? [])])];
+}
+
 function createCase(definition) {
   return {
     id: definition.id,
@@ -322,6 +391,11 @@ function createCase(definition) {
       root_causes: definition.rootCauses,
       root_cause_aliases: [],
       root_cause_anchor_sets: definition.anchors,
+      // Machine-comparable root cause: which fact is the disease, not which
+      // sentence describes it. Free text stays in the report for humans.
+      root_cause_fact_refs: causeFactRefs(definition),
+      root_cause_entity: { ...definition.causeEntity },
+      root_cause_adjacent_refs: adjacentRefs(definition),
       required_evidence: definition.required,
       forbidden_claims: definition.forbidden,
       expected_status: definition.expectedStatus ?? "resolved",
@@ -332,6 +406,34 @@ function createCase(definition) {
     },
   };
 }
+
+// A mis-annotated case silently turns into an unanswerable exam question, so
+// the three properties the annotation must have are checked at load time.
+function assertCauseAnnotations(definitions) {
+  const owners = new Map();
+  for (const definition of definitions) {
+    for (const ref of definition.required) owners.set(ref, (owners.get(ref) ?? 0) + 1);
+  }
+  for (const definition of definitions) {
+    const scope = new Set(["twin-t1", "gnb-1", "ue-1", "amf", "smf", "upf", "nrf", "mongodb",
+      "n2", "n3", "n4", "n6", "dns"]);
+    for (const ref of definition.causeFacts) {
+      if (!definition.required.includes(ref)) {
+        throw new Error(`${definition.id}: causeFacts ${ref} is not in required_evidence`);
+      }
+      if (owners.get(ref) !== 1) {
+        throw new Error(`${definition.id}: causeFacts ${ref} also occurs in another scenario`);
+      }
+    }
+    for (const resourceId of adjacentRefs(definition)) {
+      if (!scope.has(resourceId)) {
+        throw new Error(`${definition.id}: ${resourceId} is outside the laboratory resource scope`);
+      }
+    }
+  }
+}
+
+assertCauseAnnotations(SCENARIOS);
 
 export const M2_CASES = Object.freeze(Object.fromEntries(SCENARIOS.map((definition) => {
   const item = createCase(definition);
