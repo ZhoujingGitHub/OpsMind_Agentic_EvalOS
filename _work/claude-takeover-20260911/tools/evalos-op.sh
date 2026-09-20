@@ -19,13 +19,17 @@ set -eu
 : "${OP:?用法: OP=preflight|submit|status|progress|details REF=agent-harness-v2|langgraph-v1 ...}"
 : "${REF:?必须指明候选：agent-harness-v2 或 langgraph-v1}"
 : "${EXPECT_REV:?必须指明期望的 EvalOS 线上提交（守卫用，防止对着不认识的版本下发操作）}"
+# 2026-09-20 参数化：题号原先写死 M3-OBS-001@3.2.0，跑四种考法时只能改脚本。
+# 同一个理由——写死的值就是静默陷阱——所以改成入参，默认值保持原来那道题。
+CASES="${CASES:-M3-OBS-001@3.2.0}"
+REASON="${REASON:-}"
 SRC_EXP="${SRC_EXP:-}"
 IDEM="${IDEM:-}"
 ARG1="${ARG1:--}"
 ARG2="${ARG2:--}"
-python3 - "$OP" "$REF" "$ARG1" "$ARG2" "$EXPECT_REV" "$SRC_EXP" "$IDEM" <<'PY'
+python3 - "$OP" "$REF" "$ARG1" "$ARG2" "$EXPECT_REV" "$SRC_EXP" "$IDEM" "$CASES" "$REASON" <<'PY'
 import datetime,json,pathlib,re,sys,urllib.error,urllib.request
-OP,REF,ARG1,ARG2,EXPECT_REV,SRC_EXP,IDEM=sys.argv[1:8]
+OP,REF,ARG1,ARG2,EXPECT_REV,SRC_EXP,IDEM,CASES,REASON=sys.argv[1:10]
 assert OP in {'preflight','submit','status','progress','details'}, OP
 assert REF in {'agent-harness-v2','langgraph-v1'}, REF
 rel=json.loads(pathlib.Path('/opt/opsmind-evalos/current/evalos/RELEASE.json').read_text())
@@ -37,10 +41,11 @@ if OP in {'preflight','submit'}:
 if OP=='submit':
     assert IDEM, 'submit 必须给 IDEM=<本轮唯一的幂等键>；复用旧键会拿回上次那个请求'
 base={'mode':'QUICK_VALIDATION','request_kind':'NEW_EVALUATION','evaluation_purpose':'SINGLE_SYSTEM_REGRESSION',
- 'source_experiment_id':SRC_EXP,'case_refs':['M3-OBS-001@3.2.0'],'contestant_refs':[REF],
+ 'source_experiment_id':SRC_EXP,'case_refs':[c for c in CASES.split(',') if c],'contestant_refs':[REF],
  'environment_seeds':[2026081601],'repetitions':1,'requested_concurrency':1,
  'requested_by':'product-manager-authorized-four-chain-reacceptance',
- 'reason':'按产品经理授权复验四条链路：同一冻结 Case M3-OBS-001@3.2.0 与种子 2026081601，单槽位独占串行，核对独立审批、执行、独立业务验证与归档。不作为正式排名，不改评分权重与历史账本。',
+ 'reason':REASON or ('按产品经理授权复验四条链路：冻结 Case '+CASES+' 与种子 2026081601，单槽位独占串行，'
+   '核对独立审批、执行、独立业务验证与归档。不作为正式排名，不改评分权重与历史账本。'),
  'idempotency_key':IDEM}
 def call(path,payload=None,headers=None,timeout=120):
  data=None if payload is None else json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode()
