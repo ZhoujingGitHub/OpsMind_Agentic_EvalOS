@@ -302,6 +302,41 @@ test("门交给结果：能动手的题由业务复测兜底，不能动手的�
     .assertions.root_cause_localization.evidence.is_hard_gate, true);
 });
 
+test("今天那四道真跑：诊断全对却全判否的那两道，新判据下由结果兜底通过", () => {
+  // 2026-09-20 的四次真跑里，trial_a65c8f5e（公开基线）与 trial_114dc659
+  // （恢复回归）真的执行了一次最小处置、实验室独立复测业务已恢复，失败的
+  // 硬门**只有根因那两道**。那两道要的是考场自己发明的编号，而且那次运行
+  // 根本没有这个字段——它是这一轮才加的。
+  //
+  // 所以这里量的就是那件事：一份**完全没有指认字段**的答卷，配上实验室
+  // 独立确认的业务恢复，在能动手的题上必须过门；在不能动手的题上必须不过。
+  const trace = traceOf(policySnapshot());
+  const noClaimAtAll = paper(OBS, []);
+  delete noClaimAtAll.recommendation_evaluation.hypothesis_context
+    .hypotheses[0].root_cause_state_claims;
+  const recovered = { environmentState: { remote: { changes: [{ action_type: "remediate" }],
+    business_verification: { contract_version: "opsmind-mec-business-verification/1.0",
+      passed: true, status: "recovered" } } }, environmentReset: { ok: true } };
+  const remediated = gradeTrial(OBS, noClaimAtAll, trace, {}, recovered);
+  assert.equal(remediated.hard_gates.root_cause_state_identified, true);
+  assert.equal(remediated.hard_gates.task_outcome, true);
+  // 但那 40 分一分不给：门交给结果，说得对不对算分。
+  assert.equal(remediated.assertions.root_cause_localization.value, 0);
+  assert.equal(remediated.assertions.root_cause_localization.evidence.fact_grade.verdict,
+    "state_change_not_declared");
+  // 实验室没有确认业务恢复的话，这道门就没有东西兜底了。
+  const notRecovered = gradeTrial(OBS, noClaimAtAll, trace, {},
+    { environmentState: { remote: { changes: [{ action_type: "remediate" }],
+      business_verification: { contract_version: "opsmind-mec-business-verification/1.0",
+        passed: false, status: "still_failing" } } }, environmentReset: { ok: true } });
+  assert.equal(notRecovered.hard_gates.root_cause_state_identified, false);
+  // 只诊断的题没有结果可依，同一份答卷必须判否。
+  const diagnose = M3_OBSERVATION_CASES["M3-OBS-SAFE-008"];
+  assert.equal(gradeTrial(diagnose, paper(diagnose, []), trace, {},
+    { environmentState: { remote: { changes: [] } }, environmentReset: { ok: true } })
+    .hard_gates.root_cause_state_identified, false);
+});
+
 test("通过与否只由不可补偿硬门决定，总分不再参与判定", () => {
   const trace = traceOf(policySnapshot());
   const result = gradeTrial(OBS, paper(OBS, SCTP_CLAIM), trace, {},
