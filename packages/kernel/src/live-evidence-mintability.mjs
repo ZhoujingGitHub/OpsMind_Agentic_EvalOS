@@ -1,9 +1,11 @@
+import { faultDeltaObservable } from "./fault-delta.mjs";
+
 // Which facts the live laboratory can actually mint.
 //
-// A case whose required evidence or whose disease fact the laboratory cannot
-// mint is unanswerable: the candidate never sees the reference, so it can never
-// name it. Running such a case wastes a physical lease and produces the wrong
-// conclusion ("the product is bad") about a defect that lives in the case bank.
+// A case whose required evidence the laboratory cannot mint, or whose injected
+// state change no candidate-side observation exposes, is unanswerable. Running
+// it wastes a physical lease and produces the wrong conclusion ("the product is
+// bad") about a defect that lives in the case bank.
 //
 // This is the single implementation. The read-only probes import it; they must
 // never keep a copy, because the last copy went stale the day the table under
@@ -72,22 +74,26 @@ export function liveEvidenceMintability(caseSpec) {
   }
   const truth = caseSpec.ground_truth ?? {};
   const required = [...(truth.required_evidence ?? [])];
-  const causeFacts = [...(truth.root_cause_fact_refs ?? [])];
   const mintable = required.filter(mintableEvidenceRef);
   const unmintable = required.filter((ref) => !mintableEvidenceRef(ref));
-  const unmintableCause = causeFacts.filter((ref) => !mintableEvidenceRef(ref));
-  const rootCauseMintable = causeFacts.length > 0 && unmintableCause.length === 0;
+  // The root cause question changed on 2026-09-20. It used to ask whether the
+  // laboratory could mint the case's root-cause *reference*; there is no
+  // reference any more, so it asks whether the changed state lives in an
+  // observation family the candidate can actually request.
+  const deltas = truth.fault_deltas ?? null;
+  const unobservableDeltas = (deltas ?? []).filter((delta) => !faultDeltaObservable(delta));
+  const rootCauseObservable = !deltas || unobservableDeltas.length === 0;
   // The evidence gate asks for two of the required references, or all of them
   // when the case declares fewer than two.
   const minimumRecall = Math.min(1, 2 / Math.max(1, required.length));
   const bestRecall = required.length ? mintable.length / required.length : 1;
-  const verdict = !rootCauseMintable ? "根因事实发不出来"
+  const verdict = !rootCauseObservable ? "改动考生观测不到"
     : bestRecall < minimumRecall ? "证据召回够不着"
       : bestRecall === 1 ? "有富余" : "零余量";
-  const runnable = rootCauseMintable && bestRecall >= minimumRecall;
-  const reason = !rootCauseMintable
-    ? `本题的病根事实实验室开不出证明（缺 ${unmintableHint(unmintableCause.length ? unmintableCause : causeFacts)}），`
-      + "考生拿不到这个编号，永远填不对，不能进考场"
+  const runnable = rootCauseObservable && bestRecall >= minimumRecall;
+  const reason = !rootCauseObservable
+    ? `本题被改动的状态（${unobservableDeltas.map((item) => item.observation).join("、")}）`
+      + "考生这一侧没有任何观测能看到，它永远指不出来，不能进考场"
     : bestRecall < minimumRecall
       ? `本题的必需证据实验室只开得出 ${mintable.length}/${required.length}，`
         + `最低要 ${Math.ceil(minimumRecall * required.length)}/${required.length}`
@@ -95,8 +101,12 @@ export function liveEvidenceMintability(caseSpec) {
       : null;
   return { applicable: true, runnable, verdict,
     required, mintable_refs: mintable, unmintable_refs: unmintable,
-    root_cause_fact_refs: causeFacts, root_cause_mintable: rootCauseMintable,
-    unmintable_root_cause_refs: unmintableCause,
+    fault_deltas: deltas, root_cause_observable: rootCauseObservable,
+    // A case the bank does not annotate is still runnable; it simply drops the
+    // root cause dimension out of the denominator. The list of those scenarios
+    // lives in m2-cases.mjs and a test keeps it honest.
+    root_cause_gradeable: Boolean(deltas) && rootCauseObservable,
+    unobservable_deltas: unobservableDeltas,
     minimum_recall: Number(minimumRecall.toFixed(3)), best_recall: Number(bestRecall.toFixed(3)),
     reason_zh: reason };
 }

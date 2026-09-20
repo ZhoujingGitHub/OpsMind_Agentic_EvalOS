@@ -759,7 +759,7 @@ test("M3冻结设计可用于新建评测预检但不能绕过门禁直接启动
     // Since 2026-09-19 both designs carry 80 cases, so they are told apart by
     // dataset membership rather than by size.
     const frozen = templates.items.find((item) => item.case_refs.includes("M3-PUB-001@3.1.0"));
-    const observation = templates.items.find((item) => item.case_refs.includes("M3-OBS-001@3.2.1"));
+    const observation = templates.items.find((item) => item.case_refs.includes("M3-OBS-001@3.2.2"));
     assert.equal(observation.status, "FROZEN");
     assert.equal(observation.case_refs.length, 80);
     assert.equal(app.store.listTrials().length, 0);
@@ -767,7 +767,7 @@ test("M3冻结设计可用于新建评测预检但不能绕过门禁直接启动
     const symptomPreflight = await app.handler(new Request("http://local/api/workbench/run-requests/preflight", {
       method: "POST", headers: { ...headers, "content-type": "application/json" },
       body: JSON.stringify({ request_kind: "NEW_EVALUATION", evaluation_purpose: "SINGLE_SYSTEM_REGRESSION",
-        mode: "QUICK_VALIDATION", source_experiment_id: observation.id, case_refs: ["M3-OBS-001@3.2.1"],
+        mode: "QUICK_VALIDATION", source_experiment_id: observation.id, case_refs: ["M3-OBS-001@3.2.2"],
         contestant_refs: ["agent-harness-v2"], environment_seeds: [formalM3Manifest.environment_seeds[0]],
         repetitions: 1, requested_by: "api-test-operator", reason: "检查无提示题面可选择且不会自动开考" }) }));
     assert.equal(symptomPreflight.status, 200);
@@ -781,7 +781,7 @@ test("M3冻结设计可用于新建评测预检但不能绕过门禁直接启动
     const unanswerable = await app.handler(new Request("http://local/api/workbench/run-requests/preflight", {
       method: "POST", headers: { ...headers, "content-type": "application/json" },
       body: JSON.stringify({ request_kind: "NEW_EVALUATION", evaluation_purpose: "SINGLE_SYSTEM_REGRESSION",
-        mode: "QUICK_VALIDATION", source_experiment_id: observation.id, case_refs: ["M3-OBS-PUB-001@3.2.1"],
+        mode: "QUICK_VALIDATION", source_experiment_id: observation.id, case_refs: ["M3-OBS-PUB-001@3.2.2"],
         contestant_refs: ["agent-harness-v2"], environment_seeds: [formalM3Manifest.environment_seeds[0]],
         repetitions: 1, requested_by: "api-test-operator", reason: "实验室开不出证明的题必须在开考前拦住" }) }));
     assert.equal(unanswerable.status, 200);
@@ -884,7 +884,7 @@ test("M3冻结合同变更会新增可审计设计而不会覆盖历史或阻塞
     assert.equal(designs.length, 4);
     assert.equal(new Set(designs.map((item) => item.manifest_hash)).size, 4);
     assert.equal(designs.filter((item) => item.manifest.suite_ref === original.suite_ref).length, 2);
-    assert.equal(designs.filter((item) => item.manifest.suite_ref === "m3-symptom-acceptance@3.2.1").length, 2);
+    assert.equal(designs.filter((item) => item.manifest.suite_ref === "m3-symptom-acceptance@3.2.2").length, 2);
     assert.equal(designs.every((item) => second.store.listTrials(item.id).length === 0), true);
   } finally { second.close(); }
 });

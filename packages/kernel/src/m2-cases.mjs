@@ -1,3 +1,4 @@
+import { assertFaultDeltas } from "./fault-delta.mjs";
 import { sha256 } from "./utils.mjs";
 
 const VERSION = "1.0.0";
@@ -213,6 +214,116 @@ const SCENARIOS = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// What the laboratory actually changed
+// ---------------------------------------------------------------------------
+//
+// The answer key is the command the laboratory runs when it injects the fault.
+// It has always been there; the exam used to paraphrase it into a label of its
+// own invention and then demand that label back. `identify` restates the same
+// change in the field names of the observation the candidate can read, so the
+// correct answer is something the candidate can actually express.
+//
+// `injectedBy` is the real argv from infra/twin/opsmind_twinctl.py. It never
+// participates in grading — a test compares it against that file so a
+// transcription error explodes instead of quietly becoming a wrong answer key.
+//
+// Seven scenarios are deliberately unannotated (null). Either the laboratory
+// changes something no candidate-side observation exposes, or the fault is not
+// a single changed piece of state at all. They are listed, with the reason, in
+// UNGRADEABLE_STATE_SCENARIOS below so they cannot be quietly forgotten.
+const FAULT_DELTAS = Object.freeze({
+  "sctp-blocked": [{
+    observation: "network_policy", state: "present",
+    identify: { chain: "OPSMIND_TWIN_IN", protocol: "sctp", destination_port: "38412", target: "DROP" },
+    injectedBy: ["iptables", "-A", "OPSMIND_TWIN_IN", "-p", "sctp", "--dport", "38412", "-j", "DROP"],
+  }],
+  "pfcp-blocked": [{
+    observation: "network_policy", state: "present",
+    identify: { chain: "OPSMIND_TWIN_IN", protocol: "udp", destination_port: "8805", target: "DROP" },
+    injectedBy: ["iptables", "-A", "OPSMIND_TWIN_IN", "-p", "udp", "--dport", "8805", "-j", "DROP"],
+  }],
+  "gtpu-blocked": [{
+    observation: "network_policy", state: "present",
+    identify: { chain: "OPSMIND_TWIN_IN", protocol: "udp", destination_port: "2152", target: "DROP" },
+    injectedBy: ["iptables", "-A", "OPSMIND_TWIN_IN", "-p", "udp", "--dport", "2152", "-j", "DROP"],
+  }],
+  "dns-blocked": [{
+    observation: "network_policy", state: "present",
+    identify: { chain: "OPSMIND_TWIN_FWD", protocol: "udp", source: "10.45.0.0/16",
+      destination_port: "53", target: "DROP" },
+    injectedBy: ["iptables", "-A", "OPSMIND_TWIN_FWD", "-s", "10.45.0.0/16", "-p", "udp",
+      "--dport", "53", "-j", "DROP"],
+  }],
+  // The injection names a systemd unit; the observation names the leased
+  // resource. RUNTIME_TARGETS is the laboratory's own mapping between the two,
+  // which is why mongodb is identified as "mongodb" and not as "mongod".
+  "amf-process-down": [{
+    observation: "process_state", state: "present",
+    identify: { resource_id: "amf", active: false },
+    injectedBy: ["systemctl", "stop", "open5gs-amfd"],
+  }],
+  "smf-process-down": [{
+    observation: "process_state", state: "present",
+    identify: { resource_id: "smf", active: false },
+    injectedBy: ["systemctl", "stop", "open5gs-smfd"],
+  }],
+  "upf-process-down": [{
+    observation: "process_state", state: "present",
+    identify: { resource_id: "upf", active: false },
+    injectedBy: ["systemctl", "stop", "open5gs-upfd"],
+  }],
+  "nrf-process-down": [{
+    observation: "process_state", state: "present",
+    identify: { resource_id: "nrf", active: false },
+    injectedBy: ["systemctl", "stop", "open5gs-nrfd"],
+  }],
+  "mongodb-process-down": [{
+    observation: "process_state", state: "present",
+    identify: { resource_id: "mongodb", active: false },
+    injectedBy: ["systemctl", "stop", "mongod"],
+  }],
+  // Not an inject_fault() branch: the laboratory starts the radio runtime and
+  // then stops the process it just spawned. There is no argv to compare, so
+  // the consistency test checks the call site instead.
+  "gnb-process-crash": [{
+    observation: "process_state", state: "present",
+    identify: { resource_id: "gnb-1", active: false },
+    injectedBy: null, injectedAt: "stop_pid(trial_dir / \"gnb.pid\")",
+  }],
+  // The route is deleted, so no row survives to point at: the candidate names
+  // the destination that is missing and marks it absent.
+  "n6-route-missing": [{
+    observation: "routes", state: "absent",
+    identify: { dst: "10.46.0.0/24" },
+    injectedBy: ["ip", "route", "del", "10.46.0.0/24"],
+  }],
+  "subscriber-missing": [{
+    observation: "subscriber", state: "present",
+    identify: { subscriber_present: false },
+    injectedBy: null, injectedAt: "remove_subscriber()",
+  }],
+  // copy_active_configs() overwrites the UE key before the runtime starts. The
+  // consistency observation reports which checked field stopped matching.
+  "subscriber-key-mismatch": [{
+    observation: "subscriber", state: "present",
+    identify: { authentication_profile_consistent: false, mismatched_fields: ["key"] },
+    injectedBy: null, injectedAt: "copy_active_configs(): ue_text.replace(KEY, ...)",
+  }],
+});
+
+// Why the remaining seven carry no state truth. This is a standing list, not a
+// backlog note: a test reads it, so a scenario cannot drift out of it silently.
+export const UNGRADEABLE_STATE_SCENARIOS = Object.freeze({
+  "unknown-dnn": "实验室改的是订阅档案里的 apn，订阅一致性观测只比对 supi/key/op/amf 四项，考生看不到 apn",
+  "slice-mismatch": "实验室改的是 sst，订阅一致性观测不暴露切片字段",
+  "tracking-area-mismatch": "实验室改的是 gNB 的 tac，考生侧没有读得到它的观测",
+  "user-plane-latency": "注入的是 tc 队列时延，考生侧没有任何能力能观测到 tc",
+  "observability-gap": "坏的不是某处状态，是某个观测源读不到",
+  "stale-alarm": "坏的是告警还在、服务却好了，是两者矛盾，不是单点状态",
+  "pcap-capacity-risk": "现在什么都没坏，是预测将来越线",
+});
+
 // One fault, two vocabularies. The static case sheet names a curated state
 // label; the live laboratory mints the same fact from the kernel itself. They
 // are the same fact and must never be graded as two different answers.
@@ -352,6 +463,13 @@ function adjacentRefs(definition) {
     ...(NETWORK_PATH_BY_DOMAIN[definition.domain] ?? [])])];
 }
 
+function faultDeltas(definition) {
+  const deltas = FAULT_DELTAS[definition.scenario] ?? null;
+  return deltas ? deltas.map((item) => Object.freeze({ ...item,
+    identify: Object.freeze({ ...item.identify }),
+    injectedBy: item.injectedBy ? Object.freeze([...item.injectedBy]) : null })) : null;
+}
+
 function createCase(definition) {
   return {
     id: definition.id,
@@ -391,8 +509,12 @@ function createCase(definition) {
       root_causes: definition.rootCauses,
       root_cause_aliases: [],
       root_cause_anchor_sets: definition.anchors,
-      // Machine-comparable root cause: which fact is the disease, not which
-      // sentence describes it. Free text stays in the report for humans.
+      // The graded root cause: which piece of state the laboratory changed,
+      // written in the field names of the observation a candidate can read.
+      fault_deltas: faultDeltas(definition),
+      // Authoring knowledge only. These were the graded criterion until
+      // 2026-09-20; no grading path may read them again, and a test proves
+      // that deleting them changes neither a score nor a gate.
       root_cause_fact_refs: causeFactRefs(definition),
       root_cause_entity: { ...definition.causeEntity },
       root_cause_adjacent_refs: adjacentRefs(definition),
@@ -429,6 +551,17 @@ function assertCauseAnnotations(definitions) {
       if (!scope.has(resourceId)) {
         throw new Error(`${definition.id}: ${resourceId} is outside the laboratory resource scope`);
       }
+    }
+    // Either the scenario says which state was changed, or it says out loud
+    // why it cannot. Silence is how an ungradeable case sneaks into an exam.
+    const deltas = faultDeltas(definition);
+    assertFaultDeltas(definition.id, deltas);
+    const excused = Object.hasOwn(UNGRADEABLE_STATE_SCENARIOS, definition.scenario);
+    if (!deltas && !excused) {
+      throw new Error(`${definition.id}: ${definition.scenario} has no fault_deltas and no recorded reason`);
+    }
+    if (deltas && excused) {
+      throw new Error(`${definition.id}: ${definition.scenario} is both annotated and excused`);
     }
   }
 }

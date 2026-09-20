@@ -4,7 +4,12 @@
 // 这个问题决定「能不能先把题库修好再跑」。静态题面写的是人手编的标签，
 // 活实验室只会发三种形态的事实；两者对不上的那部分，考生再强也拿不到。
 //
-// 判据不是猜的，来自三处代码：
+// 2026-09-20 起这里有两个判据，不是一个：
+//   ① 必需证据活实验室发不发得出来（下面三种形态）
+//   ② 被改动的那处状态，考生这一侧有没有观测能看到
+// ② 换掉了原来的「根因事实发不出来」——考场已经不再发任何编号给考生了。
+//
+// ① 的判据不是猜的，来自三处代码：
 //   process:<资源>-healthy       product-evidence-semantics.mjs 的 service_health
 //                                （资源必须是 scope 里 resource_type=service 的那几个）
 //   pcap:<协议>-observed          harness_diagnostics.py 里写死的白名单 sctp/ngap/pfcp/gtp
@@ -26,7 +31,8 @@ const rows = Object.values(M3_OBSERVATION_CASES).map((item) => {
     profile: item.environment.observation_profile,
     required: verdict.required, live: verdict.mintable_refs,
     minRecall: verdict.minimum_recall, best: verdict.best_recall,
-    causeLive: verdict.root_cause_mintable, runnable: verdict.runnable,
+    causeObservable: verdict.root_cause_observable, causeGradeable: verdict.root_cause_gradeable,
+    runnable: verdict.runnable,
     reason: verdict.reason_zh, verdict: verdict.verdict };
 });
 
@@ -36,7 +42,7 @@ for (const row of rows) (byVerdict[row.verdict] ??= []).push(row);
 console.log("现场观测题总数:", rows.length);
 console.log();
 console.log("=== 每道题在活实验室里能不能答得出来 ===");
-for (const verdict of ["有富余", "零余量", "证据召回够不着", "根因事实发不出来"]) {
+for (const verdict of ["有富余", "零余量", "证据召回够不着", "改动考生观测不到"]) {
   const group = byVerdict[verdict] ?? [];
   console.log(`  ${verdict.padEnd(18)} ${String(group.length).padStart(3)} 道`);
 }
@@ -50,7 +56,8 @@ for (const [scenario, group] of Object.entries(byScenario).sort()) {
   console.log(`  ${row.verdict.padEnd(18)} | ${scenario.padEnd(24)}`
     + ` | 活实验室能发 ${row.live.length}/${row.required.length}`
     + ` | 最低召回线 ${row.minRecall.toFixed(3)}`
-    + ` | 根因事实${row.causeLive ? "发得出" : "**发不出**"}`);
+    + ` | 那处改动${row.causeObservable ? "考生看得到" : "**考生看不到**"}`
+    + `${row.causeGradeable ? "" : "（题库没标，诊断这一维不计分）"}`);
 }
 console.log();
 

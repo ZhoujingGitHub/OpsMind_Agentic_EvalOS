@@ -329,8 +329,8 @@
       "digest": "sha256:7a3e054f6e18f4bcfa8f5f0e02284fb95b469bb815971ba9ea20f3c7ad5fe240"
     },
     "grader": {
-      "ref": "evalos-code-grader@6.1.0",
-      "digest": "sha256:530b7c0c4f5fe42a3dc2a0e80a8e76f40bed41daf193681859f079f05b844112"
+      "ref": "evalos-code-grader@6.2.0",
+      "digest": "sha256:423ea0939316cd8ce7668ce93813135c4870bfb9fedcc69ea12a06ed39c55a63"
     },
     "twin": {
       "ref": "opsmind-m3-protocol-twin@1.0.0",

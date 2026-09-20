@@ -273,12 +273,19 @@ test("individual rule presence is credited generically, never as incident cause 
   const item = policyEvidence(), original = JSON.stringify(item);
   assert.deepEqual(protocolEvidenceReferences(item), ["policy:sctp:38412:drop-rule-present"]);
   const spec = { ground_truth: { root_causes: ["incident cause"],
-    root_cause_fact_refs: ["policy:sctp:38412:drop-rule-present"],
+    expected_behavior: "diagnose_only",
+    fault_deltas: [{ observation: "network_policy", state: "present",
+      identify: { chain: "CUSTOM", protocol: "sctp", destination_port: "38412", target: "DROP" } }],
     required_evidence: ["policy:sctp:38412:drop-rule-present"] }, tools: {} };
   const trace = [{ name: "candidate.raw_event", payload: { payload: item } }];
-  // Citing the rule is not the same as nominating it as the cause.
+  // Citing the rule is not the same as pointing at it as the changed state.
   assert.equal(gradeObservableOutcome(spec, { status: "resolved", root_cause: "unrelated",
     evidence_refs: [item.evidence_id] }, trace).pass, false);
+  // Pointing at it, from the evidence it was read in, is.
+  assert.equal(gradeObservableOutcome(spec, { status: "resolved", root_cause: "incident cause",
+    evidence_refs: [item.evidence_id],
+    root_cause_state_claims: [{ evidence_id: item.evidence_id, state: "present",
+      fields: { protocol: "sctp", destination_port: "38412", target: "DROP" } }] }, trace).pass, true);
   assert.equal(gradeObservableOutcome(spec, { status: "resolved", root_cause: "incident cause",
     evidence_refs: [] }, trace).evidenceRecall, 0);
   assert.equal(JSON.stringify(item), original);

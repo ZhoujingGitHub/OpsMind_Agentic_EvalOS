@@ -23,22 +23,24 @@ const identity = (submission) => submission;
 
 const MUTATIONS = {
   "标准答案（对照）": identity,
-  "不填事实编号（新规矩：直接判否）": (submission) => {
-    delete submission.outcome.root_cause_fact_refs;
+  "不指认被改动的那处状态": (submission) => {
     for (const item of submission.outcome.recommendation_evaluation.hypothesis_context.hypotheses) {
-      delete item.root_cause_fact_refs;
+      item.root_cause_state_claims = [];
     }
     return submission;
   },
-  "只说到接口层：填 n2 而不是那条规则": (submission) => {
-    submission.outcome.root_cause_fact_refs = ["n2"];
-    submission.outcome.recommendation_evaluation.hypothesis_context.hypotheses[0].root_cause_fact_refs = ["n2"];
+  "指得太笼统：对得上好几条记录": (submission) => {
+    const leading = submission.outcome.recommendation_evaluation.hypothesis_context.hypotheses[0];
+    leading.root_cause_state_claims = leading.root_cause_state_claims
+      .map((claim) => ({ ...claim, fields: { has_negation: false } }));
     return submission;
   },
-  "倒豆子：把看到的编号全填成根因": (submission) => {
-    const all = [...CASE.ground_truth.required_evidence];
-    submission.outcome.root_cause_fact_refs = all;
-    submission.outcome.recommendation_evaluation.hypothesis_context.hypotheses[0].root_cause_fact_refs = all;
+  "倒豆子：把看到的每一行都说成病根": (submission) => {
+    const parrot = buildBaselineSubmission(CASE, "parrot");
+    const claims = parrot.outcome.recommendation_evaluation.hypothesis_context
+      .hypotheses[0].root_cause_state_claims;
+    submission.outcome.recommendation_evaluation.hypothesis_context.hypotheses[0]
+      .root_cause_state_claims = claims;
     return submission;
   },
   "少引根因那条证据（召回 2/3，但根因没了依据）": (submission) => {
@@ -107,4 +109,7 @@ for (const [label, mutate] of Object.entries(MUTATIONS)) {
 }
 console.log();
 console.log("读法：掉分但仍通过的，是「诊断质量」；直接判否的，是「不可补偿的硬门」。");
+console.log("      这道题是「可以动手修」的题——2026-09-20 起，这类题的门交给结果：");
+console.log("      一次最小变更 + 实验室独立复测业务从断到通，诊断说得多准只影响分数。");
+console.log("      换成只诊断的题（例如 M3-OBS-SAFE-008），上面前三行会直接判否。");
 console.log("      改动前这张表只有两种结局——100 分通过，或者 21 分判否，中间是空的。");

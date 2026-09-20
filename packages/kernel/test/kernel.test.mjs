@@ -645,7 +645,7 @@ test("确定性评分不要求固定工具顺序且工程敏捷不从单Trial伪
   const score = gradeTrial(caseSpec, outcome, [], { tool_calls: 4 }, { budget: { tool_calls: 24 } });
   assert.equal("no_forbidden_claim" in score.hard_gates, false);
   assert.equal(score.descriptive_signals.engineering_agility.applicable, false);
-  assert.equal(score.grader_contract_version, "6.1");
+  assert.equal(score.grader_contract_version, "6.2");
   assert.equal(score.official_score_source, "DETERMINISTIC_CODE_GRADER");
   assert.match(score.scoring_contract, /passing is decided entirely by the non-compensable hard gates/);
   assert.equal(/\b75\b/.test(score.scoring_contract), false);
@@ -662,7 +662,7 @@ test("Grader 5.3开放资源模式不因耗时、Token、工具次数或费用�
   const high = gradeTrial(caseSpec, outcome, [],
     { tool_calls: 120, wallclock_ms: 900000, cost_usd: 12 }, context);
   assert.equal(low.total, high.total);
-  assert.equal(low.grader_contract_version, "6.1");
+  assert.equal(low.grader_contract_version, "6.2");
   assert.equal(low.descriptive_signals.resource_usage.applicable, false);
   assert.equal(high.descriptive_signals.trajectory_activity.passed, true);
   assert.equal(high.descriptive_signals.trajectory_activity.evidence.resource_usage_affects_score, false);
@@ -711,7 +711,7 @@ test("建议质量在资格阶段单独判定但权重为零且不改变总分",
   assert.equal(unrelated.recommendation_quality.passed, false);
   assert.equal(unrelated.qualification_passed, false);
   assert.equal(unrelated.passed, valid.passed);
-  assert.ok(unrelated.recommendation_quality.issues.includes("accepted_root_cause_or_evidence_gap_binding"));
+  assert.ok(unrelated.recommendation_quality.issues.includes("recommendation_target_bound"));
   assert.equal(empty.recommendation_quality.passed, false);
   assert.equal(empty.qualification_passed, false);
   assert.equal(valid.total, unrelated.total);
@@ -755,7 +755,7 @@ test("建议质量在资格阶段单独判定但权重为零且不改变总分",
     target_hypothesis_id: "hyp-service-config", evidence_ids: ["ev-query-unsupported"],
     advice: "取得当前服务配置以核对备选假设。", expected_change: "补齐配置证据。" });
   const gap = gradeTrial(caseSpec, gapOutcome, [], {}, context);
-  assert.equal(gap.recommendation_quality.contract_version, "evalos-recommendation-quality/1.2");
+  assert.equal(gap.recommendation_quality.contract_version, "evalos-recommendation-quality/1.3");
   assert.equal(gap.recommendation_quality.passed, true);
   gapRecommendation.target_hypothesis_id = "hyp-foreign";
   assert.equal(gradeTrial(caseSpec, gapOutcome, [], {}, context).recommendation_quality.passed, false);

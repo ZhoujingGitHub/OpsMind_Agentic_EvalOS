@@ -1,11 +1,11 @@
 import { LIVE_FACT_EQUIVALENCE } from "./m2-cases.mjs";
 import { M3_CASES, M3_CASE_PARTITIONS } from "./m3-cases.mjs";
 
-// 3.2.1 是必须的：3.2.0 冻结时这套题只有 1 道，而且考生可见的任务契约里
-// 还没有「必须列出已排除的竞争假设」这一条。内容变了版本却没变，冻结登记
-// 就会一边留着旧题面、一边按新规矩打分。题面文字本身一字未改（goal 的
-// sha256 与 3.2.0 相同），变的是套件成员与可见契约。
-const VERSION = "3.2.1";
+// 3.2.2 是必须的：3.2.1 的可见契约里还没有「要指认被改动的那处状态」这一条，
+// 而 2026-09-20 的四次真跑证明——考场要的东西如果没写进可见契约，考生就答不出来。
+// 内容变了版本却不变，冻结登记会一边留着旧题面、一边按新规矩打分。
+// 症状那一句一字未改；题面多出来的是「答卷要长什么样」，不是「病是什么」。
+const VERSION = "3.2.2";
 
 // The candidate is given symptoms, never the mechanism. One symptom line per
 // observable failure class; the injected fault stays private to the laboratory.
@@ -80,6 +80,21 @@ function createObservationCase(baseCase) {
   delete item.visible.scope.evaluation_partition;
   delete item.visible.scope.observation_profile;
   delete item.visible.test_condition;
+  // What the exam expects of an answer, said out loud. It describes the SHAPE
+  // of the answer — point at the state you found and copy the fields down —
+  // and deliberately publishes no list of faults, mechanisms or field names:
+  // handing the candidate a vocabulary is handing it the answer, and inventing
+  // one is what made four correct diagnoses fail on 2026-09-20.
+  item.visible.task_contract = { ...item.visible.task_contract,
+    root_cause_state_claim_required: true,
+    root_cause_state_claim_instruction: "在领先假设上指认被改动的那处状态："
+      + "引用你自己采到的一条观测，把那条观测里足以唯一锁定这处异常的字段名与字段值原样摘下来；"
+      + "字段名和取值都必须是你真的看到过的，不要改写、不要自造。"
+      + "如果异常是某样东西不见了，就标明它是缺失的。"
+      + "改动不止一处时全部列出；摘得太笼统、对得上好几条记录，同样算没有指准。" };
+  item.visible.task_contract.description = item.visible.task_contract.description
+    + "报告还须指认被改动的那处状态，用你自己观测里原样出现过的字段与取值。";
+  item.goal = `${item.goal} ${item.visible.task_contract.root_cause_state_claim_instruction}`;
   item.source.dataset = "m3-symptom-observations";
   item.ground_truth.base_case_ref = `${baseCase.id}@${baseCase.version}`;
   item.ground_truth.required_evidence = toLiveVocabulary(item.ground_truth.required_evidence);
@@ -110,8 +125,8 @@ export const M3_OBSERVATION_PARTITIONS = Object.freeze(Object.fromEntries(
 export function createObservationDesign(manifest) {
   const design = structuredClone(manifest);
   design.name = "M3.2 现场症状自主诊断验收冻结源";
-  design.dataset_ref = "m3-l2-symptom-observations@3.2.1";
-  design.suite_ref = "m3-symptom-acceptance@3.2.1";
+  design.dataset_ref = "m3-l2-symptom-observations@3.2.2";
+  design.suite_ref = "m3-symptom-acceptance@3.2.2";
   design.case_refs = Object.values(M3_OBSERVATION_CASES).map((item) => item.id + "@" + item.version);
   design.case_partitions = Object.fromEntries(
     Object.entries(M3_OBSERVATION_PARTITIONS).map(([partition, refs]) => [partition, [...refs]]));

@@ -40,13 +40,23 @@ const TRACE = [
   { seq: 5, name: "ticket.issued", payload: { event_name: "ticket.issued" } },
   { seq: 6, name: "action.executed", payload: {} },
   { seq: 7, name: "verification.completed", payload: {} },
+  // 一份被保存下来的内核快照。指认那处改动要在这里面找到恰好一条记录。
+  { seq: 8, record_type: "SPAN_EVENT", name: "candidate.raw_event", payload: { payload: {
+    evidence_id: "ev-policy", source_lineage: "lab.resource_observation.sandboxed_readonly_diagnostic",
+    raw_value_json: { records: [{ resource_id: "amf", diagnostic_profile: "network_policy",
+      tables: [{ table: "filter", chains: [{ name: "OPSMIND_TWIN_IN" }], rules: [
+        { chain: "OPSMIND_TWIN_IN", position: 1, protocol: "sctp", destination_port: "38412",
+          target: "DROP", has_negation: false, packets: 15, bytes: 1020 }] }] }] } } } },
 ];
 
-const FACT = "policy:sctp:38412:drop-rule-present";
+// 2026-09-20：考场不再收任何编号，改收「从自己的观测里摘下来的那处改动」。
+// 这里直接挂在答卷上，走的是和产品同一条读取路径。
+const STATE_CLAIM = [{ evidence_id: "ev-policy", state: "present",
+  fields: { chain: "OPSMIND_TWIN_IN", protocol: "sctp", destination_port: "38412", target: "DROP" } }];
 
 function run(label, rootCause) {
   const outcome = { status: "resolved", root_cause: rootCause, evidence_refs: [], exclusions: [],
-    root_cause_fact_refs: [FACT] };
+    root_cause_state_claims: STATE_CLAIM };
   const result = gradeTrial(CASE, outcome, TRACE, { tool_calls: 2 }, CONTEXT);
   const applicable = Object.entries(result.assertions)
     .filter(([name]) => name !== "recommendation_quality")
@@ -81,7 +91,7 @@ const WORDINGS = {
   "同时如实报告了处置结果": WITH_FIX_REPORTED,
 };
 
-console.log("=== 四种措辞，都填同一条事实编号 ===");
+console.log("=== 四种措辞，都指认同一处改动 ===");
 for (const [label, text] of Object.entries(WORDINGS)) {
   const { result } = run(label, text);
   const rc = result.assertions.root_cause_localization.value;

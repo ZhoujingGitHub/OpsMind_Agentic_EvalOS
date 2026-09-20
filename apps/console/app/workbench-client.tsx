@@ -719,9 +719,10 @@ function comparisonUnavailable(item: Json) {
   if (item.status === "FAILED" && (item.current?.score === null || item.current?.score === undefined)) return "执行失败，无评分（Failed before grading）";
   return null;
 }
-// Grader 6.1 retired the no_forbidden_claim gate, but trials graded before it
-// still carry the key and must stay readable, so its label stays here.
-function hardGateLabel(value: string) { return ({ task_outcome: "任务结果（Task outcome）", evidence_integrity: "证据完整性（Evidence integrity）", scope_safety: "范围安全（Scope safety）", approval_integrity: "审批完整性（Approval integrity）", execution_safety: "执行安全（Execution safety）", independent_verification: "独立验证（Independent verification）", reset_integrity: "环境复位（Reset integrity）", expected_status: "结果状态符合预期（Expected status）", root_cause_or_justified_inconclusive: "根因正确或有理有据地停止（Root cause / justified stop）", no_forbidden_claim: "没有禁断结论（No forbidden claim）", evidence_traceable: "证据可追溯（Traceable evidence）", minimum_evidence_recall: "关键证据覆盖（Evidence recall）", recovery: "失败恢复（Recovery）", no_unsafe_tool_attempt: "无越权尝试（No unsafe attempt）", environment_task_success: "实验环境任务成功（Environment task）" } as Record<string,string>)[value] ?? humanize(value); }
+// Grader 6.1 retired the no_forbidden_claim gate and 6.2 replaced the root
+// cause gate, but trials graded before them still carry the old keys and must
+// stay readable, so those labels stay here too.
+function hardGateLabel(value: string) { return ({ task_outcome: "任务结果（Task outcome）", evidence_integrity: "证据完整性（Evidence integrity）", scope_safety: "范围安全（Scope safety）", approval_integrity: "审批完整性（Approval integrity）", execution_safety: "执行安全（Execution safety）", independent_verification: "独立验证（Independent verification）", reset_integrity: "环境复位（Reset integrity）", expected_status: "结果状态符合预期（Expected status）", root_cause_state_identified: "指认被改动的那处状态（Root cause state identified）", root_cause_or_justified_inconclusive: "根因正确或有理有据地停止（Root cause / justified stop）", no_forbidden_claim: "没有禁断结论（No forbidden claim）", evidence_traceable: "证据可追溯（Traceable evidence）", minimum_evidence_recall: "关键证据覆盖（Evidence recall）", recovery: "失败恢复（Recovery）", no_unsafe_tool_attempt: "无越权尝试（No unsafe attempt）", environment_task_success: "实验环境任务成功（Environment task）" } as Record<string,string>)[value] ?? humanize(value); }
 function yesNo(value: any) { return value ? "是（Yes）" : "否（No）"; }
 function requestKindLabel(value: string) { return value === "RERUN_FROZEN" ? "按原配置重新评测（Rerun）" : "新建评测（New evaluation）"; }
 function stableToken(value: unknown) { const text = JSON.stringify(value); let hash = 2166136261;

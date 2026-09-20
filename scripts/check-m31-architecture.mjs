@@ -54,7 +54,11 @@ assert.match(app, /createLangGraphProductConnector/);
 assert.match(app, /createTestDouble\("test-double-a"/);
 assert.match(app, /test-double-a:ENGINEERING_TEST/);
 assert.match(runner, /buildEvaluationContract/);
-assert.match(grader, /grader_version: context\.graderRef \?\? "evalos-code-grader@6\.1\.0"/);
+assert.match(grader, /grader_version: context\.graderRef \?\? "evalos-code-grader@6\.2\.0"/);
+// 2026-09-20：根因判据换成「指认那处被改动的状态」，判定规则变了版本号必须跟着变。
+assert.match(grader, /the parameters of the command the laboratory used to inject the fault/);
+assert.doesNotMatch(grader, /root_cause_fact_refs/,
+  "考场自己发明的事实编号不许再出现在任何判分路径里");
 assert.match(grader, /recommendation quality is a separate zero-weight qualification signal/);
 assert.match(grader, /DETERMINISTIC_CODE_GRADER/);
 assert.match(twinEnvironment, /ExternalProductTwinEnvironment/);
@@ -76,7 +80,7 @@ for (const name of executableManifests) {
   const manifest = JSON.parse(read(name.startsWith("config/") ? name : `config/${name}`));
   if (name === "m15-smoke.manifest.json") {
     assert.equal(manifest.manifest_version, "6.0", "工程测试替身必须继续使用历史隔离的 Manifest 6.0");
-    assert.equal(manifest.frozen_dependencies.grader.ref, "evalos-code-grader@6.1.0",
+    assert.equal(manifest.frozen_dependencies.grader.ref, "evalos-code-grader@6.2.0",
       "当前可执行工程测试不得偷偷保留旧 Grader 路径");
   }
   if (name === "m3-formal-agent-capability.manifest.json") {
@@ -94,9 +98,12 @@ const formal = JSON.parse(read("config/m3-formal-agent-capability.manifest.json"
 assert.equal(formal.dataset_ref, "m3-l2-agentic-formal@3.1.0");
 assert.equal(formal.suite_ref, "m3-formal-80@3.1.0");
 assert.equal(formal.case_refs.every((ref) => ref.endsWith("@3.1.0")), true);
-assert.equal(formal.frozen_dependencies.grader.ref, "evalos-code-grader@6.1.0");
+assert.equal(formal.frozen_dependencies.grader.ref, "evalos-code-grader@6.2.0");
 const graderSourceDigest = "sha256:" + createHash("sha256").update(
-  ["packages/kernel/src/grader.mjs", "packages/kernel/src/product-evidence-semantics.mjs"]
+  // 判分代码全在这三份里。少算一份，改了判据也能顶着旧摘要混过去——
+  // fault-delta.mjs 是 2026-09-20 新加的根因判据，必须一起进摘要。
+  ["packages/kernel/src/grader.mjs", "packages/kernel/src/product-evidence-semantics.mjs",
+    "packages/kernel/src/fault-delta.mjs"]
     .map((name) => read(name).replaceAll("\r\n", "\n")).join("\n")).digest("hex");
 assert.equal(formal.frozen_dependencies.grader.digest, graderSourceDigest,
   "冻结评分依赖必须包含当前证据解释代码，不能只更新版本名称");
