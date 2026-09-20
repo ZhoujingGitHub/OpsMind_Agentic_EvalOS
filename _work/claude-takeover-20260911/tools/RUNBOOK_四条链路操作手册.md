@@ -36,15 +36,23 @@
 
 ---
 
-## 0. 唯一可用通道：Cloud Assistant
+## 0. 两条通道：考场走 WireGuard SSH，另两台走 Cloud Assistant
 
-**SSH 三台全部不通**（安全组 `/32` 白名单里没有当前出口 IP，握手无 banner）。
+> **2026-09-20 重大更正**：本节此前写着「SSH 三台全部不通，唯一通道是 Cloud Assistant」。
+> **这句话已经过期，而且它让人白等了好几轮云凭据。**
+> 本机装着 WireGuard，隧道 `opsmind-management` 常驻运行（本机 `10.77.240.2`），
+> **考场那台机在隧道里是 `10.77.240.1`，可以直接 root SSH，完全不需要阿里云凭据。**
+> 实测：`ssh -i ~/.ssh/opsmind-evallab-ed25519 root@10.77.240.1` 秒连；
+> 2.8 MB 的发布包 `scp` **2.3 秒**传完，不用再切 157 块。
+> 隧道里**只有考场这一台**（`10.77.240.3/.4/.5` ping 得通但 SSH 不通，是假象）。
 
-> **2026-09-16 更正**：Claude Code 就跑在**操作者本机**，出口 IP 与操作者浏览器完全相同，
-> 不存在「沙箱 IP」这回事。安全组里那些 `OpsMind-Codex-SSH` 的 `/32` 规则失效，
-> 是**操作者宽带 IP 变了**，不是工具差异。据此不要去找「给沙箱放行」这类解法。
+| 主机 | 实例 ID | 怎么进 |
+|---|---|---|
+| 产品（AH + LG + DB） | `i-bp12nyanjsyue1vs5bu6` | Cloud Assistant，profile `opsmind-main-oauth` |
+| 5G 实验室 | `i-bp19u0lim79nhh4y7fkg` | Cloud Assistant，profile `opsmind-main-oauth` |
+| **考场 EvalOS** | `i-bp14ezltpnq8mxic1gsb` | **WireGuard SSH `root@10.77.240.1`**（钥匙 `~/.ssh/opsmind-evallab-ed25519`）；云助手 profile `opsmind-evallab` 只是备用 |
 
-唯一通道是阿里云 Cloud Assistant，走 OpenAPI over HTTPS，不受安全组限制。
+剩下那两台仍走阿里云 Cloud Assistant（OpenAPI over HTTPS，不受安全组限制）。
 
 ```bash
 ./ca.sh      <实例ID> <超时秒> < 脚本文件     # 主账号：产品机 + 实验室
@@ -60,8 +68,16 @@
 **注意事项：**
 - Cloud Assistant **输出有长度上限**，大 JSON 会被截断。大证据包要先落盘到服务器，再分块取或只取摘要。
 - **长任务必须用 `nohup` 后台跑 + 轮询日志**，否则 Cloud Assistant 超时。19.8 GB 库的全表扫描必超时。
-- `opsmind-evallab` 的 OAuth 曾失效过（refresh token 400）。失效时用户需在自己终端跑：
-  `aliyun.exe configure --profile opsmind-evallab --mode OAuth --region cn-hangzhou`
+- **OAuth 是给人用的凭据，不是给机器用的**：实测有效期只有 **3 小时**，过期就要人重新扫码。
+  用它跑自动化，等于每 3 小时被打断一次。失效表现是 `refresh token 400`。
+  - **考场不受影响**——走 WireGuard SSH，不碰这套凭据。
+  - 另两台要重新授权时，命令是（**没有 `--region` 这个参数，加了直接报错**）：
+    `aliyun.exe configure --profile <名字> --mode OAuth --oauth-site-type CN`
+    注意 `aliyun.exe` 不在 PATH 里，PowerShell 要用 `& "<全路径>"` 调。
+  - 二维码可以由 Claude 调出来：上面那条命令会打印一个 `signin.aliyun.com/oauth2/...` 链接，
+    把它开在**本机**浏览器里（回调走 `127.0.0.1:1234x`，必须是本机），页面上就有扫码入口。
+  - **根治办法**：换成 AccessKey 或 RamRoleArn（`aliyun configure set --mode AK ...`），
+    长期有效、无人工步骤。这才是自动化该用的凭据类型。
 
 关键路径：
 - 阿里云 CLI：`D:/AIPM/.../OpsMind/.tools/aliyuncli/aliyun.exe`

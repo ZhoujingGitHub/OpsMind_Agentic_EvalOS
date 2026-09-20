@@ -206,8 +206,8 @@
       "architecture": "CLAUDE_AGENT_SDK_HARNESS",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "693e3a4bfb582f54e7a07929d9e4c40ddcbe4a14",
-      "artifact_digest": "sha256:d5beab83767032d7a284a73974dbd6be64da02d13402fa38c8f74b5d526fa9a9",
+      "source_revision": "35d1bcf4025f1a1da7889462d02107d95e47b9b9",
+      "artifact_digest": "sha256:2ca50611329621837e485787eb3fc65a994168b0f1d67df6cd40d50effe16d94",
       "runtime_digest": "sha256:823db0ba099411769aea95ce98c4aefec9d3136425acfba6285c42477a150ef3",
       "runtime_manifest_digest": "sha256:27b052243e1d74621385459bf42a55aa920c03ccce996370ddef7a18fc910bad",
       "capability_contract_digest": "sha256:61398d3e26bb6865f75a16d2e7311f00c763ae556a91d4af02afdd486a0ee8bd",
@@ -248,8 +248,8 @@
       "architecture": "LANGGRAPH_PRODUCT",
       "adapter_contract_version": "5.0",
       "adapter_version": "candidate-adapter-5.0.0",
-      "source_revision": "85b0b66f111e87a51759ec8466391c86fceb7844",
-      "artifact_digest": "sha256:f418d9a6322f916f3d27bea29ba83bc76aa0a910653d7998781bea071d8c866d",
+      "source_revision": "ddae8a02eabd766617e55c50fd17e2dd6b2d4be7",
+      "artifact_digest": "sha256:f56ee7211d00313439b7a935946b184cd5f07360714a89b139f861ef7bd6a3d8",
       "runtime_digest": "sha256:252e9ba645df827216948d23a8a45d8f32585af0c46fa6f12c94dc8590de7cec",
       "runtime_manifest_digest": "sha256:0f5b8a35e098ce7bad29e09b95fd86543fdc03a6dcf68714d1a4179767dbb238",
       "capability_contract_digest": "sha256:65f27c9d6568fc540fdd1252eb7960f6041c956a4cf18c090633166622c2b03e",
@@ -388,9 +388,9 @@
         "provenance": {
           "status": "product_public_maximum",
           "method": "candidate_public_runtime_contract",
-          "source_revision": "693e3a4bfb582f54e7a07929d9e4c40ddcbe4a14",
-          "artifact_digest": "sha256:d5beab83767032d7a284a73974dbd6be64da02d13402fa38c8f74b5d526fa9a9",
-          "evidence_ref": "keyword-criterion-removed-20260920:deployment-proof:3a292e126229a55ccd4944fa264fa4fe61d0b23bd73dd3613fec958ee030c114:agent-harness-v2:public-resource-contract-unchanged"
+          "source_revision": "35d1bcf4025f1a1da7889462d02107d95e47b9b9",
+          "artifact_digest": "sha256:2ca50611329621837e485787eb3fc65a994168b0f1d67df6cd40d50effe16d94",
+          "evidence_ref": "root-cause-state-claim-20260920:deployment-proof:80f72661da06c91a9d94e3d7eccf1392d3401d17d27faad0620f8be47bed0247:agent-harness-v2:public-resource-contract-unchanged"
         }
       },
       {
@@ -424,9 +424,9 @@
         "provenance": {
           "status": "product_public_maximum",
           "method": "candidate_public_runtime_contract",
-          "source_revision": "85b0b66f111e87a51759ec8466391c86fceb7844",
-          "artifact_digest": "sha256:f418d9a6322f916f3d27bea29ba83bc76aa0a910653d7998781bea071d8c866d",
-          "evidence_ref": "keyword-criterion-removed-20260920:deployment-proof:3a292e126229a55ccd4944fa264fa4fe61d0b23bd73dd3613fec958ee030c114:langgraph-v1:public-resource-contract-unchanged"
+          "source_revision": "ddae8a02eabd766617e55c50fd17e2dd6b2d4be7",
+          "artifact_digest": "sha256:f56ee7211d00313439b7a935946b184cd5f07360714a89b139f861ef7bd6a3d8",
+          "evidence_ref": "root-cause-state-claim-20260920:deployment-proof:80f72661da06c91a9d94e3d7eccf1392d3401d17d27faad0620f8be47bed0247:langgraph-v1:public-resource-contract-unchanged"
         }
       }
     ]
