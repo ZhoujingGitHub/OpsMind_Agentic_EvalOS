@@ -104,11 +104,14 @@ function redactGraderEvidence(name, assertion) {
       note: "私有参考根因与判别性事实编号不进入执行面或交互式分析上下文" };
   }
   if (name === "remediation_quality") {
-    // covered[] echoes the case's forbidden_claims, which are ground truth.
+    // Counts only. The counter-evidence identifiers belong to the candidate's
+    // own report and do not need to travel into the analysis context.
     const exclusion = evidence.competing_exclusion ?? {};
     return stripIdentity({ ...evidence,
       competing_exclusion: { applicable: exclusion.applicable ?? null, score: exclusion.score ?? null,
-        declared: exclusion.declared ?? null, covered_count: (exclusion.covered ?? []).length } });
+        rejected_hypotheses: exclusion.rejected_hypotheses ?? null,
+        rejected_with_counter_evidence: exclusion.rejected_with_counter_evidence ?? null,
+        named: exclusion.named ?? null } });
   }
   return stripIdentity(evidence);
 }

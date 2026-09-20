@@ -23,7 +23,7 @@ const identity = (submission) => submission;
 
 const MUTATIONS = {
   "标准答案（对照）": identity,
-  "不填 root_cause_fact_refs（退回文本判据）": (submission) => {
+  "不填事实编号（新规矩：直接判否）": (submission) => {
     delete submission.outcome.root_cause_fact_refs;
     for (const item of submission.outcome.recommendation_evaluation.hypothesis_context.hypotheses) {
       delete item.root_cause_fact_refs;
@@ -67,10 +67,16 @@ const MUTATIONS = {
   },
   "不写已排除的竞争假设": (submission) => {
     submission.outcome.exclusions = [];
+    submission.outcome.recommendation_evaluation.hypothesis_context.hypotheses =
+      submission.outcome.recommendation_evaluation.hypothesis_context.hypotheses
+        .filter((item) => item.status === "leading");
     return submission;
   },
-  "写了排除项但不对路": (submission) => {
-    submission.outcome.exclusions = ["天气不好"];
+  "列了被否决的假设，但不给反证编号": (submission) => {
+    submission.outcome.exclusions = [];
+    for (const item of submission.outcome.recommendation_evaluation.hypothesis_context.hypotheses) {
+      item.counter_evidence_ids = []; item.contradicting_evidence_ids = [];
+    }
     return submission;
   },
   "不给缺口分级": (submission) => {

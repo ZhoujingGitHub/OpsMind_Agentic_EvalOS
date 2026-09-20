@@ -774,6 +774,22 @@ test("M3冻结设计可用于新建评测预检但不能绕过门禁直接启动
     const symptomResult = (await symptomPreflight.json()).preflight;
     assert.equal(symptomResult.total_trials, 1);
     assert.equal(symptomResult.blockers.some((item) => item.includes("参评适配器未就绪")), true);
+    // M3-OBS-001 is one of the sixteen the laboratory can actually mint an answer for.
+    assert.equal(symptomResult.blockers.some((item) => item.includes("不能进考场")), false);
+    // A case whose disease fact the laboratory cannot mint is stopped before the exam
+    // starts, and the reason says which proof is missing in words an operator can act on.
+    const unanswerable = await app.handler(new Request("http://local/api/workbench/run-requests/preflight", {
+      method: "POST", headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ request_kind: "NEW_EVALUATION", evaluation_purpose: "SINGLE_SYSTEM_REGRESSION",
+        mode: "QUICK_VALIDATION", source_experiment_id: observation.id, case_refs: ["M3-OBS-PUB-001@3.2.0"],
+        contestant_refs: ["agent-harness-v2"], environment_seeds: [formalM3Manifest.environment_seeds[0]],
+        repetitions: 1, requested_by: "api-test-operator", reason: "实验室开不出证明的题必须在开考前拦住" }) }));
+    assert.equal(unanswerable.status, 200);
+    const unanswerableResult = (await unanswerable.json()).preflight;
+    assert.equal(unanswerableResult.ready, false);
+    const stoppedCase = unanswerableResult.blockers.find((item) => item.includes("不能进考场"));
+    assert.ok(stoppedCase, JSON.stringify(unanswerableResult.blockers));
+    assert.match(stoppedCase, /实验室/);
     assert.equal(app.store.listTrials().length, 0);
     assert.equal(frozen.status, "FROZEN");
     assert.equal(frozen.case_refs.length, 80);

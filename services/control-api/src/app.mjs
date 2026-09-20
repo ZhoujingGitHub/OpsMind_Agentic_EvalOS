@@ -6,7 +6,7 @@ import {
   auditableGraderRunView, blindExperimentView, blindGraderRunView, blindTraceView, blindTrialView,
   expertCalibrationFromConsensusSamples, createEvalRegistry, createObservationDesign, createCaseEnvironment, createTestDouble,
   evaluationDecisionReport, evaluationEvidenceTraceView, explainTraceRecord, TRACE_FILTERS, readSnapshotFile, sha256,
-  auditTrialEfficiency, candidateExecutionBudget, trialSettlementBudget,
+  auditTrialEfficiency, candidateExecutionBudget, trialSettlementBudget, liveEvidenceMintability,
   CANDIDATE_PRESENCE_PATH, CandidatePresenceRegistry, assertCandidateBound,
   assertCandidatePreflight, DEPLOYMENT_ATTESTATION_CONTRACT, trustedDeploymentAttestation,
 } from "../../../packages/kernel/src/index.mjs";
@@ -230,7 +230,7 @@ export function createApp({
       recommendation_quality: "evalos-recommendation-quality/1.2",
       diagnosis_and_recovery: "independent-advice-and-task-judgments" } });
   const gradingService = new DeterministicGradingService({ labelStore: labels,
-    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@5.7.0" });
+    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@6.1.0" });
   const approvalOracle = new FrozenApprovalOracle({ labelStore: labels });
   const ledger = new EvaluationLedger(store);
   const loadRelayConfig = () => {
@@ -673,6 +673,16 @@ export function createApp({
     }
     const totalTrials = caseRefs.length * contestants.length * environmentSeeds.length * repetitions;
     const needsTwin = caseRefs.some((caseRef) => store.getExecutionCase(caseRef)?.source?.level === "L2");
+    // A case whose disease fact the laboratory cannot mint is unanswerable, and
+    // running it burns a physical lease to produce a wrong conclusion about the
+    // product. Say which proof is missing, in words an operator can act on.
+    const unanswerableCases = caseRefs.flatMap((caseRef) => {
+      const execution = store.getExecutionCase(caseRef);
+      const groundTruth = labels.getLabel(caseRef)?.ground_truth;
+      if (!execution || !groundTruth) return [];
+      const verdict = liveEvidenceMintability({ ...execution, ground_truth: groundTruth });
+      return verdict.applicable && !verdict.runnable ? [`${caseRef}：${verdict.reason_zh}`] : [];
+    });
     const missingAdapters = contestants.filter((item) => !adapterFor(item.ref, source.manifest.evaluation_lane,
       item.adapter_contract_version) || !adapterFor(item.ref, source.manifest.evaluation_lane,
       item.adapter_contract_version).supportedEvaluationLanes?.includes(source.manifest.evaluation_lane)).map((item) => item.ref);
@@ -729,6 +739,7 @@ export function createApp({
       ...(missingAdapters.length ? [`参评适配器未就绪：${missingAdapters.join("、")}`] : []),
       ...(historicalBudgetContract ? ["Manifest 7.0 及更早真实产品预算合同仅保留历史读取；新的资格、容量和正式运行必须使用 Manifest 8.0 开放资源合同"] : []),
       ...runClassViolations,
+      ...unanswerableCases,
       ...failedCandidateChecks.map((item) => `真实考生开考检查失败（${item.ref}）：${item.error ?? "产品未就绪或冻结指纹不一致"}`),
       ...unqualifiedNativeBudgets.map((item) => `${mode === "CAPACITY_REHEARSAL" ? "容量演练" : "正式评测"}开放资源合同未取得产品原生证明（${item.ref}）：考生必须公开最大可用资源、只把上限用于安全熔断，并公开真实用量`),
       ...(needsTwin && !twinConfigured ? ["所选 L2 Case 需要数字孪生环境，但 Twin 尚未配置"] : []),

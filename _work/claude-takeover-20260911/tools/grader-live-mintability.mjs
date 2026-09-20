@@ -13,36 +13,21 @@
 // 用法（EvalOS 仓根目录）： node _work/claude-takeover-20260911/tools/grader-live-mintability.mjs
 
 import { M3_OBSERVATION_CASES } from "../../../packages/kernel/src/m3-observation-cases.mjs";
+import { liveEvidenceMintability, mintableEvidenceRef }
+  from "../../../packages/kernel/src/live-evidence-mintability.mjs";
 
-const SERVICE_IDS = new Set(["amf", "smf", "upf", "nrf", "mongodb", "dns"]);
-const CAPTURE_PROTOCOLS = new Set(["sctp", "ngap", "pfcp", "gtp"]);
-// opsmind_harness_labctl.py:90 RUNTIME_TARGETS —— 这几个守护进程停了的时候，
-// 实验室会在 observe 的 evidence_refs 里直接回一条 process:<守护进程>-inactive。
-// 这条通道不走 product-evidence-semantics，第一版探针把它漏了。
-const INACTIVE_DAEMONS = new Set(["ueransim-gnb", "ueransim-ue", "open5gs-amfd",
-  "open5gs-smfd", "open5gs-upfd", "open5gs-nrfd", "mongod"]);
-
-function mintable(ref) {
-  let match = /^process:([a-z0-9_.-]+)-healthy$/.exec(ref);
-  if (match) return SERVICE_IDS.has(match[1]);
-  match = /^process:([a-z0-9_.-]+)-inactive$/.exec(ref);
-  if (match) return INACTIVE_DAEMONS.has(match[1]);
-  match = /^pcap:([a-z][a-z0-9_]*)-observed$/.exec(ref);
-  if (match) return CAPTURE_PROTOCOLS.has(match[1]);
-  return /^policy:(?:sctp|udp|tcp):[0-9]{1,5}:drop-rule-present$/.test(ref);
-}
+// 2026-09-20：判据已经搬进内核成为正式代码（预检就是用它拦题的）。
+// 这里只 import，不再抄一份——上一轮就是因为探针抄了一份权重表，
+// 换了权重之后探针还在打印旧数字。
 
 const rows = Object.values(M3_OBSERVATION_CASES).map((item) => {
-  const required = item.ground_truth.required_evidence ?? [];
-  const live = required.filter(mintable);
-  const minRecall = Math.min(1, 2 / Math.max(1, required.length));
-  const best = required.length ? live.length / required.length : 1;
-  const causeLive = (item.ground_truth.root_cause_fact_refs ?? []).every(mintable);
+  const verdict = liveEvidenceMintability(item);
   return { id: item.id, scenario: item.environment.scenario_id,
     profile: item.environment.observation_profile,
-    required, live, minRecall, best, causeLive,
-    verdict: !causeLive ? "根因事实发不出来" : best < minRecall ? "证据召回够不着"
-      : best === 1 ? "有富余" : "零余量" };
+    required: verdict.required, live: verdict.mintable_refs,
+    minRecall: verdict.minimum_recall, best: verdict.best_recall,
+    causeLive: verdict.root_cause_mintable, runnable: verdict.runnable,
+    reason: verdict.reason_zh, verdict: verdict.verdict };
 });
 
 const byVerdict = {};
@@ -73,7 +58,7 @@ console.log("=== 发不出来的那些必需证据，缺在哪 ===");
 const missing = new Map();
 for (const row of rows) {
   for (const ref of row.required) {
-    if (mintable(ref)) continue;
+    if (mintableEvidenceRef(ref)) continue;
     missing.set(ref, (missing.get(ref) ?? 0) + 1);
   }
 }

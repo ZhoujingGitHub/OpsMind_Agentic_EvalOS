@@ -10,7 +10,6 @@
 //
 // 用法（EvalOS 仓根目录）：
 //   node _work/claude-takeover-20260911/tools/grader-baseline-agents.mjs
-//   node _work/claude-takeover-20260911/tools/grader-baseline-agents.mjs --criterion text
 //   node _work/claude-takeover-20260911/tools/grader-baseline-agents.mjs --verbose
 
 import { gradeTrial } from "../../../packages/kernel/src/grader.mjs";
@@ -65,6 +64,33 @@ function hypothesis(caseSpec, evidenceIds, { factRefs, statement }) {
     missing_evidence: ["注入主体与关联变更单属于事后溯源，不改变本次因果判定"],
     unknowns: [{ gap: "注入主体与关联变更单", blocks_root_cause: false,
       unavailable_reason: "事后溯源，超出本次只读授权" }],
+  };
+}
+
+/**
+ * The competitor the reference answer knocks down, with the evidence that
+ * knocks it down.
+ *
+ * Naming a rejected hypothesis is free; producing the observation that
+ * contradicts it is the work. Both product vocabularies are written, because
+ * Agent Harness calls this counter_evidence_ids and LangGraph calls it
+ * contradicting_evidence_ids, and neither product shares code with the other.
+ */
+function rejectedHypothesis(evidenceIds) {
+  return {
+    hypothesis_id: "h-2",
+    status: "rejected",
+    conclusion_level: "refuted",
+    confidence: 0.05,
+    statement: "同一症状的竞争解释：受影响网元自身已经停止运行。",
+    cause: "同一症状的竞争解释：受影响网元自身已经停止运行。",
+    supporting_evidence_ids: [],
+    counter_evidence_ids: evidenceIds.slice(0, 1),
+    contradicting_evidence_ids: evidenceIds.slice(0, 1),
+    root_cause_fact_refs: [],
+    blocking_evidence_gaps: [],
+    missing_evidence: [],
+    unknowns: [],
   };
 }
 
@@ -159,14 +185,17 @@ export function buildBaselineSubmission(caseSpec, kind) {
       ...(gt.root_cause_adjacent_refs ?? [])])]
     : [...(gt.root_cause_fact_refs ?? [])];
   const statement = String(gt.root_causes?.[0] ?? "");
-  const hypotheses = [hypothesis(caseSpec, evidenceIds, { factRefs, statement })];
+  const hypotheses = [hypothesis(caseSpec, evidenceIds, { factRefs, statement }),
+    rejectedHypothesis(evidenceIds)];
   const outcome = {
     status: expectedStatus,
     root_cause: statement,
     root_cause_fact_refs: factRefs,
     confidence: 0.9,
     evidence_refs: [...evidenceIds],
-    exclusions: [...(gt.forbidden_claims ?? [])],
+    // Prose for the human reader. It is archived, never graded — the exclusion
+    // credit comes from the counter-evidence on the rejected hypothesis above.
+    exclusions: ["受影响网元自身停止运行这一解释已被现场观测反证"],
     next_checks: ["注入主体与关联变更单属于事后溯源"],
     recommendation_evaluation: recommendationView(caseSpec, evidenceIds, hypotheses),
   };
@@ -206,7 +235,10 @@ export function buildGateFloorSubmission(caseSpec) {
       : record))
     // No re-observation after acting: the report is trusted as-is.
     .filter((record) => record.name !== "candidate.recovery.observed" || gt.requires_tool_recovery);
+  // The floor paper never rules a competitor out, so the knocked-down
+  // hypothesis and its counter-evidence go away with the rest of the extras.
   const hypotheses = base.outcome.recommendation_evaluation.hypothesis_context.hypotheses
+    .filter((item) => item.status === "leading")
     .map((item) => ({ ...item, supporting_evidence_ids: keptIds, missing_evidence: [],
       blocking_evidence_gaps: [], unknowns: [] }));
   const outcome = { ...base.outcome, evidence_refs: keptIds, exclusions: [], next_checks: [],
@@ -235,8 +267,7 @@ export function runBaseline(caseSpec, kind, extraContext = {}) {
 function main() {
   const argv = process.argv.slice(2);
   const verbose = argv.includes("--verbose");
-  const criterionIndex = argv.indexOf("--criterion");
-  const extra = criterionIndex >= 0 ? { rootCauseCriterion: argv[criterionIndex + 1] } : {};
+  const extra = {};
   const cases = [...Object.values(M3_CASES), ...Object.values(M3_OBSERVATION_CASES)];
   const expectations = { empty: false, reference: true, parrot: false };
   const failures = [];
@@ -266,7 +297,6 @@ function main() {
 
   const mean = (values) => Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2));
   console.log(`题目数: ${cases.length}（M3 静态 ${Object.keys(M3_CASES).length} + 现场观测 ${Object.keys(M3_OBSERVATION_CASES).length}）`);
-  if (criterionIndex >= 0) console.log(`判据: ${argv[criterionIndex + 1]}`);
   console.log();
   console.log("=== 三个基线考生 ===");
   console.log(`  ① 空答卷考生   平均分 ${String(mean(scores.empty)).padStart(6)}  期望：全部判否`);

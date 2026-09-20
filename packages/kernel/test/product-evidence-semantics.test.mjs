@@ -272,8 +272,11 @@ function policyEvidence() {
 test("individual rule presence is credited generically, never as incident cause or repair proof", () => {
   const item = policyEvidence(), original = JSON.stringify(item);
   assert.deepEqual(protocolEvidenceReferences(item), ["policy:sctp:38412:drop-rule-present"]);
-  const spec = { ground_truth: { root_causes: ["incident cause"], required_evidence: ["policy:sctp:38412:drop-rule-present"] }, tools: {} };
+  const spec = { ground_truth: { root_causes: ["incident cause"],
+    root_cause_fact_refs: ["policy:sctp:38412:drop-rule-present"],
+    required_evidence: ["policy:sctp:38412:drop-rule-present"] }, tools: {} };
   const trace = [{ name: "candidate.raw_event", payload: { payload: item } }];
+  // Citing the rule is not the same as nominating it as the cause.
   assert.equal(gradeObservableOutcome(spec, { status: "resolved", root_cause: "unrelated",
     evidence_refs: [item.evidence_id] }, trace).pass, false);
   assert.equal(gradeObservableOutcome(spec, { status: "resolved", root_cause: "incident cause",

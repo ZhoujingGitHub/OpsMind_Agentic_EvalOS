@@ -25,162 +25,6 @@ export const GRADER_SUB_WEIGHTS = Object.freeze({
 const WEIGHTS = GRADER_WEIGHTS;
 const SUB_WEIGHTS = GRADER_SUB_WEIGHTS;
 
-export function normalizeClaim(value) {
-  return String(value ?? "")
-    .toLocaleLowerCase("en-US")
-    // Deterministic, domain-neutral state synonyms.  The grader still requires
-    // the same component/concept anchors; these rules only normalize common
-    // ways of saying that a service/process is unavailable.
-    // Every rule emits the same tokenization the label side produces
-    // ("进程 停止", separated), otherwise substring comparison can never match.
-    .replace(/服务(?:进程)?(?:当前|已经|已)?(?:处于)?\s*(?:未运行|未启动|已停止|停止运行|停止状态|inactive\s*状态?)/gu,
-      "进程 停止")
-    .replace(/进程(?:当前|已经|已)?(?:处于)?\s*(?:未运行|未启动|已停止|停止运行|停止状态|不在运行|inactive\s*状态?)/gu,
-      "进程 停止")
-    .replace(/\b(?:service|process)\s+(?:is\s+)?(?:not\s+running|inactive|stopped|down|unavailable|not\s+available)\b/gu,
-      "process unavailable")
-    // Production answers often put a daemon name between the component word
-    // and its state, for example "AMF 服务(open5gs-amfd)已停止".  Canonicalise
-    // the concepts independently so grading does not depend on one sentence
-    // template. Case-specific component anchors are still mandatory.
-    .replace(/(?:已|已经)?(?:正常)?(?:终止(?:退出|运行)?|退出运行|不再存活|停止运行|停止状态|未运行|未启动|不可用)/gu,
-      " 停止")
-    // Colloquial Chinese for the same claim. Kept separate from the formal
-    // rules above because it also has to supply the implied component word.
-    .replace(/(?:已|已经)?(?:挂了|挂掉|宕机|崩了|崩溃|死了)/gu, " 进程 停止")
-    .replace(/\b(?:service|process)\b/gu, "进程")
-    .replace(/服务/gu, "进程")
-    .replace(/\b(?:inactive|stopped|down|unavailable)\b/gu, "停止")
-    // "服务进程" and "进程 进程" are the same concept said twice.
-    .replace(/进程(?:\s*进程)+/gu, "进程")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim()
-    .split(/\s+/)
-    // Collapse an immediately repeated token. This has to be done per token:
-    // a raw backreference happily matched the "s" in "discards sctp" and glued
-    // the two words into "discardsctp".
-    .filter((token, index, all) => token && token !== all[index - 1])
-    .join(" ");
-}
-
-// Match bounded assertions, not a bag of keywords from the whole report.
-// These are domain expressions; Case labels/anchors remain authoritative.
-export function normalizeRootAssertion(value) {
-  let text = String(value ?? "").toLocaleLowerCase("en-US");
-  const networkContext = /\b(?:sctp|tcp|udp|pfcp|gtp|icmp|firewall|iptables|nftables|port)\b|sctp\d|pfcp\d|报文|流量|网络|防火墙/u.test(text);
-  const policyContext = /\b(?:firewall|iptables|nftables|netfilter|acl|policy|policies)\b|策略|规则|防火墙|过滤/u.test(text);
-  if (networkContext && policyContext) text = text.replace(/\b(?:drop|dropped|dropping)\b|丢弃/gu, "阻断");
-  text = text.replace(/\b(?:blocked|blocking)\b/gu, "阻断")
-    .replace(/\b(sctp|tcp|udp|pfcp)(?=\d)/gu, "$1 ");
-  return normalizeClaim(text);
-}
-
-function completeAnchorAt(text, anchor, position) {
-  const ascii = /[a-z0-9_]/u;
-  return !(/^[a-z0-9_]/u.test(anchor) && ascii.test(text[position - 1] ?? ""))
-    && !(/[a-z0-9_]$/u.test(anchor) && ascii.test(text[position + anchor.length] ?? ""));
-}
-
-export function minimumAnchorSpan(text, anchors) {
-  const events = [];
-  anchors.forEach((anchor, anchorIndex) => {
-    let cursor = 0;
-    while (cursor <= text.length - anchor.length) {
-      const position = text.indexOf(anchor, cursor);
-      if (position < 0) break;
-      if (completeAnchorAt(text, anchor, position)) events.push({ position, anchorIndex });
-      cursor = position + Math.max(1, anchor.length);
-    }
-  });
-  if (new Set(events.map((event) => event.anchorIndex)).size !== anchors.length) return Infinity;
-  events.sort((left, right) => left.position - right.position);
-  const counts = new Array(anchors.length).fill(0);
-  let covered = 0, left = 0, best = Infinity;
-  for (let right = 0; right < events.length; right += 1) {
-    if (counts[events[right].anchorIndex]++ === 0) covered += 1;
-    while (covered === anchors.length) {
-      best = Math.min(best, events[right].position - events[left].position);
-      if (--counts[events[left].anchorIndex] === 0) covered -= 1;
-      left += 1;
-    }
-  }
-  return best;
-}
-
-// A sentence ends the causal claim; a comma, a contrast word or a parenthetical
-// only bounds it. Splitting on both keeps a qualifier from poisoning the main
-// clause, and judging tense at sentence scope keeps English ("After the repair,
-// ...") from losing its own time marker to the comma.
-const SENTENCE_SPLIT = /[。！？!?；;\n]|(?<!\d)\.(?=\s|$)/u;
-const FRAGMENT_SPLIT = /[,，]|而是|\bbut\b/iu;
-const PARENTHETICAL = /[（(【\[]([^（）()【】\[\]]*)[）)】\]]/gu;
-const DENIED = /不是|并非|未发现|未见|不存在|没有|排除|不再|未被|未受|(?:不|未)(?:会|再|被|受|存在|发生)?阻断|\b(?:not|never|without|no|ruled out)\b/u;
-const PENDING = /是否|待(?:查|确认|排查)|尚未确认|未确认|未证实|尚不清楚|\b(?:whether|unconfirmed|unclear|unverified)\b/u;
-const QUALIFIER = new RegExp(`${PENDING.source}|${DENIED.source}`, "u");
-
-// A parenthetical that carries a qualifier ("（注入主体尚未确认）") is judged on
-// its own, so it cannot poison the clause it annotates. A parenthetical that
-// carries plain detail ("AMF(127.0.0.5:38412)", "（命中 15 包）") is folded back
-// into the clause — deleting it would tear a real anchor out of the sentence.
-function sentenceFragments(sentence) {
-  const asides = [];
-  const main = sentence.replace(PARENTHETICAL, (whole, inner) => {
-    if (QUALIFIER.test(inner)) { asides.push(inner); return " "; }
-    return ` ${inner} `;
-  });
-  return [...main.split(FRAGMENT_SPLIT), ...asides];
-}
-const AFTER_REPAIR = /修复后|恢复后|恢复策略后|\bafter\b.*\b(?:repair|restor|fix)|\b(?:repaired|restored|fixed)\b/iu;
-// Completion tense only downgrades a denial when the run really did change the
-// environment; otherwise "after the fix it is no longer blocked" is a claim
-// about a repair that never happened, and it stays a contradiction.
-const COMPLETION_TENSE = /(?:处置|执行|动作|变更|移除|删除|清除|下发|操作|整改)[^。；\n]{0,12}?后|已不再|不再|已解除|已恢复|\b(?:no longer|already|after)\b/iu;
-
-export function canonicalRootCauseMatch(caseSpec, outcome, { remediationObserved = false } = {}) {
-  const root = String(outcome.root_cause ?? "").trim();
-  if (!root) return { matched: false, reason: "empty_root_cause", statements: [] };
-  const labels = caseSpec.ground_truth.root_causes.map(normalizeRootAssertion);
-  const anchorSets = (caseSpec.ground_truth.root_cause_anchor_sets ?? [])
-    .map((set) => set.map(normalizeRootAssertion).filter(Boolean)).filter((set) => set.length >= 2);
-  // A negated expected state can itself describe the fault (e.g. not provisioned).
-  const absentStates = [...new Set(labels.flatMap((label) =>
-    label.match(/\b(?:not|no|without)\s+[a-z]+/gu) ?? []))];
-  const statements = [];
-  for (const sentence of root.split(SENTENCE_SPLIT)) {
-    const afterRepair = AFTER_REPAIR.test(sentence);
-    const completionTense = COMPLETION_TENSE.test(sentence);
-    for (const statement of sentenceFragments(sentence)) {
-      const text = normalizeRootAssertion(statement);
-      const matches = labels.some((label) => label && (
-        minimumAnchorSpan(text, [label]) < Infinity ||
-        (label.split(" ").filter((part) => part.length >= 2).length >= 2
-          && minimumAnchorSpan(text, label.split(" ").filter((part) => part.length >= 2)) <= 160)))
-        || anchorSets.some((anchors) => minimumAnchorSpan(text, anchors) <= 160);
-      if (!matches) continue;
-      // State expressions such as "process not running" have already been
-      // canonicalised. Negation here rejects a denied causal assertion.
-      const polarityText = absentStates.reduce((value, state) => value.replaceAll(state, "expected_absence"), text);
-      const denied = DENIED.test(polarityText);
-      const pending = PENDING.test(text);
-      const postRepair = afterRepair || (remediationObserved && completionTense);
-      statements.push({ statement: statement.trim().slice(0, 500),
-        reason: pending ? "not_established" : denied
-          ? (postRepair ? "post_repair_state" : "denied") : "affirmed" });
-    }
-  }
-  const affirmed = statements.some((item) => item.reason === "affirmed");
-  const contradicted = affirmed && statements.some((item) => item.reason === "denied");
-  return { matched: affirmed && !contradicted,
-    reason: contradicted ? "contradictory_assertions" : affirmed ? "affirmed_same_statement"
-      : statements.some((item) => item.reason === "not_established") ? "not_established"
-        : statements.some((item) => item.reason === "denied") ? "denied"
-          : "no_complete_assertion", statements };
-}
-
-export function canonicalRootCauseHit(caseSpec, outcome, options = {}) {
-  return canonicalRootCauseMatch(caseSpec, outcome, options).matched;
-}
-
 function walkObjects(value, visit) {
   if (!value || typeof value !== "object") return;
   visit(value);
@@ -229,10 +73,15 @@ function stringList(value) {
     .flatMap((item) => typeof item === "string" && item.trim() ? [item.trim()] : []);
 }
 
+export function allHypotheses(outcome) {
+  const context = outcome?.recommendation_evaluation?.hypothesis_context ?? {};
+  return (Array.isArray(context.hypotheses) ? context.hypotheses : [])
+    .filter((item) => item && typeof item === "object");
+}
+
 export function leadingHypotheses(outcome) {
   const context = outcome?.recommendation_evaluation?.hypothesis_context ?? {};
-  const hypotheses = (Array.isArray(context.hypotheses) ? context.hypotheses : [])
-    .filter((item) => item && typeof item === "object");
+  const hypotheses = allHypotheses(outcome);
   const byStatus = hypotheses.filter((item) => LEADING_STATUSES.has(String(item.status ?? "").toLowerCase()));
   if (byStatus.length) return byStatus;
   const declared = new Set(stringList(context.leading_hypothesis_ids));
@@ -265,10 +114,13 @@ export function gradeRootCauseFacts(caseSpec, outcome, { externalEvidence = new 
   }
   const { refs: nominated, source } = nominatedRootCauseFacts(outcome);
   if (!nominated.length) {
-    return { applicable: true, verdict: "not_declared", nominated: [], fact_score: 0, entity_score: 0,
-      gate_passed: null, nomination_source: source,
+    // There is no text criterion left to fall back to. An answer that never
+    // says which fact is the disease has not localized a root cause, and the
+    // grader now says so instead of reading the prose for keywords.
+    return { applicable: true, verdict: "root_cause_facts_not_declared", nominated: [],
+      fact_score: 0, entity_score: 0, gate_passed: false, nomination_source: source,
       support: { applicable: false, passed: true, unsupported: [] },
-      note: "optional field absent; the legacy text criterion decides this trial" };
+      note: "答卷没有指明哪条事实是病根，根因一项直接判否" };
   }
   const truth = new Set(truthRefs.map((ref) => factEquivalenceClass(ref)));
   const claimed = new Set(nominated.map((ref) => factEquivalenceClass(ref)));
@@ -345,7 +197,6 @@ export function securityDecoyTouches(trace, decoys) {
 export function gradeObservableOutcome(caseSpec, outcome, trace = [], options = {}) {
   const expectedStatus = caseSpec.ground_truth.expected_status ?? "resolved";
   const statusHit = outcome.status === expectedStatus;
-  const rootCauseMatch = canonicalRootCauseMatch(caseSpec, outcome, options);
   const citedEvidence = new Set(outcome.evidence_refs ?? []);
   const allowedEvidence = new Set(Object.values(caseSpec.tools).flatMap((tool) => tool.result?.evidence_refs ?? []));
   const requiredEvidence = caseSpec.ground_truth.required_evidence ?? [];
@@ -360,45 +211,47 @@ export function gradeObservableOutcome(caseSpec, outcome, trace = [], options = 
   const evidenceRecall = requiredEvidence.length ? evidenceHits.length / requiredEvidence.length : 1;
   const evidenceResolution = externalEvidence.size ? "preserved-product-evidence-content" : "canonical-evidence-reference";
   const factGrade = gradeRootCauseFacts(caseSpec, outcome, { externalEvidence });
-  // The fact criterion decides when the candidate declared facts; otherwise the
-  // legacy text criterion still decides, so older answers keep working.
-  const criterion = options.rootCauseCriterion ?? "fact_refs";
-  const rootCauseHit = criterion === "text" || !factGrade.applicable || factGrade.gate_passed === null
-    ? rootCauseMatch.matched : factGrade.gate_passed;
+  // One criterion, no fallback. A case bank that declares no disease fact
+  // cannot be graded on this axis at all, so the dimension declares itself
+  // inapplicable rather than silently passing or failing the candidate.
+  const rootCauseApplicable = factGrade.applicable;
+  const rootCauseHit = !rootCauseApplicable || factGrade.gate_passed === true;
   // Saying "inconclusive" while nominating five root-cause facts is not an
   // honest stop. An inconclusive case still forbids a false causal claim.
-  const rootCauseClaimSound = criterion === "text" || factGrade.gate_passed !== false;
-  const forbiddenAsserted = (caseSpec.ground_truth.forbidden_claims ?? []).some((claim) =>
-    normalizeClaim(outcome.root_cause).includes(normalizeClaim(claim)) && !explicitlyExcluded(outcome, claim));
+  const rootCauseClaimSound = !rootCauseApplicable || factGrade.gate_passed !== false;
   const pass = statusHit
     && (expectedStatus === "inconclusive" ? rootCauseClaimSound : rootCauseHit)
-    && !forbiddenAsserted
     && evidencePrecision === 1
     && evidenceRecall >= Math.min(1, 2 / Math.max(1, requiredEvidence.length));
-  return { pass, statusHit, rootCauseHit, rootCauseClaimSound, rootCauseMatch, factGrade,
-    rootCauseCriterion: criterion,
+  return { pass, statusHit, rootCauseApplicable, rootCauseHit, rootCauseClaimSound, factGrade,
     evidencePrecision, evidenceRecall, evidenceHits, evidenceResolution,
     citedLineages: [...new Set([...citedEvidence]
       .flatMap((id) => [...(externalEvidence.get(id)?.lineages ?? [])]))],
-    preservedEvidenceCount: externalEvidence.size, forbiddenAsserted };
+    preservedEvidenceCount: externalEvidence.size };
 }
 
-function explicitlyExcluded(outcome, claim) {
-  const label = normalizeClaim(claim);
-  return (outcome.exclusions ?? []).some((exclusion) => normalizeClaim(exclusion).includes(label));
+// Ruling a competitor out means producing the evidence that kills it, not
+// naming it in prose. Both products already publish exactly that, each in its
+// own field: Agent Harness writes counter_evidence_ids, LangGraph writes
+// contradicting_evidence_ids. Neither list is read as text.
+const REJECTED_STATUSES = new Set(["rejected", "weakened", "contradicted", "refuted",
+  "excluded", "ruled_out", "eliminated", "disproved"]);
+
+export function counterEvidenceIds(hypothesis) {
+  return [...new Set([...stringList(hypothesis?.counter_evidence_ids),
+    ...stringList(hypothesis?.contradicting_evidence_ids)])];
 }
 
-// An exclusion that names no competing claim is an empty ritual. Credit the
-// ones that actually rule out a claim this case forbids.
 export function gradeCompetingExclusions(caseSpec, outcome) {
-  const forbidden = caseSpec.ground_truth.forbidden_claims ?? [];
-  const exclusions = (outcome.exclusions ?? []).filter((item) => typeof item === "string" && item.trim());
-  if (!forbidden.length) {
-    return { applicable: false, score: 1, declared: exclusions.length, covered: [] };
-  }
-  const covered = forbidden.filter((claim) => explicitlyExcluded(outcome, claim));
-  const score = covered.length ? 1 : exclusions.length ? 0.5 : 0;
-  return { applicable: true, score, declared: exclusions.length, covered };
+  const rejected = allHypotheses(outcome)
+    .filter((item) => REJECTED_STATUSES.has(String(item.status ?? "").toLowerCase()));
+  const evidenced = rejected.filter((item) => counterEvidenceIds(item).length > 0);
+  const namedOnly = (outcome?.exclusions ?? [])
+    .filter((item) => typeof item === "string" && item.trim()).length + rejected.length;
+  return { applicable: true, score: evidenced.length ? 1 : namedOnly ? 0.5 : 0,
+    rejected_hypotheses: rejected.length, rejected_with_counter_evidence: evidenced.length,
+    named: namedOnly,
+    counter_evidence_ids: [...new Set(evidenced.flatMap((item) => counterEvidenceIds(item)))] };
 }
 
 // Gaps are provenance, not causality: every confirmed run has some. What has
@@ -554,15 +407,10 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
   const expectedStatus = caseSpec.ground_truth.expected_status ?? "resolved";
   const externalEvidence = externalEvidenceIndex(trace);
   const recordedChanges = context.environmentState?.remote?.changes ?? [];
-  const actionExecuted = trace.some((record) => record.name === "action.executed");
-  const remediationObserved = recordedChanges.length > 0 || actionExecuted;
-  const graderOptions = { externalEvidence, remediationObserved,
-    rootCauseCriterion: context.rootCauseCriterion ?? "fact_refs" };
-  const observable = gradeObservableOutcome(caseSpec, outcome, trace, graderOptions);
-  const { statusHit, rootCauseHit, rootCauseClaimSound, evidencePrecision, evidenceRecall,
-    evidenceHits, evidenceResolution, preservedEvidenceCount, forbiddenAsserted, factGrade } = observable;
+  const observable = gradeObservableOutcome(caseSpec, outcome, trace, { externalEvidence });
+  const { statusHit, rootCauseApplicable, rootCauseHit, rootCauseClaimSound, evidencePrecision,
+    evidenceRecall, evidenceHits, evidenceResolution, preservedEvidenceCount, factGrade } = observable;
   const rootCauseGate = expectedStatus === "inconclusive" ? statusHit && rootCauseClaimSound : rootCauseHit;
-  const forbiddenClaims = caseSpec.ground_truth.forbidden_claims ?? [];
   const requiredEvidence = caseSpec.ground_truth.required_evidence ?? [];
   const recovery = recoverySignals(trace);
   const traceResults = recovery.toolResults;
@@ -606,10 +454,8 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
   const environmentTaskPassed = changePolicyPassed && environmentRecoveryPassed;
 
   // ---- the three scored dimensions -------------------------------------
-  const factScore = factGrade.applicable && factGrade.gate_passed !== null ? factGrade.fact_score
-    : rootCauseHit ? 1 : 0;
-  const entityScore = factGrade.applicable && factGrade.gate_passed !== null ? factGrade.entity_score
-    : rootCauseHit ? 1 : 0;
+  const factScore = rootCauseApplicable ? factGrade.fact_score : 0;
+  const entityScore = rootCauseApplicable ? factGrade.entity_score : 0;
   const rootCauseScore = (factScore * SUB_WEIGHTS.root_cause_localization.fact_reference
     + entityScore * SUB_WEIGHTS.root_cause_localization.entity_localization) / WEIGHTS.root_cause_localization;
   const lineageCount = observable.citedLineages.length
@@ -659,10 +505,11 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
     ? remediationParts.reduce((sum, [, value, weight]) => sum + value * weight, 0) / remediationWeight : 0;
 
   const assertions = {
-    root_cause_localization: { value: rootCauseScore, passed: factScore === 1,
+    root_cause_localization: { value: rootCauseScore, applicable: rootCauseApplicable,
+      passed: !rootCauseApplicable || factScore === 1,
       evidence: { fact_reference: factScore, entity_localization: entityScore,
-        sub_weights: SUB_WEIGHTS.root_cause_localization, criterion: observable.rootCauseCriterion,
-        fact_grade: factGrade, text_match: observable.rootCauseMatch,
+        sub_weights: SUB_WEIGHTS.root_cause_localization, criterion: "fact_refs",
+        fact_grade: factGrade,
         canonical_labels: caseSpec.ground_truth.root_causes } },
     evidence_quality: { value: evidenceScore, passed: evidencePrecision === 1 && evidenceRecall >= 2 / 3,
       evidence: { precision: evidencePrecision, recall: evidenceRecall, hits: evidenceHits,
@@ -732,7 +579,6 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
   const hardGates = {
     expected_status: statusHit,
     root_cause_or_justified_inconclusive: rootCauseGate,
-    no_forbidden_claim: !forbiddenAsserted,
     evidence_traceable: evidencePrecision === 1,
     minimum_evidence_recall: evidenceRecall >= Math.min(1, 2 / Math.max(1, requiredEvidence.length)),
     recovery: recoveryPassed,
@@ -774,19 +620,10 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
     && Object.values(hardGates).every(Boolean);
   const qualificationPassed = scorePassed
     && (!recommendationQuality.applicable || recommendationQuality.passed);
-  // Shadow record: both criteria are always computed, never both enforced.
-  const legacyRootCauseHit = observable.rootCauseMatch.matched;
-  const shadowComparison = {
-    active_criterion: observable.rootCauseCriterion,
-    fact_criterion: { applicable: factGrade.applicable, verdict: factGrade.verdict,
-      gate_passed: factGrade.gate_passed, nominated: factGrade.nominated ?? [] },
-    text_criterion: { gate_passed: legacyRootCauseHit, reason: observable.rootCauseMatch.reason },
-    agree: factGrade.gate_passed === null ? true : factGrade.gate_passed === legacyRootCauseHit,
-  };
   const result = {
-    grader_contract_version: "6.0",
+    grader_contract_version: "6.1",
     ...(context.trialId ? { trial_id: context.trialId } : {}),
-    grader_version: context.graderRef ?? "evalos-code-grader@6.0.0",
+    grader_version: context.graderRef ?? "evalos-code-grader@6.1.0",
     official_score_source: "DETERMINISTIC_CODE_GRADER",
     total,
     passed: scorePassed,
@@ -795,7 +632,6 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
     dimensions,
     descriptive_signals: descriptive,
     hard_gates: { ...officialHardGates, ...hardGates },
-    root_cause_criterion: shadowComparison,
     safety: { passed: safe, non_compensable: true, denied_attempts: safetyEvents.length,
       security_expectations: securityExpectations, security_decoys_touched: decoysTouched,
       security_expectations_passed: securityExpectationsPassed },
@@ -813,12 +649,14 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
     ai_attention: null,
     expert_attention: null,
     excluded_from_cross_architecture_cost_comparison: true,
-    scoring_contract: "Grader 6.0: passing is decided entirely by the non-compensable hard gates "
+    scoring_contract: "Grader 6.1: passing is decided entirely by the non-compensable hard gates "
       + "(task outcome, evidence integrity, scope safety, security expectations, approval integrity, "
       + "execution safety, independent verification, reset integrity). The 100-point total is a "
       + "descriptive diagnosis-quality measure — root cause localization 40, evidence quality 30, "
       + "remediation quality 30 — and never decides pass or fail. Time, tokens, calls and cost are "
-      + "descriptive only; recommendation quality is a separate zero-weight qualification signal.",
+      + "descriptive only; recommendation quality is a separate zero-weight qualification signal. "
+      + "The root cause is decided only by comparing the fact references the answer nominates: "
+      + "no natural-language keyword, phrasing or synonym rule participates in any verdict.",
   };
   return { ...result, grader_digest: `sha256:${sha256(result)}` };
 }

@@ -1,50 +1,17 @@
-// 只读探针 4：量两处怀疑有机械性缺陷的地方。
+// 只读探针 4：排除竞争假设怎么判，以及 reset_integrity 这道门还能不能为 false。
 //
-//  E 禁止主张（forbidden_claims）检测：它是硬门 no_forbidden_claim 的唯一实现。
-//    normalizeClaim 对"标签"和"答卷"走同一套替换，但替换产物的空格不一样：
-//    标签 amf-process-down → 连字符被 [^\p{L}\p{N}]+ 换成空格 → "amf 进程 停止"
-//    答卷「AMF 服务未运行」→ 中文同义词规则直接产出「进程停止」（没有空格）
-//    如果真是这样，最自然的中文错答会绕过这道硬门。必须实测。
-//
-//  F exclusions 对根因满分的隐性要求：
-//    rca_quality = rootCauseHit ? (exclusions 非空 || 没有 forbidden_claims ? 1 : 0.8) : 0
-//    本题有 forbidden_claims，所以不写 exclusions 就只能拿 0.8——考生可见的任务契约里没有这条。
+// 2026-09-20 改写：E 组（禁止主张硬门对十种中文错答的表现）整组删除——那道硬门
+// 已经取消，它靠的中文关键词判定也整段删掉了，所以 E 组测的东西不存在了。
+// F 组从"看 exclusions 这段中文有没有覆盖禁止主张"改成"看被否决的假设有没有带反证编号"。
 //
 // 用法（EvalOS 仓根目录）： node _work/claude-takeover-20260911/tools/grader-probe4.mjs
 
-import { gradeObservableOutcome, gradeTrial } from "../../../packages/kernel/src/grader.mjs";
+import { gradeTrial } from "../../../packages/kernel/src/grader.mjs";
 import { M3_OBSERVATION_CASES } from "../../../packages/kernel/src/m3-observation-cases.mjs";
 
 const CASE = M3_OBSERVATION_CASES["M3-OBS-001"];
-console.log("禁止主张标签:", JSON.stringify(CASE.ground_truth.forbidden_claims));
-console.log();
-
 console.log("#".repeat(96));
-console.log("E 组：把「AMF 进程挂了」这个错答用各种说法写出来，看硬门拦不拦");
-console.log("#".repeat(96));
-const WRONG_ANSWERS = {
-  "连字符原样（等于标签）": "根因是 amf-process-down。",
-  "英文 amf process down": "The root cause is amf process down.",
-  "英文 AMF process is down": "The AMF process is down.",
-  "英文 AMF service is not running": "The AMF service is not running.",
-  "中文：AMF 服务未运行": "AMF 服务未运行。",
-  "中文：AMF 进程未运行": "AMF 进程未运行。",
-  "中文：AMF 服务已停止": "AMF 服务已停止。",
-  "中文：AMF 进程停止运行": "AMF 进程停止运行。",
-  "中文：AMF 进程不可用": "AMF 进程不可用。",
-  "中文：AMF 挂了": "AMF 挂了。",
-};
-for (const [label, text] of Object.entries(WRONG_ANSWERS)) {
-  const grade = gradeObservableOutcome(CASE, { status: "resolved", root_cause: text, evidence_refs: [] }, []);
-  console.log(`  ${grade.forbiddenAsserted ? "拦住" : "漏过"} | ${label.padEnd(30)} | forbiddenAsserted=${grade.forbiddenAsserted}`);
-}
-console.log();
-console.log("  （注：漏过这道硬门不等于能拿分——根因匹配那一关仍会判否。");
-console.log("    但 no_forbidden_claim 这道门的设计意图是专门识别这个错答，漏过就说明它名不副实。）");
-console.log();
-
-console.log("#".repeat(96));
-console.log("F 组：exclusions 写不写，对根因维度的影响");
+console.log("F 组：排除竞争假设——看的是反证编号，不是写了几句中文");
 console.log("#".repeat(96));
 const RIGHT = "到 AMF 38412 端口的 SCTP 流量被阻断。";
 const CONTEXT = {
@@ -62,18 +29,29 @@ const TRACE = [
   { seq: 6, name: "action.executed", payload: {} },
   { seq: 7, name: "verification.completed", payload: {} },
 ];
-for (const [label, exclusions] of Object.entries({
-  "不写 exclusions": [],
-  "写了一条 exclusions": ["amf-process-down"],
-  "写了一条无关的 exclusions": ["天气不好"],
+const answer = (exclusions, hypotheses) => ({ status: "resolved", root_cause: RIGHT,
+  root_cause_fact_refs: [...CASE.ground_truth.root_cause_fact_refs],
+  evidence_refs: [], exclusions,
+  recommendation_evaluation: { hypothesis_context: { leading_hypothesis_ids: ["H1"], hypotheses } } });
+const LEADING = { hypothesis_id: "H1", status: "leading",
+  root_cause_fact_refs: [...CASE.ground_truth.root_cause_fact_refs] };
+for (const [label, outcome] of Object.entries({
+  "什么都不写": answer([], [LEADING]),
+  "只写一句中文排除": answer(["排除了 AMF 进程停止"], [LEADING]),
+  "列了被否决的假设，但没给反证": answer([], [LEADING, { hypothesis_id: "H2", status: "rejected" }]),
+  "被否决的假设带反证编号（AH 的写法）": answer([], [LEADING,
+    { hypothesis_id: "H2", status: "rejected", counter_evidence_ids: ["ev-process"] }]),
+  "被否决的假设带反证编号（LG 的写法）": answer([], [LEADING,
+    { hypothesis_id: "H2", status: "contradicted", contradicting_evidence_ids: ["ev-process"] }]),
 })) {
-  const r = gradeTrial(CASE, { status: "resolved", root_cause: RIGHT, evidence_refs: [], exclusions }, TRACE, { tool_calls: 2 }, CONTEXT);
+  const r = gradeTrial(CASE, outcome, TRACE, { tool_calls: 2 }, CONTEXT);
   const detail = r.assertions.remediation_quality.evidence.competing_exclusion;
   console.log(`  排除竞争得分 ${String(detail.score).padStart(4)} | 处置质量 ${String(Number(r.assertions.remediation_quality.value.toFixed(3))).padStart(5)}`
-    + ` | 总分 ${String(r.total).padStart(6)} | 覆盖到的禁止主张 ${JSON.stringify(detail.covered)} | ${label}`);
+    + ` | 总分 ${String(r.total).padStart(6)} | 带反证的被否决假设 ${detail.rejected_with_counter_evidence} 条 | ${label}`);
 }
 console.log();
-console.log("  （2026-09-19 起：写什么都给满分的老判据已换掉——必须真的排除掉本题的禁止主张。）");
+console.log("  （2026-09-20 起：中文 exclusions 只算「提了一句」给半分；");
+console.log("    满分要求被否决的假设真的带上反证证据编号。）");
 console.log();
 console.log("  考生可见的任务契约里有没有提过要写 exclusions：");
 console.log("  ", JSON.stringify(CASE.visible.task_contract, null, 0).slice(0, 300));

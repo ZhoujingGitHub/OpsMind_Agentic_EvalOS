@@ -20,7 +20,6 @@ import {
   gradeTrial, judgeCalibrationGate, redact, reliabilityMetrics,
   seededShuffle, sha256, judgeSuiteCalibration, isRetryableInfrastructureFailure,
 } from "../src/index.mjs";
-import { canonicalRootCauseHit, canonicalRootCauseMatch } from "../src/grader.mjs";
 import { measuredUsage } from "../src/runner.mjs";
 
 // The laboratory samples whether the business works; the scenario score does not.
@@ -163,79 +162,6 @@ test("M2 执行面保留冻结环境合同但不泄露私有标签", () => {
   } finally { store.close(); }
 });
 
-test("确定性根因评分允许同一概念锚点间有修饰语但拒绝无关组件", () => {
-  const caseSpec = CASES["PILOT-REG-001"];
-  const evidence_refs = [...caseSpec.ground_truth.required_evidence];
-  const correctChinese = gradeTrial(caseSpec, {
-    status: "resolved",
-    root_cause: "UDM 侧企业园区终端用户签约数据未成功导入，导致注册失败。",
-    evidence_refs,
-    exclusions: ["gnb-radio-outage"],
-  });
-  const correctEnglish = gradeTrial(caseSpec, {
-    status: "resolved",
-    root_cause: "UDM bulk import skipped the subscriber provisioning records.",
-    evidence_refs,
-    exclusions: ["gnb-radio-outage"],
-  });
-  const wrong = gradeTrial(caseSpec, {
-    status: "resolved",
-    root_cause: "UPF user-plane packet loss while UDM is healthy.",
-    evidence_refs,
-    exclusions: ["gnb-radio-outage"],
-  });
-  assert.equal(correctChinese.hard_gates.root_cause_or_justified_inconclusive, true);
-  assert.equal(correctEnglish.hard_gates.root_cause_or_justified_inconclusive, true);
-  assert.equal(wrong.hard_gates.root_cause_or_justified_inconclusive, false);
-  assert.equal(Object.values(CASES).filter((item) => item.id.startsWith("PILOT-"))
-    .every((item) => item.ground_truth.root_cause_anchor_sets.length >= 2), true);
-});
-
-test("AMF 服务未运行与进程不可用按同一根因计分但不接受其他网元故障", () => {
-  const caseSpec = M2_CASES["M2-AMF-006"];
-  const evidence_refs = [...caseSpec.ground_truth.required_evidence];
-  const equivalent = gradeTrial(caseSpec, {
-    status: "resolved",
-    root_cause: "AMF 服务未运行（open5gs-amfd=false），导致 gNB 的 N2 SCTP 连接失败。",
-    evidence_refs,
-    exclusions: ["single-subscriber-data-error"],
-  });
-  const wrongComponent = gradeTrial(caseSpec, {
-    status: "resolved",
-    root_cause: "SMF 服务未运行导致 PDU Session 建立失败。",
-    evidence_refs,
-    exclusions: ["single-subscriber-data-error"],
-  });
-  assert.equal(equivalent.hard_gates.root_cause_or_justified_inconclusive, true);
-  assert.equal(wrongComponent.hard_gates.root_cause_or_justified_inconclusive, false);
-});
-
-test("AMF 停止状态与中英混合 inactive 状态按同一根因计分", () => {
-  const caseSpec = M2_CASES["M2-AMF-006"];
-  const evidence_refs = [...caseSpec.ground_truth.required_evidence];
-  for (const root_cause of [
-    "AMF 服务处于停止状态，导致 gNB 的 N2 SCTP 接入失败。",
-    "AMF 的 open5gs-amfd 进程处于 inactive 状态，导致 N2 接入不可用。",
-  ]) {
-    const score = gradeTrial(caseSpec, { status: "resolved", root_cause, evidence_refs,
-      exclusions: ["single-subscriber-data-error"] });
-    assert.equal(score.hard_gates.root_cause_or_justified_inconclusive, true);
-  }
-});
-
-test("AMF 生产答案中的守护进程插入和终止同义表达按同一根因计分", () => {
-  const caseSpec = M2_CASES["M2-AMF-006"];
-  const evidence_refs = [...caseSpec.ground_truth.required_evidence];
-  for (const root_cause of [
-    "核心网控制面 AMF(open5gs-amfd)进程在收到 SIGTERM 后正常终止退出，进程不再存活，导致 N2 SCTP 端点无监听。",
-    "AMF 服务（open5gs-amfd）已停止运行，导致 gNB 无法建立 SCTP 连接并使 UE 无法注册。",
-  ]) {
-    const score = gradeTrial(caseSpec, { status: "resolved", root_cause, evidence_refs,
-      exclusions: ["single-subscriber-data-error"] });
-    assert.equal(score.hard_gates.root_cause_or_justified_inconclusive, true, root_cause);
-  }
-});
-
 test("原生工具策略拒绝区分安全攻击与无害能力不在冻结清单", () => {
   const caseSpec = M2_CASES["M2-AMF-006"];
   const outcome = { status: "resolved", root_cause: "AMF process is unavailable",
@@ -273,40 +199,6 @@ test("外部参评适配器的标准tool.call/tool.result事件进入轨迹审�
   }, renamedTrace, { tool_calls: 2 }, { budget: { tool_calls: 24 } });
   assert.equal(renamedScore.descriptive_signals.trajectory_activity.value, score.descriptive_signals.trajectory_activity.value);
   assert.equal(renamedScore.total, score.total);
-});
-
-test("M2主动风险根因允许磁盘门禁与磁盘阈值的等义表达", () => {
-  const caseSpec = M2_CASES["M2-PROACTIVE-020"];
-  const score = gradeTrial(caseSpec, {
-    status: "risk_detected",
-    root_cause: `PCAP 初始观测正常。${"其他现场证据 ".repeat(40)}后续采样确认 PCAP 增长趋势将导致共享磁盘越过 80% 安全门禁。`,
-    evidence_refs: [...caseSpec.ground_truth.required_evidence],
-    exclusions: ["active-service-outage"],
-  }, [
-    { seq: 1, record_type: "SPAN_EVENT", name: "tool.result", payload: { tool: "observe", ok: true } },
-  ], { tool_calls: 1 }, { budget: { tool_calls: 24 }, environmentState: { remote: {
-    changes: [{ action_type: "capture_policy", parameters: { policy: "bounded-retention", desired_state: "enabled" } }],
-    recovery: { task_success: true }, business_verification: businessFact(true),
-  } } });
-  assert.equal(score.hard_gates.root_cause_or_justified_inconclusive, true);
-  assert.equal(score.hard_gates.evidence_traceable, true);
-  assert.equal(score.hard_gates.environment_task_success, true);
-});
-
-test("M2会话根因允许DNN未订阅与DNN配置错误的等义表达", () => {
-  const caseSpec = M2_CASES["M2-PDU-003"];
-  const score = gradeTrial(caseSpec, {
-    status: "resolved",
-    root_cause: "UE 请求的 DNN 与签约档案不一致，属于 DNN 订阅配置错误。",
-    evidence_refs: [...caseSpec.ground_truth.required_evidence],
-    exclusions: ["amf-process-down"],
-  }, [{ seq: 1, record_type: "SPAN_EVENT", name: "tool.result", payload: { tool: "observe", ok: true } }],
-  { tool_calls: 1 }, { budget: { tool_calls: 24 }, environmentState: { remote: {
-    changes: [{ action_type: "subscriber_profile", parameters: { source: "reference_profile" } }],
-    recovery: { task_success: true }, business_verification: businessFact(true),
-  } } });
-  assert.equal(score.hard_gates.root_cause_or_justified_inconclusive, true);
-  assert.equal(score.hard_gates.evidence_traceable, true);
 });
 
 test("基础设施重试策略拒绝Agent选错工具，只接受明确瞬态故障", () => {
@@ -751,9 +643,9 @@ test("确定性评分不要求固定工具顺序且工程敏捷不从单Trial伪
   const outcome = { status: "resolved", root_cause: "UDM subscriber provisioning fault",
     evidence_refs: [...caseSpec.ground_truth.required_evidence], exclusions: ["gnb-radio-outage"], next_checks: [] };
   const score = gradeTrial(caseSpec, outcome, [], { tool_calls: 4 }, { budget: { tool_calls: 24 } });
-  assert.equal(score.hard_gates.no_forbidden_claim, true);
+  assert.equal("no_forbidden_claim" in score.hard_gates, false);
   assert.equal(score.descriptive_signals.engineering_agility.applicable, false);
-  assert.equal(score.grader_contract_version, "6.0");
+  assert.equal(score.grader_contract_version, "6.1");
   assert.equal(score.official_score_source, "DETERMINISTIC_CODE_GRADER");
   assert.match(score.scoring_contract, /passing is decided entirely by the non-compensable hard gates/);
   assert.equal(/\b75\b/.test(score.scoring_contract), false);
@@ -770,7 +662,7 @@ test("Grader 5.3开放资源模式不因耗时、Token、工具次数或费用�
   const high = gradeTrial(caseSpec, outcome, [],
     { tool_calls: 120, wallclock_ms: 900000, cost_usd: 12 }, context);
   assert.equal(low.total, high.total);
-  assert.equal(low.grader_contract_version, "6.0");
+  assert.equal(low.grader_contract_version, "6.1");
   assert.equal(low.descriptive_signals.resource_usage.applicable, false);
   assert.equal(high.descriptive_signals.trajectory_activity.passed, true);
   assert.equal(high.descriptive_signals.trajectory_activity.evidence.resource_usage_affects_score, false);
@@ -796,7 +688,8 @@ test("建议质量在资格阶段单独判定但权重为零且不改变总分",
       notes: "已核对当前 Trial。" },
   };
   const base = { status: "resolved", root_cause: caseSpec.ground_truth.root_causes[0],
-    evidence_refs: ["ev-process"], exclusions: caseSpec.ground_truth.forbidden_claims,
+    root_cause_fact_refs: [...caseSpec.ground_truth.root_cause_fact_refs],
+    evidence_refs: ["ev-process"], exclusions: ["竞争解释已被现场观测反证"],
     recommendation_evaluation: { readonly: true, source_ref: "product:report:1",
       native: { recommendations: [recommendation], recommendation_delivery: { status: "published", valid: true } },
       hypothesis_context: { leading_hypothesis_ids: ["hyp-amf"], conclusion_status: "probable" },
@@ -1149,63 +1042,6 @@ test("Trial命名空间不共享文件", () => {
     assert.notEqual(sha256(one.namespace), sha256(two.namespace));
   } finally { labels.close(); store.close(); }
 });
-
-test("根因匹配以同一陈述和完整标识判定网络阻断，不奖励否定或待查", () => {
-  const spec = { ground_truth: {
-    root_causes: ["SCTP traffic to AMF port 38412 blocked"],
-    root_cause_anchor_sets: [["sctp", "38412", "blocked"], ["sctp", "38412", "阻断"]],
-  } };
-  const cases = [
-    [true, "AMF 38412端口的SCTP报文被防火墙丢弃。"],
-    [true, "SCTP traffic to AMF port 38412 is blocked."],
-    [true, "Firewall DROP discards SCTP traffic to AMF port 38412."],
-    [true, "不是DNS，而是 AMF SCTP38412流量被网络策略阻断。"],
-    [true, "修复前 AMF SCTP38412流量被网络策略丢弃；修复后 SCTP38412不再阻断，业务已恢复。"],
-    [true, "AMF SCTP38412流量很可能被网络策略阻断。"],
-    [false, "根因不是 SCTP38412 blocked；网络正常，故障是DNS。"],
-    [false, "未发现 SCTP38412流量被阻断，实际订阅不一致。"],
-    [false, "下一步检查是否 SCTP38412 blocked，目前尚未确认。"],
-    [false, "AMF SCTP384120流量被阻断。"],
-    [false, "SCTP38412通信正常。另一条DNS路径被阻断。"],
-    [false, "SCTP38412通信正常，另一条DNS路径被阻断。"],
-    [false, "AMF UDP38412流量被阻断。"],
-    [false, "SCTP38412请求超时，尚不清楚原因。"],
-    [false, "SCTP38412 is not blocked."],
-    [false, "SCTP38412未被阻断。"],
-    [false, "SCTP38412未阻断。"],
-    [false, "Check whether SCTP38412 is blocked; not yet confirmed."],
-    [false, "SCTP38412 blocked. SCTP38412 blocked was ruled out."],
-  ];
-  for (const [expected, root_cause] of cases)
-    assert.equal(canonicalRootCauseHit(spec, { root_cause }), expected, root_cause);
-});
-
-test("同一判定入口保留已有故障合同中的缺失状态，并返回可核对解释", () => {
-  for (const spec of Object.values({ ...CASES, ...M2_CASES, ...M3_CASES })) {
-    for (const root_cause of spec.ground_truth.root_causes)
-      assert.equal(canonicalRootCauseHit(spec, { root_cause }), true, spec.id + ": " + root_cause);
-  }
-  for (const [protocol, port] of [["PFCP", "8805"], ["GTP-U", "2152"]]) {
-    const spec = { ground_truth: { root_causes: [protocol + " traffic on UDP " + port + " is blocked"] } };
-    assert.equal(canonicalRootCauseHit(spec, { root_cause:
-      protocol + " traffic on UDP " + port + " is dropped by firewall policy." }), true);
-  }
-  const spec = { ground_truth: { root_causes: ["SCTP traffic to AMF port 38412 blocked"],
-    root_cause_anchor_sets: [["sctp", "38412", "blocked"]] } };
-  const outcome = { status: "resolved", root_cause:
-    "目标 gNB(127.0.0.1:44059)→AMF(127.0.0.5:38412) 的 N2 SCTP 关联被网络策略丢弃:AMF 进程存活且端口监听正常；修复后业务恢复。",
-    evidence_refs: [] };
-  const matched = canonicalRootCauseMatch(spec, outcome);
-  assert.equal(matched.matched, true);
-  assert.equal(matched.reason, "affirmed_same_statement");
-  assert.match(matched.statements[0].statement, /127\.0\.0\.5:38412/u);
-  assert.equal(gradeTrial({ ...spec, tools: {} }, outcome).assertions.root_cause_localization.evidence.text_match.matched, true);
-  assert.equal(canonicalRootCauseMatch(spec, { root_cause: "未发现SCTP38412被阻断" }).reason, "denied");
-  assert.equal(canonicalRootCauseMatch(spec, { root_cause: "待确认SCTP38412是否阻断" }).reason, "not_established");
-  assert.equal(canonicalRootCauseHit(spec, {root_cause:
-    "SCTP to AMF38412: capture dropped packets because the capture buffer filled."}), false);
-});
-
 
 test("环境恢复硬门只认独立业务复测，场景分说通过也不算数", () => {
   const caseSpec = M2_CASES["M2-PDU-003"];

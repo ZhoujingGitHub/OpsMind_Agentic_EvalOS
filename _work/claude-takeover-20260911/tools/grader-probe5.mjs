@@ -48,7 +48,7 @@ for (const item of cases) {
 console.log(`  有判别性事实的题: ${cases.length - missingFacts}/${cases.length}`);
 console.log(`  每题的事实编号条数分布（含活/静两套词表）: ${JSON.stringify(factCounts)}`);
 console.log(`  每题的拓扑相邻标识数分布: ${JSON.stringify(adjacentCounts)}`);
-console.log(`  有锚点集合的题（文本兜底判据用）: ${
+console.log(`  有锚点集合的题（2026-09-20 起已无任何判定读它）: ${
   cases.filter((item) => (item.ground_truth.root_cause_anchor_sets ?? []).length).length}/${cases.length}`);
 console.log();
 
@@ -62,7 +62,7 @@ for (const item of cases) {
   const target = Math.min(3, Math.max(1, new Set(required.map((ref) => ref.split(":", 1)[0])).size));
   lineageTargets[target] = (lineageTargets[target] ?? 0) + 1;
 }
-console.log(`  forbidden_claims 条数分布: ${JSON.stringify(forbiddenCounts)}`);
+console.log(`  forbidden_claims 条数分布（只是出题知识，任何判定都不读）: ${JSON.stringify(forbiddenCounts)}`);
 console.log(`  required_evidence 条数分布: ${JSON.stringify(requiredCounts)}`);
 console.log(`  独立血缘目标条数分布（本题自己的证据能跨几种来源）: ${JSON.stringify(lineageTargets)}`);
 console.log();

@@ -43,9 +43,13 @@ test("根因展示读取真实评分判定，缺失显示未知且不泄漏参�
       assert.equal(JSON.stringify(view).includes("PRIVATE-FACT"), false);
     }
   }
+  // The exclusion evidence is counts only: the candidate's own counter-evidence
+  // identifiers do not need to travel into the analysis context either.
   const remediation = auditableGraderRunView({ result: { assertions: { remediation_quality: {
     passed: true, value: 1, evidence: { competing_exclusion: { applicable: true, score: 1,
-      declared: 1, covered: ["PRIVATE-FORBIDDEN-CLAIM"] } } } } } });
-  assert.equal(JSON.stringify(remediation).includes("PRIVATE-FORBIDDEN-CLAIM"), false);
-  assert.equal(remediation.result.assertions.remediation_quality.evidence.competing_exclusion.covered_count, 1);
+      named: 1, rejected_hypotheses: 1, rejected_with_counter_evidence: 1,
+      counter_evidence_ids: ["PRIVATE-COUNTER-EVIDENCE"] } } } } } });
+  assert.equal(JSON.stringify(remediation).includes("PRIVATE-COUNTER-EVIDENCE"), false);
+  assert.equal(remediation.result.assertions.remediation_quality.evidence
+    .competing_exclusion.rejected_with_counter_evidence, 1);
 });

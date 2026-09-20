@@ -5,6 +5,7 @@ export * from "./m2-cases.mjs";
 export * from "./m3-cases.mjs";
 export * from "./m3-observation-cases.mjs";
 export * from "./grader.mjs";
+export * from "./live-evidence-mintability.mjs";
 export * from "./ledger.mjs";
 export * from "./test-double.mjs";
 export * from "./private-labels.mjs";
