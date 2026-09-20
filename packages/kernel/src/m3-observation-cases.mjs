@@ -1,7 +1,11 @@
 import { LIVE_FACT_EQUIVALENCE } from "./m2-cases.mjs";
 import { M3_CASES, M3_CASE_PARTITIONS } from "./m3-cases.mjs";
 
-const VERSION = "3.2.0";
+// 3.2.1 是必须的：3.2.0 冻结时这套题只有 1 道，而且考生可见的任务契约里
+// 还没有「必须列出已排除的竞争假设」这一条。内容变了版本却没变，冻结登记
+// 就会一边留着旧题面、一边按新规矩打分。题面文字本身一字未改（goal 的
+// sha256 与 3.2.0 相同），变的是套件成员与可见契约。
+const VERSION = "3.2.1";
 
 // The candidate is given symptoms, never the mechanism. One symptom line per
 // observable failure class; the injected fault stays private to the laboratory.
@@ -106,8 +110,8 @@ export const M3_OBSERVATION_PARTITIONS = Object.freeze(Object.fromEntries(
 export function createObservationDesign(manifest) {
   const design = structuredClone(manifest);
   design.name = "M3.2 现场症状自主诊断验收冻结源";
-  design.dataset_ref = "m3-l2-symptom-observations@3.2.0";
-  design.suite_ref = "m3-symptom-acceptance@3.2.0";
+  design.dataset_ref = "m3-l2-symptom-observations@3.2.1";
+  design.suite_ref = "m3-symptom-acceptance@3.2.1";
   design.case_refs = Object.values(M3_OBSERVATION_CASES).map((item) => item.id + "@" + item.version);
   design.case_partitions = Object.fromEntries(
     Object.entries(M3_OBSERVATION_PARTITIONS).map(([partition, refs]) => [partition, [...refs]]));
