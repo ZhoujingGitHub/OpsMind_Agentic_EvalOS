@@ -202,7 +202,7 @@ test("过期的一次性编号可以清，还在防重放窗口内的仍然删�
     const insert = store.db.prepare(
       "INSERT INTO candidate_relay_nonces(candidate_ref,nonce,signed_at,received_at) VALUES(?,?,?,?)");
     for (let i = 0; i < 7; i += 1) insert.run("candidate-real", `stale-${i}`, stale, stale);
-    assert.equal(broker.sweepExpiredNonces({ limit: 3 }), 3, "一次只清一批");
+    assert.equal(broker.sweepExpiredNonces({ limit: 3, batch: 3 }), 3, "一次只清一批");
     assert.equal(count(), 4);
   } finally { store.close(); }
 });

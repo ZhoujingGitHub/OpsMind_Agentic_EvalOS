@@ -258,6 +258,14 @@ export class EvalStore {
     mkdirSync(path.dirname(this.databasePath), { recursive: true });
     mkdirSync(this.runtimeRoot, { recursive: true });
     this.db = new DatabaseSync(this.databasePath);
+    // Wait for a writer that is already holding the file instead of failing on
+    // the spot. Without this, any second process touching the database — a
+    // maintenance sweep, a read-only audit that upgrades to a write, a backup
+    // check — makes the control plane throw "database is locked" on its next
+    // write, which surfaces as a failed candidate call rather than as a pause.
+    // 2026-09-23: hit from both sides while draining ten million expired
+    // nonces; the drain and the service each refused to wait for the other.
+    this.db.exec("PRAGMA busy_timeout = 10000");
     const migrations = [migrationPath, ...migrationPaths].filter(Boolean);
     if (!migrations.length) throw new Error("at least one database migration is required");
     for (const migration of migrations) {

@@ -62,9 +62,24 @@ const MAX_CLAIM_WAIT_MS = 18000;
 // process cannot turn the sweep into a replay hole. The matching trigger in
 // 011_m32_relay_nonce_retention.sql still refuses to delete anything newer.
 const NONCE_RETENTION_MS = 3600000;
-// Rows per sweep. The backlog on 2026-09-23 was ten million; deleting that in
-// one statement would hold a write lock long enough to stall a running trial.
-const NONCE_SWEEP_LIMIT = 20000;
+// Rows per delete, and the total time one sweep may spend.
+//
+// node:sqlite is synchronous, so a sweep does not merely hold a database lock:
+// it blocks this process outright, answering nothing while it runs. Measured on
+// 2026-09-23 against the ten-million-row backlog, deleting 20,000 rows took
+// 13.4 seconds — long enough that the deployment smoke check got 502 from an
+// API that was up and listening, and the release rolled back twice.
+//
+// So the sweep is bounded by wall time, not by row count. Each pass takes small
+// bites until its budget is gone, and a bite on the full backlog costs about
+// 67 ms. Once the backlog is drained the same budget clears far more rows,
+// because the cost per row is a function of how large the table still is.
+//
+// This budget is sized for the steady state, which is roughly ten thousand new
+// nonces a day. It is deliberately too slow to drain ten million rows: that
+// backlog is drained out of process, where a stall costs nothing.
+const NONCE_SWEEP_BATCH = 100;
+const NONCE_SWEEP_BUDGET_MS = 100;
 // Sweeping on every claim would be wasteful now that claims are parked rather
 // than polled, so it runs at most this often.
 const NONCE_SWEEP_INTERVAL_MS = 60000;
@@ -195,11 +210,22 @@ export class CandidateRelayBroker {
    * stall a running trial. Each pass takes a slice; the table drains over a
    * few hours and then stays small on its own.
    */
-  sweepExpiredNonces({ retentionMs = NONCE_RETENTION_MS, limit = NONCE_SWEEP_LIMIT } = {}) {
+  sweepExpiredNonces({ retentionMs = NONCE_RETENTION_MS, batch = NONCE_SWEEP_BATCH,
+    budgetMs = NONCE_SWEEP_BUDGET_MS, limit = Infinity } = {}) {
     const cutoff = new Date(Date.now() - retentionMs).toISOString();
-    return this.store.db.prepare(`DELETE FROM candidate_relay_nonces WHERE rowid IN (
-      SELECT rowid FROM candidate_relay_nonces WHERE received_at<? LIMIT ?)`)
-      .run(cutoff, limit).changes;
+    const deadline = Date.now() + budgetMs;
+    const statement = this.store.db.prepare(`DELETE FROM candidate_relay_nonces WHERE rowid IN (
+      SELECT rowid FROM candidate_relay_nonces WHERE received_at<? LIMIT ?)`);
+    let removed = 0;
+    do {
+      const size = Math.min(batch, limit - removed);
+      if (size <= 0) break;
+      const changes = statement.run(cutoff, size).changes;
+      removed += changes;
+      // Nothing left inside the cutoff: stop rather than spin out the budget.
+      if (changes < size) break;
+    } while (Date.now() < deadline);
+    return removed;
   }
 
   sweepExpiredNoncesIfDue() {
