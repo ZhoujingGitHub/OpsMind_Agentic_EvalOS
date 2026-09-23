@@ -38,12 +38,35 @@ function parseJson(value, fallback = {}) {
   catch { return fallback; }
 }
 
+// How long a claim with nothing to hand out is allowed to wait before it
+// answers "nothing yet".
+//
+// Why this exists: with an immediate answer, the worker beside each candidate
+// had to ask again straight away, and it asked every 0.5 s around the clock.
+// Measured on 2026-09-22: 4 asks a second, 320 thousand a day, 4.4 million over
+// a fortnight — and because the exam and the candidates live in two different
+// cloud accounts, every one of those asks crossed the public network and was
+// billed on both sides. It also left 9.67 million anti-replay rows in an
+// append-only table, which is most of why the database reached 19 GB.
+//
+// 98.5% of that was the answer "nothing". Holding the question instead of
+// answering it removes exactly that: one held question covers fifteen seconds.
+// The cap stays below the worker's own 20 s request timeout so the worker needs
+// no change at all, and work is handed over the instant it arrives rather than
+// on the next poll — so this is faster, not slower.
+const DEFAULT_CLAIM_WAIT_MS = 15000;
+const MAX_CLAIM_WAIT_MS = 18000;
+
 export class CandidateRelayBroker {
-  constructor({ store, ledger, candidates = {}, pollIntervalMs = 100, signatureWindowMs = 300000 }) {
+  constructor({ store, ledger, candidates = {}, pollIntervalMs = 100, signatureWindowMs = 300000,
+    claimWaitMs = DEFAULT_CLAIM_WAIT_MS }) {
     this.store = store;
     this.ledger = ledger;
     this.pollIntervalMs = pollIntervalMs;
     this.signatureWindowMs = signatureWindowMs;
+    this.claimWaitMs = Math.min(Math.max(Number(claimWaitMs) || 0, 0), MAX_CLAIM_WAIT_MS);
+    // One entry per candidate holding the resolvers of the claims parked on it.
+    this.claimWaiters = new Map();
     this.candidates = Object.fromEntries(Object.entries(candidates).map(([ref, item]) => [ref, {
       ...item,
       publicKey: createPublicKey(item.public_key_pem),
@@ -106,6 +129,9 @@ export class CandidateRelayBroker {
     this.ledger.append({ entityType: "candidate_relay_request", entityId: id, action: "candidate_relay.queued",
       payload: { candidate_ref: candidateRef, credential_role: credentialRole, method: normalizedMethod,
         pathname, request_hash: requestHash } });
+    // Hand it over to a parked claim immediately; queueing is the only thing
+    // that can turn "nothing yet" into work, so this is the only wake needed.
+    this.wakeClaimWaiters(candidateRef);
 
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -147,6 +173,50 @@ export class CandidateRelayBroker {
     const cutoff = new Date(Date.now() - ABANDONED_BODY_MS).toISOString();
     return this.store.db.prepare(
       "DELETE FROM candidate_relay_response_bodies WHERE created_at<?").run(cutoff).changes;
+  }
+
+  wakeClaimWaiters(candidateRef) {
+    const parked = this.claimWaiters.get(candidateRef);
+    if (!parked?.size) return 0;
+    const woken = parked.size;
+    for (const resolve of [...parked]) resolve();
+    parked.clear();
+    return woken;
+  }
+
+  /**
+   * Claim work, waiting quietly instead of answering "nothing yet".
+   *
+   * If there is work it is handed over at once, exactly as before. If there is
+   * not, the question is parked until work arrives or the wait runs out, and
+   * only then answered. The answer is the same in both cases, so the worker
+   * asking cannot tell the difference — it simply stops having to ask 120
+   * times a minute to find out nothing changed.
+   */
+  async claimWaiting(candidateRef, params = {}, { waitMs = this.claimWaitMs } = {}) {
+    const first = this.claim(candidateRef, params);
+    if (first || !(waitMs > 0)) return first;
+    const parked = this.claimWaiters.get(candidateRef) ?? new Set();
+    this.claimWaiters.set(candidateRef, parked);
+    await new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        parked.delete(finish);
+        resolve();
+      };
+      const timer = setTimeout(finish, waitMs);
+      // Never hold the process open for a parked claim: a shutdown mid-wait is
+      // an answer of "nothing", not a hang.
+      timer.unref?.();
+      parked.add(finish);
+    });
+    // Ask once more on the way out. A wake means work arrived; a timeout means
+    // it probably did not, but the queue is cheap to re-read and racing a wake
+    // against the timer must never drop a request on the floor.
+    return this.claim(candidateRef, params);
   }
 
   claim(candidateRef, { worker_id: workerId, lease_ms: leaseMs = 30000 } = {}) {

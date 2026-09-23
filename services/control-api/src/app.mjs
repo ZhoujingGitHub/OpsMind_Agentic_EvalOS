@@ -244,7 +244,12 @@ export function createApp({
   const relayCandidates = Object.fromEntries(Object.entries(relayConfig.candidates ?? {}).map(([ref, item]) => [ref, {
     ...item, allowed_paths: CANDIDATE_RELAY_PATHS[ref] ?? [],
   }]));
-  const candidateRelay = new CandidateRelayBroker({ store, ledger, candidates: relayCandidates });
+  // A claim with nothing to hand out waits instead of answering at once. Set
+  // EVALOS_RELAY_CLAIM_WAIT_MS=0 to go back to answering immediately, which
+  // means every worker resumes asking on its own timer.
+  const candidateRelay = new CandidateRelayBroker({ store, ledger, candidates: relayCandidates,
+    ...(process.env.EVALOS_RELAY_CLAIM_WAIT_MS
+      ? { claimWaitMs: Number(process.env.EVALOS_RELAY_CLAIM_WAIT_MS) } : {}) });
   const frozenM31Manifest = m3DesignManifest ?? JSON.parse(readFileSync(path.join(ROOT, "config", "m3-formal-agent-capability.manifest.json"), "utf8"));
   if (bootstrapM3Design) {
     // Content-hashed designs are immutable and only selectable here.
@@ -1119,7 +1124,9 @@ export function createApp({
         candidateRelay.authenticate({ candidateRef, method: request.method, pathname: url.pathname,
           headers: request.headers, rawBody });
         const body = rawBody ? JSON.parse(rawBody) : {};
-        if (relayClaimMatch) return json({ request: candidateRelay.claim(candidateRef, body) }, 200, cors);
+        // Parked, not polled: with nothing to hand out this waits rather than
+        // sending the worker away to ask again in half a second.
+        if (relayClaimMatch) return json({ request: await candidateRelay.claimWaiting(candidateRef, body) }, 200, cors);
         return json(candidateRelay.complete(candidateRef, decodeURIComponent(relayCompleteMatch[2]), body), 200, cors);
       }
       if (candidatePresenceMutation) {

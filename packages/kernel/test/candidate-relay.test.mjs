@@ -118,3 +118,43 @@ test("没人取走的传输缓冲会被清扫，证据行不受影响", async ()
     assert.equal(JSON.parse(row.response_body_json).__relay_response_body, "candidate-relay-response-body/1.0");
   } finally { store.close(); }
 });
+
+test("没活干的取活会挂住等，不再让考生每半秒问一次", async () => {
+  // 2026-09-22 实测：立即回"没有"的做法，让两个考生侧的工人每 0.5 秒问一次，
+  // 一天 32 万次、两周 441 万次。考场与考生分属两个云账号，每一次问答都走
+  // 公网、两边各自计费；还在只增不删的防重放表里留下 966 万行，这是 19 GB
+  // 库的主要来源。其中 98.5% 的回答是"没有"。
+  const { store, broker } = fixture();
+  try {
+    // 没活时不立刻回答，而是把问题攥住。
+    const startedAt = Date.now();
+    const empty = await broker.claimWaiting("candidate-real",
+      { worker_id: "w", lease_ms: 30000 }, { waitMs: 120 });
+    assert.equal(empty, null, "没活时仍然回答 null，考生侧一行都不用改");
+    assert.ok(Date.now() - startedAt >= 100, "它必须真的等过，而不是立刻回答");
+
+    // 来活了要立刻交出去，不用等这一轮攥满。
+    const parked = broker.claimWaiting("candidate-real",
+      { worker_id: "w", lease_ms: 30000 }, { waitMs: 5000 });
+    const askedAt = Date.now();
+    setTimeout(() => {
+      broker.request("candidate-real", "candidate_submitter", "/api/health", { timeoutMs: 2000 })
+        .catch(() => {});
+    }, 20);
+    const claimed = await parked;
+    assert.ok(claimed, "来活之后这条挂住的取活必须拿到它");
+    assert.equal(claimed.pathname, "/api/health");
+    assert.ok(Date.now() - askedAt < 2000, "来活要立刻交，不能等攥满 5 秒");
+    broker.complete("candidate-real", claimed.id,
+      { worker_id: "w", response_status: 200, response_body: { ok: true } });
+
+    // 攥的时长有上限，而且必须低于考生工人自己的 20 秒请求超时，
+    // 否则考生会把正常的一次问答当成超时。
+    const capped = new CandidateRelayBroker({ store, ledger: broker.ledger, claimWaitMs: 99000,
+      candidates: {} });
+    assert.ok(capped.claimWaitMs <= 18000, "攥的上限必须留在考生 20 秒超时之内");
+    // 设成 0 就回到立刻回答的老行为，出事时可以一键退回。
+    const off = new CandidateRelayBroker({ store, ledger: broker.ledger, claimWaitMs: 0, candidates: {} });
+    assert.equal(off.claimWaitMs, 0);
+  } finally { store.close(); }
+});
