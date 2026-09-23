@@ -18,6 +18,7 @@ function fixture() {
       path.join(ROOT, "infra", "migrations", "sqlite", "003_m26_run_control.sql"),
       path.join(ROOT, "infra", "migrations", "sqlite", "004_m31_candidate_relay.sql"),
       path.join(ROOT, "infra", "migrations", "sqlite", "010_m32_relay_transport_buffer.sql"),
+      path.join(ROOT, "infra", "migrations", "sqlite", "011_m32_relay_nonce_retention.sql"),
     ] });
   const ledger = new EvaluationLedger(store);
   const broker = new CandidateRelayBroker({ store, ledger, pollIntervalMs: 5, candidates: {
@@ -156,5 +157,52 @@ test("没活干的取活会挂住等，不再让考生每半秒问一次", async
     // 设成 0 就回到立刻回答的老行为，出事时可以一键退回。
     const off = new CandidateRelayBroker({ store, ledger: broker.ledger, claimWaitMs: 0, candidates: {} });
     assert.equal(off.claimWaitMs, 0);
+  } finally { store.close(); }
+});
+
+test("过期的一次性编号可以清，还在防重放窗口内的仍然删不掉", async () => {
+  // 2026-09-23 实测：这张表长到 9,949,118 行、最早一条来自 8 月 22 日，
+  // 而其中**还在五分钟签名窗内、真正还会被查的只有 74 条**。
+  // 判据的顺序决定了这件事：时间戳超窗就直接拒绝，根本走不到查编号那一步，
+  // 所以过窗的编号证明不了任何东西，只占着 1.9 GB。
+  //
+  // 但"能清"不等于"随便删"——窗口内的编号必须删不掉，否则有人可以先把
+  // 某条编号的记录抹掉，再把那次请求原样重放一遍。这条测试同时钉住两头。
+  const { store, broker, privateKey } = fixture();
+  try {
+    const pathname = "/api/candidate-relay/candidate-real/claim";
+    const rawBody = JSON.stringify({ worker_id: "w", lease_ms: 30000 });
+    broker.authenticate({ candidateRef: "candidate-real", method: "POST", pathname,
+      headers: signedHeaders(privateKey, pathname, rawBody), rawBody });
+    const count = () => store.db.prepare("SELECT COUNT(*) AS n FROM candidate_relay_nonces").get().n;
+    assert.equal(count(), 1);
+
+    // 刚用过的编号还在窗口里：清扫碰不到它，直接删也会被触发器拒绝。
+    assert.equal(broker.sweepExpiredNonces(), 0, "窗口内的编号不该被清扫带走");
+    assert.throws(() => store.db.prepare("DELETE FROM candidate_relay_nonces").run(),
+      /append-only/, "窗口内的编号必须删不掉");
+    assert.equal(count(), 1);
+
+    // 同一个编号再用一次，仍然被认出是重放——保护没有因为这次改动变弱。
+    const timestamp = String(Date.now());
+    const replayed = store.db.prepare("SELECT nonce FROM candidate_relay_nonces LIMIT 1").get().nonce;
+    assert.throws(() => store.db.prepare(
+      "INSERT INTO candidate_relay_nonces(candidate_ref,nonce,signed_at,received_at) VALUES(?,?,?,?)")
+      .run("candidate-real", replayed, timestamp, new Date().toISOString()), /UNIQUE/);
+
+    // 把它挪到两小时前——此刻它已经不可能再被查到，清扫就该带走它。
+    store.db.exec("DROP TRIGGER candidate_relay_nonces_no_update");
+    store.db.prepare("UPDATE candidate_relay_nonces SET received_at=?")
+      .run(new Date(Date.now() - 7200000).toISOString());
+    assert.equal(broker.sweepExpiredNonces(), 1, "过窗的编号应当被清掉");
+    assert.equal(count(), 0);
+
+    // 清扫是有界的：一次最多带走一批，不会为了追进度锁住整个库。
+    const stale = new Date(Date.now() - 7200000).toISOString();
+    const insert = store.db.prepare(
+      "INSERT INTO candidate_relay_nonces(candidate_ref,nonce,signed_at,received_at) VALUES(?,?,?,?)");
+    for (let i = 0; i < 7; i += 1) insert.run("candidate-real", `stale-${i}`, stale, stale);
+    assert.equal(broker.sweepExpiredNonces({ limit: 3 }), 3, "一次只清一批");
+    assert.equal(count(), 4);
   } finally { store.close(); }
 });

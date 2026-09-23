@@ -57,6 +57,18 @@ function parseJson(value, fallback = {}) {
 const DEFAULT_CLAIM_WAIT_MS = 15000;
 const MAX_CLAIM_WAIT_MS = 18000;
 
+// How long a used nonce is kept after it stops being checkable. One hour is
+// twelve times the five-minute signature window, so clock skew or a paused
+// process cannot turn the sweep into a replay hole. The matching trigger in
+// 011_m32_relay_nonce_retention.sql still refuses to delete anything newer.
+const NONCE_RETENTION_MS = 3600000;
+// Rows per sweep. The backlog on 2026-09-23 was ten million; deleting that in
+// one statement would hold a write lock long enough to stall a running trial.
+const NONCE_SWEEP_LIMIT = 20000;
+// Sweeping on every claim would be wasteful now that claims are parked rather
+// than polled, so it runs at most this often.
+const NONCE_SWEEP_INTERVAL_MS = 60000;
+
 export class CandidateRelayBroker {
   constructor({ store, ledger, candidates = {}, pollIntervalMs = 100, signatureWindowMs = 300000,
     claimWaitMs = DEFAULT_CLAIM_WAIT_MS }) {
@@ -67,6 +79,7 @@ export class CandidateRelayBroker {
     this.claimWaitMs = Math.min(Math.max(Number(claimWaitMs) || 0, 0), MAX_CLAIM_WAIT_MS);
     // One entry per candidate holding the resolvers of the claims parked on it.
     this.claimWaiters = new Map();
+    this.lastNonceSweepAt = 0;
     this.candidates = Object.fromEntries(Object.entries(candidates).map(([ref, item]) => [ref, {
       ...item,
       publicKey: createPublicKey(item.public_key_pem),
@@ -169,6 +182,34 @@ export class CandidateRelayBroker {
     return payload;
   }
 
+  /**
+   * Drop nonces that have aged out of the replay window.
+   *
+   * A nonce is only ever consulted for a request whose signed timestamp is
+   * inside the signature window; past that, the timestamp check refuses the
+   * request before the lookup happens, so an expired nonce can prove nothing.
+   * Keeping them cost 1.9 GB and ten million rows by 2026-09-23.
+   *
+   * Deletion is bounded on purpose. The backlog was ten million rows, and
+   * removing that in one statement would hold a write lock long enough to
+   * stall a running trial. Each pass takes a slice; the table drains over a
+   * few hours and then stays small on its own.
+   */
+  sweepExpiredNonces({ retentionMs = NONCE_RETENTION_MS, limit = NONCE_SWEEP_LIMIT } = {}) {
+    const cutoff = new Date(Date.now() - retentionMs).toISOString();
+    return this.store.db.prepare(`DELETE FROM candidate_relay_nonces WHERE rowid IN (
+      SELECT rowid FROM candidate_relay_nonces WHERE received_at<? LIMIT ?)`)
+      .run(cutoff, limit).changes;
+  }
+
+  sweepExpiredNoncesIfDue() {
+    if (Date.now() - this.lastNonceSweepAt < NONCE_SWEEP_INTERVAL_MS) return 0;
+    this.lastNonceSweepAt = Date.now();
+    // A failed sweep must never fail the claim it rode in on: housekeeping is
+    // not part of the contract between the exam and a candidate.
+    try { return this.sweepExpiredNonces(); } catch { return 0; }
+  }
+
   sweepAbandonedResponseBodies() {
     const cutoff = new Date(Date.now() - ABANDONED_BODY_MS).toISOString();
     return this.store.db.prepare(
@@ -221,6 +262,7 @@ export class CandidateRelayBroker {
 
   claim(candidateRef, { worker_id: workerId, lease_ms: leaseMs = 30000 } = {}) {
     this.sweepAbandonedResponseBodies();
+    this.sweepExpiredNoncesIfDue();
     if (!workerId || !Number.isInteger(leaseMs) || leaseMs < 1000 || leaseMs > 120000) {
       throw new Error("candidate relay claim requires worker_id and lease_ms between 1000 and 120000");
     }

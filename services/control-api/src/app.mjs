@@ -218,7 +218,8 @@ export function createApp({
       path.join(ROOT, "infra", "migrations", "sqlite", "007_m32_run_resilience.sql"),
       path.join(ROOT, "infra", "migrations", "sqlite", "008_m32_cleanup_reconciliation.sql"),
       path.join(ROOT, "infra", "migrations", "sqlite", "009_m32_capacity_rehearsal.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "010_m32_relay_transport_buffer.sql")] });
+      path.join(ROOT, "infra", "migrations", "sqlite", "010_m32_relay_transport_buffer.sql"),
+      path.join(ROOT, "infra", "migrations", "sqlite", "011_m32_relay_nonce_retention.sql")] });
   const labels = new PrivateLabelStore({ databasePath: privateLabelDatabasePath,
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const privateLabelHash = labels.publishRegistry(registry);
