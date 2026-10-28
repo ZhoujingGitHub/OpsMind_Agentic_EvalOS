@@ -13,6 +13,7 @@
 # Usage: ./check-certs.sh [warn-days]        默认 30 天
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/remote-hosts.sh"
 WARN="${1:-30}"
 SECS=$((WARN * 86400))
 bad=0
@@ -43,11 +44,18 @@ exit \${RC:-0}
 EOF
 }
 
+on() {  # 经 SSH 执行 probe 的输出，打印远端退出码
+  local rc=0
+  remote_ssh_args "$1"
+  probe | "${REMOTE_SSH[@]}" "${REMOTE_SUDO}sh -s" || rc=$?
+  [ "$rc" = 255 ] && remote_unreachable_hint
+  echo "  （远端退出码 $rc）"
+}
 echo "EvalOS 机 121.40.223.202"
-probe | "$HERE/ca-eval.sh" i-bp14ezltpnq8mxic1gsb 90 2>/dev/null | grep -v "^InvokeId" | sed 's/^### exit=\(.*\) status=.*/  （远端退出码 \1）/'
+on evalos
 echo
 echo "产品机 114.55.40.170"
-probe | "$HERE/ca.sh" i-bp12nyanjsyue1vs5bu6 90 2>/dev/null | grep -v "^InvokeId" | sed 's/^### exit=\(.*\) status=.*/  （远端退出码 \1）/'
+on product
 echo
 echo "提示：远端退出码非 0 表示该机有证书问题，按上面的 !! 行处理。"
 echo "余额检查是另一个脚本：./check-balance.sh"

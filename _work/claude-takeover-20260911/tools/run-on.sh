@@ -1,7 +1,5 @@
 #!/bin/bash
-# 统一启动器。这是这套工具此前缺的那块：ca.sh 从标准输入读脚本、不转发参数，
-# 所以约定是"在脚本前面拼上环境变量赋值"。以前每轮会话都在手搓这段管道，
-# RUNBOOK 却声称"直接照此驱动"。有了它那句话才成立。
+# 统一远端执行器：把本地一个脚本（或一条命令）交给三台机之一执行，退出码原样带回。
 #
 #   ./run-on.sh <product|evalos|lab> <脚本文件> [VAR=值 ...]
 #   ./run-on.sh <product|evalos|lab> - '<直接执行的 shell 命令>'
@@ -11,20 +9,20 @@
 #   ./run-on.sh evalos  evalos-op.sh OP=preflight REF=agent-harness-v2 \
 #               SRC_EXP=exp_xxxx EXPECT_REV=1a6eefc30c20475d61ed48dce0e361d9bcdf5180
 #   ./run-on.sh lab     - 'opsmind-harness-labctl manage-status'
+#
+# 2026-10-29 起走 SSH（入口见 remote-hosts.sh），不再走云助手。三处行为变化：
+#   · 退出码就是远端脚本的退出码（云助手时代永远 exit 0、要解析 "### exit=N"）；
+#     255 是 ssh 自己连不上，会另外打一行提示
+#   · 没有 300 秒上限；要限时显式给 TIMEOUT=秒
+#   · 输出不截断
 set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$HERE/remote-hosts.sh"
 HOST="${1:?用法: run-on.sh <product|evalos|lab> <脚本|-> [VAR=值 ...]}"
 SCRIPT="${2:?用法: run-on.sh <product|evalos|lab> <脚本|-> [VAR=值 ...]}"
 shift 2
+remote_ssh_args "$HOST" || exit 2
 
-case "$HOST" in
-  product) RUNNER="$HERE/ca.sh";      INST=i-bp12nyanjsyue1vs5bu6 ;;
-  evalos)  RUNNER="$HERE/ca-eval.sh"; INST=i-bp14ezltpnq8mxic1gsb ;;
-  lab)     RUNNER="$HERE/ca.sh";      INST=i-bp19u0lim79nhh4y7fkg ;;
-  *) echo "host 取值: product | evalos | lab" >&2; exit 2 ;;
-esac
-
-TMO="${TIMEOUT:-300}"
 BODY=$(mktemp)
 trap 'rm -f "$BODY"' EXIT
 
@@ -42,4 +40,11 @@ else
 fi
 
 echo "[run-on] $HOST <- $SCRIPT $*" >&2
-"$RUNNER" "$INST" "$TMO" < "$BODY"
+rc=0
+if [ -n "${TIMEOUT:-}" ]; then
+  timeout "$TIMEOUT" "${REMOTE_SSH[@]}" "${REMOTE_SUDO}sh -s" < "$BODY" || rc=$?
+else
+  "${REMOTE_SSH[@]}" "${REMOTE_SUDO}sh -s" < "$BODY" || rc=$?
+fi
+[ "$rc" = 255 ] && remote_unreachable_hint
+exit "$rc"

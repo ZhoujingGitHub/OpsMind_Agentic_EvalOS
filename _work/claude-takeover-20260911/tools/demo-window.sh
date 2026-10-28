@@ -18,12 +18,12 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ACTION="${1:-status}"
 WHICH="${2:-all}"
 
-EVALOS_INST=i-bp14ezltpnq8mxic1gsb
-PRODUCT_INST=i-bp12nyanjsyue1vs5bu6
-
-# 每个入口：实例 / 云助手脚本 / 开关文件 / 开放态备份 / 探测用 IP
-run_evalos() { "$HERE/ca-eval.sh" "$EVALOS_INST" 90; }
-run_product() { "$HERE/ca.sh" "$PRODUCT_INST" 90; }
+# 每个入口：主机 / 开关文件 / 开放态备份 / 探测用 URL
+# 开关在主机上的 nginx 里，走 SSH 即可（入口见 remote-hosts.sh）；
+# 只有改安全组这类阿里云账号层面的事才需要云助手。
+. "$HERE/remote-hosts.sh"
+run_evalos() { remote_ssh_args evalos; "${REMOTE_SSH[@]}" "${REMOTE_SUDO}sh -s"; }
+run_product() { remote_ssh_args product; "${REMOTE_SSH[@]}" "${REMOTE_SUDO}sh -s"; }
 
 remote_body() {
   # $1=switch file  $2=open-state backup  $3=probe url  $4=action
