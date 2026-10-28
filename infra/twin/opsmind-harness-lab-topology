@@ -125,6 +125,50 @@ start_services() {
   echo $! >"$DNS_PID"
 }
 
+# Transport faults live on hop B, the only transport node a candidate can read
+# (node_profile=transport). Each is one command; the exam's answer key quotes it.
+apply_fault() {
+  case "$1" in
+    n6-route-missing)
+      ip route del "$SERVICE_NET" 2>/dev/null || true
+      ;;
+    transport-link-down)
+      ip -n opsmind-ah-b link set ah-b-c down
+      ;;
+    transport-packet-loss)
+      tc -n opsmind-ah-b qdisc add dev ah-b-c root netem loss 60%
+      ;;
+    transport-rate-limit)
+      tc -n opsmind-ah-b qdisc add dev ah-b-c root tbf rate 16kbit burst 1600 latency 20ms
+      ;;
+    transport-route-loop)
+      ip -n opsmind-ah-b route replace "$SERVICE_NET" via 10.61.0.5 dev ah-b-a
+      ;;
+  esac
+}
+
+# Restoring the path and clearing an impairment are different repairs. A
+# candidate that picks the wrong one does not get the fault fixed for free.
+restore_path() {
+  ip -n opsmind-ah-b link set ah-b-c up
+  ip -n opsmind-ah-b route replace "$SERVICE_NET" via 10.61.0.10 dev ah-b-c
+  ip route replace "$SERVICE_NET" via 10.61.0.2 dev ah-host-a
+}
+
+clear_impairment() {
+  tc -n opsmind-ah-b qdisc del dev ah-b-c root 2>/dev/null || true
+}
+
+transport_clean() {
+  link_up=false
+  if ip -n opsmind-ah-b -j link show ah-b-c | grep -q '"operstate":"UP"'; then link_up=true; fi
+  impaired=false
+  if tc -n opsmind-ah-b qdisc show dev ah-b-c | grep -Eq 'netem|tbf'; then impaired=true; fi
+  path_ok=false
+  if ip -n opsmind-ah-b route show "$SERVICE_NET" | grep -q "dev ah-b-c"; then path_ok=true; fi
+  printf '%s %s %s' "$link_up" "$impaired" "$path_ok"
+}
+
 status() {
   ready=false
   if ip netns exec opsmind-ah-mec curl -fsS --max-time 2 "http://$MEC_IP:8080/health" >/dev/null 2>&1 && \
@@ -135,8 +179,11 @@ status() {
   fi
   route_present=false
   if ip route show "$SERVICE_NET" | grep -q ah-host-a; then route_present=true; fi
-  printf '{"ready":%s,"route_present":%s,"service_network":"%s","mec_ip":"%s","dns_ip":"%s","transport_hops":3,"http":8080,"mqtt":1883,"dns":53,"runtime_isolated":true}\n' \
-    "$ready" "$route_present" "$SERVICE_NET" "$MEC_IP" "$DNS_IP"
+  read -r link_up impaired path_ok <<EOF
+$(transport_clean 2>/dev/null || printf 'false false false')
+EOF
+  printf '{"ready":%s,"route_present":%s,"transport_link_up":%s,"transport_impaired":%s,"transport_path_ok":%s,"service_network":"%s","mec_ip":"%s","dns_ip":"%s","transport_hops":3,"http":8080,"mqtt":1883,"dns":53,"runtime_isolated":true}\n' \
+    "$ready" "$route_present" "$link_up" "$impaired" "$path_ok" "$SERVICE_NET" "$MEC_IP" "$DNS_IP"
 }
 
 case "$command" in
@@ -144,17 +191,19 @@ case "$command" in
     reset_topology
     up_all
     start_services
-    if [ "$scenario" = "n6-route-missing" ]; then
-      ip route del "$SERVICE_NET" 2>/dev/null || true
-    fi
+    apply_fault "$scenario"
     status
     ;;
-  route)
-    ip route replace "$SERVICE_NET" via 10.61.0.2 dev ah-host-a
+  fault)
+    apply_fault "${2:-}"
     status
     ;;
-  fault-route)
-    ip route del "$SERVICE_NET" 2>/dev/null || true
+  restore-path)
+    restore_path
+    status
+    ;;
+  clear-impairment)
+    clear_impairment
     status
     ;;
   status)

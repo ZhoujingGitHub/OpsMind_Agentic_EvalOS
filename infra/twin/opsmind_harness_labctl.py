@@ -758,6 +758,20 @@ def node_prefix(profile: str) -> list[str]:
     raise ValueError("invalid node_profile")
 
 
+# A repair the base twin records may also have to be carried out on this
+# candidate's own transport hops. Restoring the path and clearing an
+# impairment are different repairs; the wrong one leaves the fault in place.
+TOPOLOGY_REPAIRS = {"route_state": "restore-path", "traffic_control": "clear-impairment"}
+
+
+def repair_topology(action_type: str) -> None:
+    command = TOPOLOGY_REPAIRS.get(action_type)
+    if command:
+        result = run([str(TOPOLOGY), command], timeout=30)
+        if result.returncode != 0:
+            raise RuntimeError(f"transport repair {command} failed: {(result.stdout or '')[-200:]}")
+
+
 def act(request: dict) -> dict:
     external_request_id = str(request["external_request_id"])
     existing = request_record(external_request_id)
@@ -778,8 +792,8 @@ def act(request: dict) -> dict:
                 "parameters": parameters,
             }
         )
-        if response.get("ok") and action_type == "route_state":
-            run([str(TOPOLOGY), "route"], timeout=30)
+        if response.get("ok"):
+            repair_topology(action_type)
         data = dict(response.get("data") or {})
         data.update(
             status="succeeded" if response.get("ok") else "failed",
@@ -825,8 +839,8 @@ def rollback_fault(snapshot: dict, request: dict) -> dict:
     state["changes"] = []
     module.inject_fault(state["scenario_id"], state)
     module.save_state(state)
-    if state["scenario_id"] == "n6-route-missing":
-        run([str(TOPOLOGY), "fault-route"], timeout=30)
+    # Faults on this candidate's own hops are re-applied by the topology owner.
+    run([str(TOPOLOGY), "fault", str(state["scenario_id"])], timeout=30)
     return {
         "ok": True,
         "operation": "act",

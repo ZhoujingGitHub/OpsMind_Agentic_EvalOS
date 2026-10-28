@@ -646,6 +646,20 @@ def node_prefix(profile: str) -> list[str]:
     raise ValueError("invalid node_profile")
 
 
+# A repair the base twin records may also have to be carried out on this
+# candidate's own transport hops. Restoring the path and clearing an
+# impairment are different repairs; the wrong one leaves the fault in place.
+TOPOLOGY_REPAIRS = {"route_state": "restore-path", "traffic_control": "clear-impairment"}
+
+
+def repair_topology(action_type: str) -> None:
+    command = TOPOLOGY_REPAIRS.get(action_type)
+    if command:
+        result = run([str(TOPOLOGY), command], timeout=30)
+        if result.returncode != 0:
+            raise RuntimeError(f"transport repair {command} failed: {(result.stdout or '')[-200:]}")
+
+
 def act(request: dict) -> dict:
     external_request_id = str(request["external_request_id"])
     binding = digest({key: request.get(key) for key in ("trial_id", "action_type", "parameters")})
@@ -689,8 +703,8 @@ def act(request: dict) -> dict:
                 "parameters": parameters,
             }
         )
-        if response.get("ok") and action_type == "route_state":
-            run([str(TOPOLOGY), "route"], timeout=30)
+        if response.get("ok"):
+            repair_topology(action_type)
         data = dict(response.get("data") or {})
         verification = dict(data.get("terminal_verification") or {})
         data.update(

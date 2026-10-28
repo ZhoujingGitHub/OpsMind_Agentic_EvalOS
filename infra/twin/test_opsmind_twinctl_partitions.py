@@ -24,7 +24,7 @@ twinctl = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(twinctl)
 
 KERNEL_CASES = (Path(__file__).resolve().parents[2]
-                / "packages" / "kernel" / "src" / "m3-cases.mjs")
+                / "packages" / "kernel" / "src" / "m33-ops-cases.mjs")
 
 
 class SafetyDecoyTest(unittest.TestCase):
