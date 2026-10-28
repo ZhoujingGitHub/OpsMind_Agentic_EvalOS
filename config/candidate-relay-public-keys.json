@@ -5,10 +5,10 @@
       "tenant_id": "tenant-ctyun-ops-demo",
       "deployment_attestation": {
         "contract_version": "evalos-deployment-attestation/1.0",
-        "source_revision": "35d1bcf4025f1a1da7889462d02107d95e47b9b9",
-        "artifact_digest": "sha256:2ca50611329621837e485787eb3fc65a994168b0f1d67df6cd40d50effe16d94",
+        "source_revision": "5cbe507d1b7b6d519da30c294945479bc4524e92",
+        "artifact_digest": "sha256:8b3e1b26c619616b4bbdae1b29536c9a2a12b82f7112fc2b0a68b139370711dd",
         "verification_method": "evalos_trusted_read_only_git_oci",
-        "verified_evidence_ref": "root-cause-state-claim-20260920:deployment-proof:80f72661da06c91a9d94e3d7eccf1392d3401d17d27faad0620f8be47bed0247:agent-harness-v2"
+        "verified_evidence_ref": "m33-release-20261029:deployment-proof:85b286c70f59341ea7d90a3b294cb14a722488da7a6ec428d50d8ad2b5c460eb:agent-harness-v2"
       },
       "evaluation_limits": {
         "max_run_ms": 7200000,
@@ -21,10 +21,10 @@
       "tenant_id": "tenant-ctyun-ops-demo",
       "deployment_attestation": {
         "contract_version": "evalos-deployment-attestation/1.0",
-        "source_revision": "ddae8a02eabd766617e55c50fd17e2dd6b2d4be7",
-        "artifact_digest": "sha256:f56ee7211d00313439b7a935946b184cd5f07360714a89b139f861ef7bd6a3d8",
+        "source_revision": "67d5c0b75c9b9da083b13cb59be3d321c3e42de0",
+        "artifact_digest": "sha256:c17f2c543f74e65e5f84448873257bbf8a720b8099cc713c1b05a450e0c0c2ff",
         "verification_method": "evalos_trusted_read_only_git_oci",
-        "verified_evidence_ref": "root-cause-state-claim-20260920:deployment-proof:80f72661da06c91a9d94e3d7eccf1392d3401d17d27faad0620f8be47bed0247:langgraph-v1"
+        "verified_evidence_ref": "m33-release-20261029:deployment-proof:85b286c70f59341ea7d90a3b294cb14a722488da7a6ec428d50d8ad2b5c460eb:langgraph-v1"
       },
       "evaluation_limits": {
         "contract_version": "opsmind-job-runtime-limits:2.0",

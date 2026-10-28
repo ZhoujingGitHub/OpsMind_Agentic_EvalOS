@@ -127,9 +127,15 @@ assert.equal(formal.contestants.find((item) => item.ref === "langgraph-v1")
   .candidate_runtime.versions.job_runtime_limits_contract_version, "opsmind-job-runtime-limits:2.0");
 assert.equal(formal.candidate_resource_contract.contract_version, "evalos-candidate-open-resource/2.0");
 const lgResources = formal.candidate_resource_contract.profiles.find((item) => item.contestant_ref === "langgraph-v1");
-assert.equal(Object.values(lgResources.candidate_resources).every((value) => value === null), true);
+// LG publishes finite runaway fuses since 2026-10-29 (decision 7: five times the
+// largest sealed exam Job). Every limit it publishes is one it enforces itself;
+// the rest stay observed only. The exam never invents a limit of its own.
+const LG_FUSES = { max_model_calls: 70, max_tool_calls: 120, max_tokens: 3_000_000 };
+for (const [name, limit] of Object.entries(lgResources.candidate_resources)) {
+  assert.equal(limit, LG_FUSES[name] ?? null, `langgraph-v1 ${name}`);
+  assert.equal(lgResources.enforcement[name], name in LG_FUSES ? "enforced" : "observed_only", `langgraph-v1 ${name} enforcement`);
+}
 assert.equal(Object.values(lgResources.settlement_reserve).every((value) => value === null), true);
-assert.equal(Object.values(lgResources.enforcement).every((value) => value === "observed_only"), true);
 validateCandidateRegistration({ manifest: formal,
   relay: JSON.parse(read("config/candidate-relay-public-keys.json")),
   presence: JSON.parse(read("config/candidate-presence-public-keys.json")) });
