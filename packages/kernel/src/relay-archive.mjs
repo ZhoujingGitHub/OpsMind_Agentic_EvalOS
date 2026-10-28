@@ -7,6 +7,10 @@
 // backup a 20 GB copy. The rows are evidence, so they are archived, verified
 // and recorded before they are deleted — never just deleted.
 //
+// Rows are read in insertion (rowid) order. Ordering by created_at has no index
+// and makes SQLite sort the whole payload in a temp file first — on 2026-10-29
+// that was 17.9 GB of temp writes on a disk with 27 GB free.
+//
 // The archive is one gzip'd JSON-lines file: one line per relay request, with
 // its response body row when there is one. MANIFEST.json carries the counts,
 // the time range, a digest over the ordered ids and a digest over the
@@ -73,7 +77,7 @@ export async function exportRelayEvidence(db, { before, outDir }) {
   const rows = db.prepare(`SELECT r.*, b.body_json AS stored_body_json, b.bytes AS stored_body_bytes,
       b.sha256 AS stored_body_sha256, b.created_at AS stored_body_created_at
     FROM candidate_relay_requests r LEFT JOIN candidate_relay_response_bodies b ON b.request_id = r.id
-    WHERE r.created_at < ? ORDER BY r.created_at, r.id`).iterate(before);
+    WHERE r.created_at < ? ORDER BY r.rowid`).iterate(before);
   function* lines() {
     for (const row of rows) {
       const { stored_body_json: body, stored_body_bytes: bytes, stored_body_sha256: sha, stored_body_created_at: at, ...request } = row;
@@ -88,7 +92,7 @@ export async function exportRelayEvidence(db, { before, outDir }) {
   }
   await writeLines(file, lines());
   if (count !== range.n) throw new Error(`exported ${count} rows but ${range.n} were in scope`);
-  const manifest = { contract: RELAY_ARCHIVE_CONTRACT, before, requests: count, response_bodies: bodies,
+  const manifest = { contract: RELAY_ARCHIVE_CONTRACT, before, order: "rowid", requests: count, response_bodies: bodies,
     first_created_at: range.first, last_created_at: range.last, ids_sha256: ids.digest("hex"),
     content_sha256: content.digest("hex"), archive_file: ARCHIVE_FILE,
     archive_sha256: await fileSha256(file), archive_bytes: statSync(file).size };
@@ -114,7 +118,9 @@ export async function verifyRelayArchive(outDir, db = null) {
   if (ids.digest("hex") !== manifest.ids_sha256) throw new Error("archive ids do not match the manifest");
   if (content.digest("hex") !== manifest.content_sha256) throw new Error("archive content does not match the manifest");
   if (db) {
-    const live = db.prepare("SELECT id FROM candidate_relay_requests WHERE created_at < ? ORDER BY created_at, id").iterate(manifest.before);
+    // Archives written before `order` was recorded (2026-10-29) are in created_at, id order.
+    const order = manifest.order === "rowid" ? "rowid" : "created_at, id";
+    const live = db.prepare(`SELECT id FROM candidate_relay_requests WHERE created_at < ? ORDER BY ${order}`).iterate(manifest.before);
     const liveIds = createHash("sha256");
     let liveCount = 0;
     for (const row of live) { liveIds.update(`${row.id}\n`); liveCount += 1; }
