@@ -217,7 +217,7 @@
         "models": [
           {
             "provider": "deepseek",
-            "id": "deepseek-v4-flash",
+            "id": "deepseek-flash",
             "interface": "anthropic-compatible",
             "thinking": "enabled",
             "roles": [
@@ -259,7 +259,7 @@
         "models": [
           {
             "provider": "deepseek",
-            "id": "deepseek-v4-flash",
+            "id": "deepseek-flash",
             "interface": "anthropic",
             "thinking": "disabled",
             "roles": [
@@ -286,7 +286,7 @@
           "state_schema_version": "graph-state:6.0.0",
           "mcp_contract_version": "observation+protocol-lab:3.5.0",
           "knowledge_version": "[\"general-investigation@2.0.0\"]",
-          "model_version": "deepseek-v4-flash+deepseek-v4-pro",
+          "model_version": "deepseek-flash+deepseek-v4-pro",
           "product_e2e_contract_version": "opsmind-controlled-remediation:1.3",
           "public_event_schema_version": "opsmind-public-event:1.0",
           "job_runtime_limits_contract_version": "opsmind-job-runtime-limits:2.0",

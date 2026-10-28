@@ -112,7 +112,11 @@ assert.equal(JSON.parse(read("config/m15-smoke.manifest.json")).frozen_dependenc
 assert.equal(formal.model.sdk, "@anthropic-ai/claude-agent-sdk");
 assert.equal(formal.model.id, "deepseek-v4-flash");
 assert.deepEqual(formal.contestants.find((item) => item.ref === "langgraph-v1")
-  .candidate_runtime.models.map((item) => item.id), ["deepseek-v4-flash", "deepseek-v4-pro"]);
+  .candidate_runtime.models.map((item) => item.id), ["deepseek-flash", "deepseek-v4-pro"]);
+// Both candidates must declare DeepSeek's current name; the legacy deepseek-v4-flash
+// is only routed to V4.1 Flash temporarily (DeepSeek changelog 2026-09-10).
+assert.deepEqual(formal.contestants.find((item) => item.ref === "agent-harness-v2")
+  .candidate_runtime.models.map((item) => item.id), ["deepseek-flash"]);
 assert.equal(formal.contestants.find((item) => item.ref === "langgraph-v1")
   .candidate_runtime.versions.job_runtime_limits_contract_version, "opsmind-job-runtime-limits:2.0");
 assert.equal(formal.candidate_resource_contract.contract_version, "evalos-candidate-open-resource/2.0");
