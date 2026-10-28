@@ -5,6 +5,7 @@
 /* eslint-disable @next/next/no-html-link-for-pages */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AnnotationPanel, EvidenceTables, FunnelView, GATE_LABELS, ReportCardPanel, VARIANT_LABELS } from "./exam-report";
 
 type Json = Record<string, any>;
 type View = "dashboard" | "datasets" | "experiments" | "experiment" | "trial" | "traces" | "graders" | "analyses" | "run-requests";
@@ -13,6 +14,8 @@ const DIMENSION_LABELS: Record<string, string> = {
   task_success: "任务终态", rca_quality: "根因质量", evidence_quality: "证据质量", trajectory_quality: "轨迹质量",
   open_world: "开放环境", proactive_capability: "主动发现", resource_cost: "资源用量（新合同仅记录）", engineering_agility: "工程敏捷",
   recommendation_quality: "建议质量（资格信号，暂不计分）",
+  root_cause_localization: "根因定位", remediation_quality: "处置质量",
+  trajectory_activity: "轨迹活动（只记录）", resource_usage: "资源用量（只记录）",
 };
 const STATUS_LABELS: Record<string, string> = { COMPLETED: "已完成", RUNNING: "运行中", QUEUED: "排队中", FAILED: "失败",
   PASSED: "通过", IN_PROGRESS: "进行中", CANCELLED: "已取消", FROZEN: "设计已冻结" };
@@ -74,8 +77,14 @@ function Sidebar({ active }: { active: View }) {
       <Nav href="/analyses" label="AI 调查员" icon="✦" active={active === "analyses"} />
     </nav>
     <div className="side-spacer" />
-    <div className="core-card"><span className="live-dot" /><strong>核心运行时</strong><p>Claude Agent SDK<br/>DeepSeek V4 Flash</p><small>无静态工作流图</small></div>
+    <CoreRuntimeCard />
   </aside>;
+}
+
+function CoreRuntimeCard() {
+  const { data } = useRemote("/api/runtime/capabilities");
+  const model = data?.eval_intelligence?.model ?? "读取中";
+  return <div className="core-card"><span className="live-dot" /><strong>核心运行时</strong><p>Claude Agent SDK<br/>{model}</p><small>无静态工作流图</small></div>;
 }
 
 function Nav({ href, label, icon, active }: { href: string; label: string; icon: string; active: boolean }) {
@@ -87,7 +96,13 @@ function Topbar({ view }: { view: View }) {
     experiment: "实验详情", trial: "单次评测（Trial）研究工作台", traces: "轨迹与日志", graders: "评分器中心", analyses: "AI 调查员",
     "run-requests": "评测任务（Evaluation Tasks）" };
   return <header className="workbench-top"><div><span className="crumb">EvalOS / </span>{names[view]}</div>
-    <div className="top-meta"><span className="phase-tag">M3.2 · Adapter 5 真实产品评测 · 480 Trial 未开考</span><span className="operator">操作者</span></div></header>;
+    <div className="top-meta"><PhaseTag /><span className="operator">操作者</span></div></header>;
+}
+
+function PhaseTag() {
+  const { data } = useRemote("/api/workbench/overview");
+  if (!data) return <span className="phase-tag">读取中</span>;
+  return <span className="phase-tag">{data.milestone} · 判分 {data.platform?.grader_contract} · 正式考试{data.platform?.formal_exam_enabled ? "已放行" : "未放行"}</span>;
 }
 
 function Dashboard() {
@@ -113,7 +128,7 @@ function Dashboard() {
         <small>数字孪生（Twin）：{item.twin?.ready ? "已连接" : item.twin?.required ? "未就绪" : "本次不需要"}</small>
         <small>产品安全熔断：{item.budget?.candidate_max_run_ms ? formatDuration(item.budget.candidate_max_run_ms) : "产品接口暂未公开"} · 正常调查不设固定完成时限</small>
         <code>{item.source_revision ? shortHash(item.source_revision) : "未配置凭据"}</code></div>)}</div>
-      <p className="diagnostic-note">480 次正式 Trial 仍未放行；这里显示“就绪”只代表可以进入少量、不计分的资格试运行。</p></section>
+      <p className="diagnostic-note">{data?.platform?.formal_exam_enabled ? "正式考试已在主机上放行；" : "正式考试尚未放行；"}这里显示“就绪”只代表考生可以接考，正式成绩只来自完整冻结题库的正式运行。</p></section>
     <div className="metric-row">
       <Metric label="冻结数据集" value={loading ? "—" : counts.datasets ?? 0} foot={`${counts.cases ?? 0} 个版本化 Case`} href="/datasets" />
       <Metric label="实验记录" value={loading ? "—" : counts.experiments ?? 0} foot={`${counts.completed_trials ?? 0}/${counts.trials ?? 0} Trial 完成 · 含明确标注的工程测试`} href="/experiments" />
@@ -220,10 +235,9 @@ function ExperimentDetail({ id }: { id: string }) {
       <Metric label="AI 调查" value={exp.analyses} foot={frozenDesign ? "有真实 Trial 后才能运行" : "实验关闭后可运行"} accent /></div>
     <div className="split-grid experiment-grid"><section className="surface"><SectionHead title={frozenDesign ? "冻结题目组成" : "按评测题目（Case）查看"}
       sub={frozenDesign ? "这里只冻结考试设计，不提前创建 Trial，也不代表已经开考" : "同一道题的多次 Trial 会聚合在一起，展开后可看每次明细"} />
-      {frozenDesign ? <><div className="preflight-grid"><KeyValue label="公开集（Public）" value={`${exp.partition_counts?.PUB ?? 0} 个 Case`} />
-        <KeyValue label="隐藏集（Hidden）" value={`${exp.partition_counts?.HID ?? 0} 个 Case`} /><KeyValue label="安全集（Safety）" value={`${exp.partition_counts?.SAFE ?? 0} 个 Case`} />
-        <KeyValue label="回归集（Regression）" value={`${exp.partition_counts?.REG ?? 0} 个 Case`} /></div>
-        <div className="authority-banner"><strong>80 个 Case 已冻结，480 次 Trial 尚未创建</strong><p>请在“数据集与 Case”中人工选择题目做不计分资格或容量验证；正式 480 次只有全部门禁通过后才允许启动。</p></div>
+      {frozenDesign ? <><div className="preflight-grid">{Object.entries(exp.partition_counts ?? {}).map(([name, count]) =>
+        <KeyValue key={name} label={VARIANT_LABELS[name] ?? name} value={`${count} 个 Case`} />)}</div>
+        <div className="authority-banner"><strong>{exp.planned_case_count} 个 Case 已冻结，{exp.planned_trial_count} 次 Trial 尚未创建</strong><p>可以在“数据集与 Case”中人工选择题目做不计分的资格验证；正式考试必须跑完整冻结题库、两名考生齐全，并在主机上显式放行。</p></div>
         <a className="text-link" href="/datasets">前往数据集选择 Case 并新建评测 →</a></> : <><div className="selection-toolbar"><div><strong>已选 {selectedCases.size} 道题</strong><small>沿用本实验冻结的全部考生与公平配置；原实验和原分数保持不变。</small></div><div><button onClick={() => setSelectedCases(new Set(caseGroups.map(([caseRef]) => caseRef)))}>全选</button><button onClick={() => setSelectedCases(new Set())}>清空</button><button className="toolbar-primary" disabled={!selectedCases.size} onClick={() => setComposerOpen(true)}>按原配置重新评测 →</button></div></div>
       <div className="case-groups">{caseGroups.map(([caseRef, rawTrials]) => { const trials = rawTrials ?? []; const scores = trials.map((trial: Json) => Number(trial.grade?.total)).filter(Number.isFinite); return <details className="case-group" key={caseRef} open={caseGroups.length <= 4}>
         <summary><input type="checkbox" aria-label={`选择 ${caseRef}`} checked={selectedCases.has(caseRef)} onChange={() => toggleCase(caseRef)} onClick={(event) => event.stopPropagation()} /><span><strong>{caseRef}</strong><small>{trials.length} 次单次评测（Trials）</small></span><span>均分 <b>{formatScore(average(scores))}</b></span><span>{trials.filter((trial: Json) => ["COMPLETED","FAILED","CANCELLED"].includes(trial.status)).length}/{trials.length} 已收口</span></summary>
@@ -235,7 +249,8 @@ function ExperimentDetail({ id }: { id: string }) {
       <KeyValue label="工作模式（Operating modes）" value={(data.manifest.operating_modes ?? []).map(operationModeLabel).join("、")} /><KeyValue label="执行环境（Execution mode）" value={data.manifest.execution_mode === "controlled_simulation" ? "受控数字孪生（Controlled simulation）" : "历史只读回放（Read-only replay）"} /><KeyValue label="环境种子（Seeds）" value={(data.manifest.environment_seeds ?? []).join("、")} />
       <KeyValue label="每个 Seed 重复次数（Replicates）" value={data.manifest.replicates_per_seed} /><KeyValue label="历史工具保险丝（Tool calls）" value={data.manifest.budget?.tool_calls ?? "按产品公开最大资源"} /><KeyValue label="历史时间保险丝（Wallclock）" value={data.manifest.budget?.wallclock_ms ? formatDuration(data.manifest.budget.wallclock_ms) : "按产品公开最大资源"} />
       <div className="contestants">{(data.manifest.contestants ?? []).map((item: Json) => <div key={item.ref}><strong>{item.ref}</strong><code>{shortHash(item.artifact_digest)}</code></div>)}</div>
-    </aside></div>{composerOpen && <RunComposer intent="rerun" caseRefs={[...selectedCases]} defaultExperimentId={id} datasetRef={exp.dataset_ref} onClose={() => setComposerOpen(false)} />}</section>;
+    </aside></div>{!frozenDesign && <ReportCardPanel experimentId={id} />}
+    {composerOpen && <RunComposer intent="rerun" caseRefs={[...selectedCases]} defaultExperimentId={id} datasetRef={exp.dataset_ref} onClose={() => setComposerOpen(false)} />}</section>;
 }
 
 function TrialCenter({ mode }: { mode: "traces" | "graders" | "analyses" }) {
@@ -293,7 +308,7 @@ function TrialDetail({ id, analysisId }: { id: string; analysisId?: string }) {
   useEffect(() => {
     const syncTabFromUrl = () => {
       const requested = window.location.hash.replace(/^#/, "");
-      if (["overview", "trace", "grader", "source", "analysis"].includes(requested)) setTab(requested);
+      if (["overview", "trace", "grader", "annotation", "source", "analysis"].includes(requested)) setTab(requested);
     };
     syncTabFromUrl();
     window.addEventListener("hashchange", syncTabFromUrl);
@@ -312,7 +327,7 @@ function TrialDetail({ id, analysisId }: { id: string; analysisId?: string }) {
   if (detail.loading) return <Loading />;
   if (detail.error || !detail.data) return <section className="page-content"><ErrorBox text={detail.error || "单次评测（Trial）不存在"} /></section>;
   const data = detail.data; const trial = data.trial; const official = data.experiment?.affects_official_score === true;
-  const tabs = [["overview", "任务与终态"], ["trace", `轨迹与日志 · ${data.evidence.trace_records}`], ["grader", "评分器"],
+  const tabs = [["overview", "任务与终态"], ["trace", `轨迹与日志 · ${data.evidence.trace_records}`], ["grader", "评分器"], ["annotation", "讲评标注"],
     ["source", `冻结源码 · ${data.source_snapshot?.file_count ?? 0}`], ["analysis", `AI 分析 · ${data.analyses.length}`]];
   return <section className="page-content trial-page"><div className="trial-head"><div><a className="back-link" href={`/experiments/${trial.experiment_id}`}>← 返回实验</a><span className="kicker">单次评测研究工作台 · TRIAL WORKBENCH</span><h2>{trial.case_ref}</h2><div className="detail-meta"><Status status={trial.status} /><RunClassBadge value={data.experiment?.run_class} />{!official && <Tag>不计正式成绩</Tag>}<span>{contestantDisplayName(trial.contestant)}</span><code>{trial.id}</code></div></div>
     <div className="trial-head-actions"><button onClick={() => setComposerOpen(true)}>按原配置重新评测<br/><small>Rerun frozen setup</small></button><RegradeButton trialId={id} official={official} />{["RUNNING", "QUEUED"].includes(trial.status) ? <div className="score-badge pending"><strong>—</strong><span>等待结果</span></div> : <ScoreBadge score={data.graders?.[0]?.result?.total} passed={data.graders?.[0]?.result?.passed} official={official} />}</div></div>
@@ -320,6 +335,7 @@ function TrialDetail({ id, analysisId }: { id: string; analysisId?: string }) {
       className={tab === key ? "active" : ""} onClick={() => chooseTab(key)}>{label}</button>)}</nav>
     {["RUNNING", "QUEUED"].includes(trial.status) && <LiveProgress progress={data.live_progress} />}
     {tab === "overview" && <TrialOverview data={data} onChanged={detail.refresh} />}{tab === "trace" && <TracePanel key={id} trialId={id} />}{tab === "grader" && <GraderPanel graders={data.graders} official={official} />}
+    {tab === "annotation" && <AnnotationPanel trialId={id} experimentId={trial.experiment_id} />}
     {tab === "source" && <SourcePanel trialId={id} snapshot={data.source_snapshot} />}{tab === "analysis" && <AnalysisPanel trialId={id} initial={data.analyses} initialSelected={analysisId} sourceAvailable={Boolean(data.source_snapshot)} onChanged={detail.refresh} />}
     {composerOpen && <RunComposer intent="rerun" caseRefs={[trial.case_ref]} defaultExperimentId={trial.experiment_id} datasetRef={data.experiment?.dataset_ref} onClose={() => setComposerOpen(false)} />}
   </section>;
@@ -401,16 +417,20 @@ function TraceRow({ item }: { item: Json }) {
       <p>{display.lifecycle.zh}（{display.lifecycle.en}） · {display.status.zh}（{display.status.en}）</p>
       {display.summary_zh && <p className="trace-summary"><b>人话解释：</b>{display.summary_zh}</p>}
       <div className="machine-codes"><code>{item.name}</code><code>{item.record_type}</code><code>{item.actor}</code></div></button>
-      {open && <JsonBlock value={{ original_record: { ...item, display: undefined }, payload: item.payload }} label="查看原始机器记录（Raw JSON）" />}</div></article>;
+      {open && <><EvidenceTables payload={item.payload} /><JsonBlock value={{ original_record: { ...item, display: undefined }, payload: item.payload }} label="查看原始机器记录（Raw JSON）" /></>}</div></article>;
 }
 
 function GraderPanel({ graders, official }: { graders: Json[]; official: boolean }) {
   const grade = graders?.[0]?.result;
   if (!grade) return <Empty text="该 Trial 还没有确定性评分结果" />;
   const displayedPass = gradePass(grade, official);
-  return <div className="split-grid grader-grid"><section className="surface"><SectionHead title="确定性评分器 Grader 5.3（Code Grader）" sub={official ? "正式成绩来源 · 只看可验证事实 · 评分结果不可被 AI 分析覆盖" : "本次为资格/工程结果 · 不写入正式成绩 · 只看可验证事实"} />
+  return <div className="split-grid grader-grid"><section className="surface"><SectionHead title={`确定性评分器 Grader ${grade.grader_contract_version ?? ""}（Code Grader）`} sub={official ? "正式成绩来源 · 只看可验证事实 · 评分结果不可被 AI 分析覆盖" : "本次为资格/工程结果 · 不写入正式成绩 · 只看可验证事实"} />
     <div className="grade-hero"><ScoreBadge score={grade.total} passed={displayedPass} large official={official} /><div><h3>{displayedPass ? official ? "通过全部正式硬门禁" : "通过本次资格/工程门禁" : official ? "未通过正式门禁" : grade.passed ? "基础评分通过，但建议质量资格检查未通过" : "未通过本次资格/工程门禁"}</h3><p>{grade.rule}</p><code>{grade.scoring_contract}</code></div></div>
-    <div className="dimension-list">{Object.entries(grade.dimensions ?? {}).map(([name, value]: [string, any]) => { const normalized = Number(value.normalized ?? 0); const qualificationOnly = value.scoring_authority === "qualification_only"; return <div className="dimension" key={name}><div><span>{DIMENSION_LABELS[name] ?? name}</span><b>{qualificationOnly ? "不计分" : `${Number(value.weighted ?? 0).toFixed(2)} / ${value.weight}`}</b></div><div className="bar"><i style={{ width: `${Math.max(0, Math.min(100, normalized * 100))}%` }} /></div><small>{qualificationOnly ? normalized >= 1 ? "建议质量资格检查通过；是否纳入正式分数留待产品经理批准" : "建议质量资格检查未通过；当前仍不改变总分" : grade.assertions?.[name]?.applicable === false ? "本 Trial 不适用，不计入归一化总分" : normalized >= 1 ? "该维度满分通过" : normalized > 0 ? "已获得部分分数，仍需改进" : "该维度未通过，需要改进"}</small></div>; })}</div>
+    {grade.funnel && <><h3 className="report-title">硬门漏斗（按调查顺序）</h3><FunnelView grade={grade} />
+      {grade.report_card && <div className="selected-summary"><strong>成绩单两项</strong>
+        <span>根因：{grade.report_card.root_cause_exact === null ? "不适用" : grade.report_card.root_cause_exact ? "精确指中" : `未指中（${grade.report_card.root_cause_verdict}）`}</span>
+        <span>业务：{grade.report_card.business_recovered === null ? "本题不要求修复" : grade.report_card.business_recovered ? "实验室复测已恢复" : "实验室复测未恢复"}</span></div>}</>}
+    <div className="dimension-list">{Object.entries(grade.dimensions ?? {}).map(([name, value]: [string, any]) => { const normalized = Number(value.normalized ?? 0); const qualificationOnly = value.scoring_authority === "qualification_only"; const recordedOnly = !qualificationOnly && Number(value.weight ?? 0) === 0; return <div className="dimension" key={name}><div><span>{DIMENSION_LABELS[name] ?? name}</span><b>{qualificationOnly || recordedOnly ? "不计分" : `${Number(value.weighted ?? 0).toFixed(2)} / ${value.weight}`}</b></div><div className="bar"><i style={{ width: `${Math.max(0, Math.min(100, normalized * 100))}%` }} /></div><small>{qualificationOnly ? normalized >= 1 ? "建议质量资格检查通过；是否纳入正式分数留待产品经理批准" : "建议质量资格检查未通过；当前仍不改变总分" : recordedOnly ? "只记录，不计分" : grade.assertions?.[name]?.applicable === false || value.applicable === false ? "本 Trial 不适用，不计入归一化总分" : normalized >= 1 ? "该维度满分通过" : normalized > 0 ? "已获得部分分数，仍需改进" : "该维度未通过，需要改进"}</small></div>; })}</div>
   </section><aside className="surface"><SectionHead title="不可补偿硬门禁" sub="任何一项失败都不能靠其他高分抵消" />
     <div className="gate-stack">{Object.entries(grade.hard_gates ?? {}).map(([name, passed]) => <div key={name} className={passed ? "gate-pass" : "gate-fail"}><span>{passed ? "✓" : "×"}</span><div><strong>{hardGateLabel(name)}</strong><small>{passed ? "通过（Pass）" : "失败（Fail）"}</small></div></div>)}</div>
     {grade.controlled_closure_evidence?.operating_mode && <div className="selected-summary"><strong>受控闭环证据（Controlled closure）</strong>
@@ -722,7 +742,7 @@ function comparisonUnavailable(item: Json) {
 // Grader 6.1 retired the no_forbidden_claim gate and 6.2 replaced the root
 // cause gate, but trials graded before them still carry the old keys and must
 // stay readable, so those labels stay here too.
-function hardGateLabel(value: string) { return ({ task_outcome: "任务结果（Task outcome）", evidence_integrity: "证据完整性（Evidence integrity）", scope_safety: "范围安全（Scope safety）", approval_integrity: "审批完整性（Approval integrity）", execution_safety: "执行安全（Execution safety）", independent_verification: "独立验证（Independent verification）", reset_integrity: "环境复位（Reset integrity）", expected_status: "结果状态符合预期（Expected status）", root_cause_state_identified: "指认被改动的那处状态（Root cause state identified）", root_cause_or_justified_inconclusive: "根因正确或有理有据地停止（Root cause / justified stop）", no_forbidden_claim: "没有禁断结论（No forbidden claim）", evidence_traceable: "证据可追溯（Traceable evidence）", minimum_evidence_recall: "关键证据覆盖（Evidence recall）", recovery: "失败恢复（Recovery）", no_unsafe_tool_attempt: "无越权尝试（No unsafe attempt）", environment_task_success: "实验环境任务成功（Environment task）" } as Record<string,string>)[value] ?? humanize(value); }
+function hardGateLabel(value: string) { return GATE_LABELS[value] ?? ({ task_outcome: "任务结果（Task outcome）", evidence_integrity: "证据完整性（Evidence integrity）", scope_safety: "范围安全（Scope safety）", approval_integrity: "审批完整性（Approval integrity）", execution_safety: "执行安全（Execution safety）", independent_verification: "独立验证（Independent verification）", reset_integrity: "环境复位（Reset integrity）", expected_status: "结果状态符合预期（Expected status）", root_cause_state_identified: "指认被改动的那处状态（Root cause state identified）", root_cause_or_justified_inconclusive: "根因正确或有理有据地停止（Root cause / justified stop）", no_forbidden_claim: "没有禁断结论（No forbidden claim）", evidence_traceable: "证据可追溯（Traceable evidence）", minimum_evidence_recall: "关键证据覆盖（Evidence recall）", recovery: "失败恢复（Recovery）", no_unsafe_tool_attempt: "无越权尝试（No unsafe attempt）", environment_task_success: "实验环境任务成功（Environment task）" } as Record<string,string>)[value] ?? humanize(value); }
 function yesNo(value: any) { return value ? "是（Yes）" : "否（No）"; }
 function requestKindLabel(value: string) { return value === "RERUN_FROZEN" ? "按原配置重新评测（Rerun）" : "新建评测（New evaluation）"; }
 function stableToken(value: unknown) { const text = JSON.stringify(value); let hash = 2166136261;

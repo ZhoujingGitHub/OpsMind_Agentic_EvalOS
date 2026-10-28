@@ -2,12 +2,13 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  CASES, M2_CASES, OPS_CASES, OPS_CATEGORIES, OPS_DATASET_REF, OPS_SUITE_REF, CandidateRelayBroker, DeterministicGradingService, EvalStore, EvaluationLedger, FrozenApprovalOracle, PrivateLabelStore, TrialRunner,
+  CASES, M2_CASES, OPS_CASES, OPS_CATEGORIES, OPS_DATASET_REF, OPS_SUITE_REF, CandidateRelayBroker, DeterministicGradingService, EvaluationLedger, FrozenApprovalOracle, PrivateLabelStore, TrialRunner,
   auditableGraderRunView, blindExperimentView, blindGraderRunView, blindTraceView, blindTrialView,
   expertCalibrationFromConsensusSamples, createEvalRegistry, createCaseEnvironment, createTestDouble,
   evaluationDecisionReport, evaluationEvidenceTraceView, explainTraceRecord, TRACE_FILTERS, readSnapshotFile, sha256,
   auditTrialEfficiency, candidateExecutionBudget, trialSettlementBudget, caseRunnability,
-  CANDIDATE_PRESENCE_PATH, CandidatePresenceRegistry, assertCandidateBound, GRADER_CONTRACT_VERSION,
+  CANDIDATE_PRESENCE_PATH, CandidatePresenceRegistry, assertCandidateBound, GRADER_CONTRACT_VERSION, examReportCard,
+  openControlStore,
   assertCandidatePreflight, DEPLOYMENT_ATTESTATION_CONTRACT, trustedDeploymentAttestation,
 } from "../../../packages/kernel/src/index.mjs";
 import {
@@ -209,18 +210,7 @@ export function createApp({
   const candidatePresenceRegistry = Object.keys(candidatePresenceCandidates).length
     ? new CandidatePresenceRegistry({ candidates: candidatePresenceCandidates })
     : null;
-  const store = new EvalStore({ databasePath, runtimeRoot,
-    migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_m15.sql"),
-    migrationPaths: [path.join(ROOT, "infra", "migrations", "sqlite", "002_m25_workbench.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "003_m26_run_control.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "004_m31_candidate_relay.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "005_m31_seed_identity.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "006_m31_trial_attempt_audit.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "007_m32_run_resilience.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "008_m32_cleanup_reconciliation.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "009_m32_capacity_rehearsal.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "010_m32_relay_transport_buffer.sql"),
-      path.join(ROOT, "infra", "migrations", "sqlite", "011_m32_relay_nonce_retention.sql")] });
+  const store = openControlStore({ databasePath, runtimeRoot });
   const labels = new PrivateLabelStore({ databasePath: privateLabelDatabasePath,
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const privateLabelHash = labels.publishRegistry(registry);
@@ -1595,6 +1585,47 @@ export function createApp({
       if (request.method === "GET" && url.pathname === "/api/workbench/trials") {
         return json({ items: workbenchTrials() }, 200, cors);
       }
+      // The report card (24 甲): by fault category, never a total. Identities stay
+      // blinded until the experiment is closed, exactly as on the trial list.
+      const reportCardMatch = url.pathname.match(/^\/api\/workbench\/experiments\/([^/]+)\/report-card$/);
+      if (request.method === "GET" && reportCardMatch) {
+        if (!isAdmin(request)) return json({ error: "authenticated workbench session required" }, 401, cors);
+        const experiment = store.getExperiment(decodeURIComponent(reportCardMatch[1]));
+        if (!experiment) return json({ error: "experiment not found" }, 404, cors);
+        const items = store.listTrials(experiment.id).map((trial) => {
+          const audited = auditTrial(trial, experiment);
+          const grade = gradeFor(trial.id)?.result ?? null;
+          const truth = labels.getLabel(trial.case_ref)?.ground_truth ?? {};
+          return { trial: { id: trial.id, contestant_ref: audited.contestant, case_ref: trial.case_ref, status: trial.status },
+            case_profile: { category: truth.category ?? null, variant: truth.variant ?? null, scenario_id: truth.scenario_id ?? null },
+            grade: grade?.grader_contract_version === "7.0" ? grade : null,
+            analyses: store.listAnalysisRuns(trial.id).filter((item) => item.status === "COMPLETED"),
+            annotations: store.listTrialAnnotations(trial.id, { latestPerAnnotator: true }) };
+        });
+        return json({ experiment_id: experiment.id, identity_state: experiment.status === "COMPLETED" ? "REVEALED_AFTER_CLOSE" : "BLINDED",
+          ...examReportCard(items) }, 200, cors);
+      }
+      const trialAnnotationsMatch = url.pathname.match(/^\/api\/workbench\/trials\/([^/]+)\/annotations$/);
+      if (trialAnnotationsMatch) {
+        if (!isAdmin(request)) return json({ error: "authenticated workbench session required" }, 401, cors);
+        const trialId = decodeURIComponent(trialAnnotationsMatch[1]);
+        if (!store.getTrial(trialId)) return json({ error: "trial not found" }, 404, cors);
+        if (request.method === "GET") return json({ items: store.listTrialAnnotations(trialId) }, 200, cors);
+        if (request.method === "POST") {
+          const body = await request.json();
+          let item;
+          try {
+            item = store.addTrialAnnotation({ trialId, annotator: body.annotator, annotatorKind: body.annotator_kind ?? "human",
+              verdict: body.verdict, firstFailureGate: body.first_failure_gate ?? null, tags: body.tags ?? [], note: body.note ?? "" });
+          } catch (error) {
+            return json({ error: error.message }, 400, cors);
+          }
+          ledger.append({ entityType: "trial_annotation", entityId: item.id, action: "annotation.recorded",
+            payload: { trial_id: trialId, annotator: item.annotator, annotator_kind: item.annotator_kind, verdict: item.verdict,
+              official_score_mutated: false } });
+          return json({ item }, 201, cors);
+        }
+      }
       const workbenchExperimentMatch = url.pathname.match(/^\/api\/workbench\/experiments\/([^/]+)$/);
       if (request.method === "GET" && workbenchExperimentMatch) {
         const id = decodeURIComponent(workbenchExperimentMatch[1]);
@@ -1678,8 +1709,14 @@ export function createApp({
         if (!trial || trial.status !== "COMPLETED") return json({ error: "completed trial is required" }, 400, cors);
         const experiment = store.getExperiment(trial.experiment_id);
         if (experiment?.status !== "COMPLETED") return json({ error: "experiment must be closed before AI analysis" }, 409, cors);
-        const snapshot = store.getTrialSourceSnapshot(trial.id);
-        if (!snapshot) return json({ error: "frozen source snapshot is required" }, 409, cors);
+        // A trial is bound to the frozen source of exactly the version that ran it:
+        // same candidate, same source revision, same artifact digest. Nothing else.
+        const contestant = experiment.manifest.contestants?.find((item) => item.ref === trial.contestant_ref);
+        const registered = contestant ? store.findSourceSnapshot({ contestantRef: contestant.ref,
+          sourceRevision: contestant.source_revision, artifactDigest: contestant.artifact_digest }) : null;
+        const snapshot = store.getTrialSourceSnapshot(trial.id)
+          ?? (registered ? store.attachTrialSourceSnapshot(trial.id, registered.snapshot_ref) : null);
+        if (!snapshot) return json({ error: "frozen source snapshot of the candidate version that ran this trial is not registered" }, 409, cors);
         const idempotencyKey = request.headers.get("idempotency-key") ?? body.idempotency_key;
         const created = store.createAnalysisRun({ trialId: trial.id, idempotencyKey, requestedBy: body.requested_by,
           prompt: body.prompt, mode: body.mode, sourceSnapshotRef: snapshot.snapshot_ref,

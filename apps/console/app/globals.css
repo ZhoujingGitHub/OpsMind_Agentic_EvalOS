@@ -79,3 +79,52 @@ a { color: inherit; text-decoration: none; } code, pre { font-family: var(--mono
 @media (max-width: 980px) { .operations-banner { grid-template-columns: 1fr; }.operations-kpis, .decision-kpis { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 760px) { .side-nav { grid-template-columns: repeat(4,1fr); }.operations-kpis, .decision-kpis { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 760px) { .live-progress-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }.live-progress-head { align-items: flex-start; } }
+
+/* ---- M3.3 report card, funnel, annotations, evidence tables ---- */
+.report-card { display: grid; gap: 18px; margin-top: 18px; }
+.report-table td small, .compare-table td small { display: block; color: var(--muted); font-size: 10px; }
+.report-cell { min-width: 190px; } .report-cell.empty { color: var(--muted); }
+.report-cell > div { display: grid; grid-template-columns: 52px 58px 1fr; align-items: center; gap: 8px; margin: 3px 0; font-size: 12px; }
+.report-cell > div small { color: var(--muted); font-size: 10px; } .report-warn { display: block; margin-top: 4px; color: var(--amber); font-size: 10px; }
+.mini-bar { height: 6px; border-radius: 99px; background: #ecece6; overflow: hidden; display: block; }
+.mini-bar i { display: block; height: 100%; border-radius: 99px; background: var(--green); }
+.mini-bar.tone-amber i { background: var(--amber); } .mini-bar.tone-red i { background: var(--blue); }
+.funnel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 22px; }
+.funnel-grid h3 { margin: 0 0 10px; font-size: 13px; }
+.funnel-bars { display: grid; gap: 9px; }
+.funnel-step { display: grid; grid-template-columns: 54px minmax(0, 1fr); column-gap: 10px; row-gap: 3px; font-size: 12px; }
+.funnel-stage { grid-row: span 3; align-self: start; padding: 3px 6px; border-radius: 6px; background: var(--mint); color: var(--green-dark); font-size: 10px; text-align: center; }
+.funnel-track { position: relative; height: 9px; border-radius: 99px; background: #ecece6; overflow: hidden; display: block; }
+.funnel-track i { position: absolute; inset: 0 auto 0 0; background: #9cc8b2; } .funnel-track em { position: absolute; inset: 0 auto 0 0; background: var(--red); }
+.funnel-step small { color: var(--muted); font-size: 10px; }
+.trial-funnel { display: grid; gap: 6px; margin: 14px 0; }
+.trial-funnel-step { display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; background: #f6f6f1; }
+.trial-funnel-step > span { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: #e3e3dc; font: 700 11px/1 var(--mono); }
+.trial-funnel-step div { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 12px; }
+.trial-funnel-step small { color: var(--muted); } .trial-funnel-step em { font-style: normal; font-size: 11px; color: var(--muted); }
+.trial-funnel-step.pass > span { background: var(--mint); color: var(--green-dark); }
+.trial-funnel-step.fail { background: var(--red-soft); } .trial-funnel-step.fail > span { background: var(--red); color: white; }
+.trial-funnel-step.first { box-shadow: inset 3px 0 var(--red); } .trial-funnel-step.na { opacity: .55; }
+.compare-cell { display: block; padding: 6px 8px; border-radius: 8px; font-size: 12px; font-weight: 650; }
+.compare-cell.pass { background: var(--mint); color: var(--green-dark); } .compare-cell.fail { background: var(--red-soft); color: var(--red); }
+.compare-cell.pending { background: #ecece6; color: var(--muted); }
+.taxonomy-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+.taxonomy-block ul { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 5px; }
+.taxonomy-block li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 9px; border-radius: 8px; background: #f6f6f1; font-size: 12px; }
+.muted { color: var(--muted); font-size: 12px; }
+.annotation-panel label { display: grid; gap: 6px; margin: 12px 0; font-size: 12px; font-weight: 650; }
+.annotation-panel input, .annotation-panel select, .annotation-panel textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); }
+.annotation-progress { color: var(--muted); font-size: 11px; }
+.verdict-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.verdict-row button { padding: 9px 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); font-size: 12px; font-weight: 680; }
+.verdict-row button.active { border-color: var(--green); background: var(--mint); color: var(--green-dark); }
+.saved-hint { color: var(--green); font-size: 12px; align-self: center; }
+.annotation-list { display: grid; gap: 9px; }
+.annotation-item { padding: 10px 12px; border-radius: 10px; background: #f6f6f1; display: grid; gap: 4px; font-size: 12px; }
+.annotation-item small { display: block; color: var(--muted); font-size: 10px; } .annotation-item p { margin: 2px 0 0; }
+.annotation-item.verdict-pass { box-shadow: inset 3px 0 var(--green); } .annotation-item.verdict-fail { box-shadow: inset 3px 0 var(--red); }
+.evidence-tables { display: grid; gap: 10px; margin: 10px 0; }
+.evidence-table strong { display: block; margin-bottom: 5px; font-size: 11px; }
+.evidence-table table { width: 100%; border-collapse: collapse; font: 11px/1.4 var(--mono); }
+.evidence-table th, .evidence-table td { padding: 4px 7px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+@media (max-width: 720px) { .report-cell > div { grid-template-columns: 44px 52px 1fr; } .trial-funnel-step div { grid-template-columns: 1fr; } }

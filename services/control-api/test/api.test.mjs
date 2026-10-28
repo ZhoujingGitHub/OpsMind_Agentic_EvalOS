@@ -1010,3 +1010,52 @@ test("服务入口支持独立私有标签库", () => {
   assert.match(source, /EVALOS_PRIVATE_LABEL_DATABASE_PATH/);
   assert.match(source, /EVALOS_RUNTIME_ROOT/);
 });
+
+test("讲评标注只追加不改分，按大类成绩单在实验关闭前保持盲态", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-api-report-card-"));
+  const app = createApp({ databasePath: path.join(root, "control.sqlite"), privateLabelDatabasePath: path.join(root, "private.sqlite"),
+    runtimeRoot: root, apiToken: "control-secret", bootstrapM3Design: true, formalM3RunEnabled: false });
+  try {
+    const headers = { authorization: "Bearer control-secret", "content-type": "application/json" };
+    const templates = await (await app.handler(new Request("http://local/api/workbench/run-templates", { headers }))).json();
+    const frozen = app.store.getExperiment(templates.items[0].id);
+    const runManifest = structuredClone(frozen.manifest);
+    const caseRef = runManifest.case_refs[0];
+    runManifest.name = "成绩单与讲评标注回归";
+    runManifest.case_refs = [caseRef];
+    runManifest.case_partitions = Object.fromEntries(Object.entries(runManifest.case_partitions)
+      .map(([name, refs]) => [name, refs.filter((ref) => ref === caseRef)]));
+    runManifest.environment_seeds = [runManifest.environment_seeds[0]];
+    runManifest.replicates_per_seed = 1;
+    const experiment = app.store.createExperiment(runManifest, "report-card-experiment").experiment;
+    const trials = app.store.listTrials(experiment.id);
+    assert.equal(trials.length, 2);
+    const url = `http://local/api/workbench/trials/${trials[0].id}/annotations`;
+
+    assert.equal((await app.handler(new Request(url))).status, 401);
+    const invalid = await app.handler(new Request(url, { method: "POST", headers,
+      body: JSON.stringify({ annotator: "pm", verdict: "maybe" }) }));
+    assert.equal(invalid.status, 400);
+    for (const [verdict, tags] of [["pending", []], ["fail", ["根因指认过宽"]]]) {
+      const created = await app.handler(new Request(url, { method: "POST", headers, body: JSON.stringify({
+        annotator: "pm", verdict, first_failure_gate: "root_cause_exact", tags, note: "复核" }) }));
+      assert.equal(created.status, 201);
+    }
+    const history = (await (await app.handler(new Request(url, { headers }))).json()).items;
+    assert.deepEqual(history.map((item) => item.verdict), ["pending", "fail"]);
+
+    const response = await app.handler(new Request(`http://local/api/workbench/experiments/${experiment.id}/report-card`, { headers }));
+    assert.equal(response.status, 200);
+    const card = await response.json();
+    assert.equal(card.contract, "evalos-exam-report-card/1.0");
+    assert.equal(card.identity_state, "BLINDED");
+    assert.equal(JSON.stringify(card).includes("agent-harness-v2"), false);
+    assert.equal(card.candidates.length, 2);
+    assert.equal(card.same_case.length, 1);
+    assert.ok(card.same_case[0].category);
+    assert.ok(card.same_case[0].variant);
+    // Only the latest note per annotator counts toward the taxonomy.
+    assert.deepEqual(card.taxonomy.annotation_tags, [{ name: "根因指认过宽", count: 1 }]);
+    assert.deepEqual(card.taxonomy.annotation_progress, { trials: 2, annotated: 1, human_reviewed: 1 });
+  } finally { app.close(); }
+});

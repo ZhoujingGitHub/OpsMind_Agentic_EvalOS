@@ -742,6 +742,12 @@ export class EvalStore {
     return this.getSourceSnapshot(snapshotRef);
   }
 
+  findSourceSnapshot({ contestantRef, sourceRevision, artifactDigest }) {
+    const row = this.db.prepare(`SELECT snapshot_ref FROM source_snapshots WHERE contestant_ref=? AND source_revision=?
+      AND artifact_digest=? ORDER BY created_at DESC LIMIT 1`).get(contestantRef, sourceRevision, artifactDigest);
+    return row ? this.getSourceSnapshot(row.snapshot_ref) : null;
+  }
+
   getSourceSnapshot(snapshotRef) {
     const row = this.db.prepare("SELECT * FROM source_snapshots WHERE snapshot_ref=?").get(snapshotRef);
     return row ? { ...row, manifest: parseJson(row.manifest_json, {}) } : null;
@@ -769,7 +775,7 @@ export class EvalStore {
   }
 
   createAnalysisRun({ trialId, idempotencyKey, requestedBy = "evalos-operator", prompt,
-    mode = "case_diagnosis", model = "deepseek-v4-flash", sourceSnapshotRef = null, budget = {} }) {
+    mode = "case_diagnosis", model = "deepseek-flash", sourceSnapshotRef = null, budget = {} }) {
     if (!this.getTrial(trialId)) throw new Error(`trial not found: ${trialId}`);
     if (!idempotencyKey || !prompt) throw new Error("analysis idempotency key and prompt are required");
     if (!new Set(["case_diagnosis", "score_explanation", "optimization_research"]).has(mode)) throw new Error("invalid analysis mode");
@@ -857,6 +863,34 @@ export class EvalStore {
     const rows = this.db.prepare("SELECT id FROM analysis_runs WHERE status='RUNNING'").all();
     for (const row of rows) this.failAnalysisRun(row.id, "analysis process interrupted before an immutable result was recorded");
     return rows.map((row) => row.id);
+  }
+
+  // Error-analysis notes ("讲评标注"). Append-only; the latest note of an
+  // annotator supersedes their earlier ones when read.
+  addTrialAnnotation({ trialId, annotator, annotatorKind = "human", verdict, firstFailureGate = null,
+    tags = [], note = "" }) {
+    if (!this.getTrial(trialId)) throw new Error(`trial not found: ${trialId}`);
+    if (!annotator || typeof annotator !== "string") throw new Error("annotator is required");
+    if (!["human", "ai_first_pass"].includes(annotatorKind)) throw new Error("invalid annotator kind");
+    if (!["pass", "fail", "pending"].includes(verdict)) throw new Error("verdict must be pass, fail or pending");
+    const cleanTags = [...new Set((Array.isArray(tags) ? tags : []).map((item) => String(item).trim()).filter(Boolean))];
+    const createdAt = isoNow();
+    const id = entityId("annotation", `${trialId}:${annotator}:${createdAt}:${randomBytes(6).toString("hex")}`);
+    this.db.prepare(`INSERT INTO trial_annotations(id,trial_id,annotator,annotator_kind,verdict,first_failure_gate,
+      tags_json,note,created_at) VALUES(?,?,?,?,?,?,?,?,?)`).run(id, trialId, annotator, annotatorKind, verdict,
+      firstFailureGate, stableStringify(cleanTags), String(note ?? "").slice(0, 2000), createdAt);
+    return this.listTrialAnnotations(trialId).find((item) => item.id === id);
+  }
+
+  listTrialAnnotations(trialId, { latestPerAnnotator = false } = {}) {
+    const rows = this.db.prepare("SELECT * FROM trial_annotations WHERE trial_id=? ORDER BY created_at, id").all(trialId)
+      .map(({ tags_json: tags, ...row }) => ({ ...row, tags: parseJson(tags, []) }));
+    if (!latestPerAnnotator) return rows;
+    return [...new Map(rows.map((row) => [row.annotator, row])).values()];
+  }
+
+  listExperimentAnnotations(experimentId) {
+    return this.listTrials(experimentId).flatMap((trial) => this.listTrialAnnotations(trial.id, { latestPerAnnotator: true }));
   }
 
   getAnalysisRun(id) {

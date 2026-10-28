@@ -52,10 +52,11 @@ test("评测任务中心拥有独立页面和人工复评入口", async () => {
 });
 
 test("工作台明确Agent自主性、确定性评分、源码快照和只读AI边界", async () => {
-  const [source, css, server] = await Promise.all([
+  const [source, css, server, report] = await Promise.all([
     readFile(new URL("../app/workbench-client.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../serve.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../app/exam-report.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(source, /Agent 自主求解/);
   assert.match(source, /官方分数只来自确定性 Code Grader/);
@@ -123,13 +124,25 @@ test("工作台明确Agent自主性、确定性评分、源码快照和只读AI�
   assert.match(source, /window.confirm/);
   assert.match(source, /compareUsageMetric/);
   assert.match(source, /评测执行层（Harness）/);
-  assert.match(source, /80 个 Case 已冻结，480 次 Trial 尚未创建/);
+  // Frozen design counts come from the manifest, never a hard-coded 80/480.
+  assert.match(source, /\{exp\.planned_case_count\} 个 Case 已冻结，\{exp\.planned_trial_count\} 次 Trial 尚未创建/);
+  assert.doesNotMatch(source, /480/);
+  assert.doesNotMatch(source, /DeepSeek V4 Flash/);
+  assert.doesNotMatch(source, /Grader 5\.3/);
+  assert.match(source, /<ReportCardPanel experimentId=\{id\} \/>/);
+  assert.match(source, /<AnnotationPanel trialId=\{id\}/);
+  assert.match(source, /<FunnelView grade=\{grade\} \/>/);
+  assert.match(report, /按大类，不算总分/);
+  assert.match(report, /P 通过 · F 未通过 · D 待定 · J\/K 下一场\/上一场/);
+  assert.match(report, /失败漏斗/);
+  assert.match(report, /同题对比/);
+  assert.match(report, /防火墙规则/);
   assert.match(source, /前往数据集选择 Case 并新建评测/);
   assert.match(source, /该实验不符合当前可执行评测合同，不能按原配置重新评测/);
   assert.match(source, /intent === "rerun" \? \(sourceIsAvailable \? sourceExperimentId : ""\)/);
   assert.match(source, /className="trace-toggle"/);
   assert.doesNotMatch(source, /<button className="trace-body"/);
-  assert.match(source, /<\/button>\s*\{open && <JsonBlock/);
+  assert.match(source, /<\/button>\s*\{open && <><EvidenceTables payload=\{item\.payload\} \/><JsonBlock/);
   assert.match(css, /prefers-reduced-motion/);
   assert.match(css, /@media \(max-width: 760px\)/);
   assert.match(server, /EVALOS_API_TOKEN/);
