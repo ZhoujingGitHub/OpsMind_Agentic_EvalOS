@@ -34,6 +34,9 @@ const include = [
   "infra/management",
   "apps/console/dist", "apps/console/serve.mjs", "apps/console/package.json", "apps/console/package-lock.json",
   "scripts/smoke-m31-deployment.mjs",
+  // Exam-host operations: they read and write the control database in place,
+  // so they ship with the release that owns its schema.
+  "scripts/archive-relay-evidence.mjs", "scripts/investigate-failed-trials.mjs", "scripts/register-candidate-source.mjs",
 ];
 
 for (const relative of include) {
