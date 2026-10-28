@@ -650,6 +650,19 @@ def node_prefix(profile: str) -> list[str]:
 # candidate's own transport hops. Restoring the path and clearing an
 # impairment are different repairs; the wrong one leaves the fault in place.
 TOPOLOGY_REPAIRS = {"route_state": "restore-path", "traffic_control": "clear-impairment"}
+# Faults that live on this candidate's transport hops. The base twin only knows
+# that a change was recorded; whether the path is actually repaired is read
+# from the topology itself, so a wrong repair is never reported as success.
+TRANSPORT_SCENARIOS = frozenset({"transport-link-down", "transport-packet-loss", "transport-rate-limit",
+                                 "transport-route-loop"})
+
+
+def scenario_task_success(scenario_id: str, base_value: object, topology: dict) -> object:
+    if scenario_id not in TRANSPORT_SCENARIOS or base_value is None:
+        return base_value
+    restored = (topology.get("transport_link_up") is True and topology.get("transport_impaired") is False
+                and topology.get("transport_path_ok") is True)
+    return bool(base_value) and restored
 
 
 def repair_topology(action_type: str) -> None:
@@ -707,10 +720,16 @@ def act(request: dict) -> dict:
             repair_topology(action_type)
         data = dict(response.get("data") or {})
         verification = dict(data.get("terminal_verification") or {})
+        scenario_id = str(snapshot.get("scenario_id", ""))
+        task_success = verification.get("task_success")
+        if scenario_id in TRANSPORT_SCENARIOS:
+            task_success = scenario_task_success(scenario_id, task_success, topology_status())
+            verification["task_success"] = task_success
+            data["terminal_verification"] = verification
         data.update(
             status="succeeded" if response.get("ok") else "unknown",
             changed_external_state=bool(data.get("applied")) if response.get("ok") else True,
-            task_success=verification.get("task_success"),
+            task_success=task_success,
         )
         response = {**response, "data": data}
     response["request_binding_digest"] = binding
@@ -789,11 +808,12 @@ def snapshot(request: dict) -> dict:
     recovery = dict(value.get("recovery") or {})
     verification = harness_probes.business_verification(
         dict(value.get("resource_scope") or {}), NETWORK_PROFILE)
+    topology = topology_status()
     value.update(
-        topology=topology_status(),
+        topology=topology,
         # The scenario score stays visible as a scenario signal only. Product
         # health is the independently sampled business verification below.
-        task_success=recovery.get("task_success"),
+        task_success=scenario_task_success(str(value.get("scenario_id", "")), recovery.get("task_success"), topology),
         business_verification=verification,
         healthy=verification["passed"],
         production_network=False,

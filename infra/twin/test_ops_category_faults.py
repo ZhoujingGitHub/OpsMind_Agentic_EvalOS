@@ -122,6 +122,19 @@ class TopologyRepairTest(unittest.TestCase):
             with mock.patch.object(labctl, "run", side_effect=failing), self.assertRaises(RuntimeError):
                 labctl.repair_topology("route_state")
 
+    def test_a_wrong_transport_repair_is_not_reported_to_the_candidate_as_success(self) -> None:
+        labctl = load("ops_lg_labctl_task_success", "opsmind_langgraph_labctl.py")
+        clean = {"transport_link_up": True, "transport_impaired": False, "transport_path_ok": True}
+        # Restoring the path while the hop is still impaired leaves the fault in place.
+        still_impaired = {**clean, "transport_impaired": True}
+        self.assertTrue(labctl.scenario_task_success("transport-packet-loss", True, clean))
+        self.assertFalse(labctl.scenario_task_success("transport-packet-loss", True, still_impaired))
+        self.assertFalse(labctl.scenario_task_success("transport-link-down", True, {**clean, "transport_link_up": False}))
+        self.assertFalse(labctl.scenario_task_success("transport-route-loop", False, clean))
+        # Other scenarios keep the base twin's verdict; an unknown verdict stays unknown.
+        self.assertTrue(labctl.scenario_task_success("sctp-blocked", True, still_impaired))
+        self.assertIsNone(labctl.scenario_task_success("transport-rate-limit", None, clean))
+
     def test_topology_scripts_offer_fault_restore_and_clear_per_candidate(self) -> None:
         for file, prefix in [("opsmind-harness-lab-topology", "ah"), ("opsmind-langgraph-lab-topology", "lg")]:
             text = (HERE / file).read_text(encoding="utf-8")
