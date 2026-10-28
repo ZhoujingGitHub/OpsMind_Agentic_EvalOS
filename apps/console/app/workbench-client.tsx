@@ -123,11 +123,12 @@ function Dashboard() {
     <section className="surface"><SectionHead title="真实考生开考状态" sub="Candidate readiness · 这里检查的是外部产品，不是 EvalOS 内部考生分身" />
       {candidateReadiness.error && <ErrorBox text={candidateReadiness.error} />}
       <div className="dataset-cards">{(candidateReadiness.data?.items ?? []).map((item: Json) => <div className={`dataset-card ${item.ready ? "selected" : ""}`} key={item.ref}>
-        <span className={`level ${item.ready ? "level-l1" : "level-l2"}`}>{item.ready ? "就绪" : "阻塞"}</span><strong>{contestantDisplayName(item.ref)}</strong><small>{item.architecture ?? "外部真实产品"}</small>
+        <span className={`level ${item.ready ? "level-l1" : "level-l2"}`}>{item.ready ? "就绪" : item.busy ? "占用" : "阻塞"}</span><strong>{contestantDisplayName(item.ref)}</strong><small>{item.architecture ?? "外部真实产品"}</small>
         <div><b>{item.status_label}</b></div><p>{item.explanation}</p>
+        {item.checked === false ? <small>本次没有做完整检查，孪生、熔断与版本请在考场空出后再看</small> : <>
         <small>数字孪生（Twin）：{item.twin?.ready ? "已连接" : item.twin?.required ? "未就绪" : "本次不需要"}</small>
-        <small>产品安全熔断：{item.budget?.candidate_max_run_ms ? formatDuration(item.budget.candidate_max_run_ms) : "产品接口暂未公开"} · 正常调查不设固定完成时限</small>
-        <code>{item.source_revision ? shortHash(item.source_revision) : "未配置凭据"}</code></div>)}</div>
+        <small>产品安全熔断：最长运行 {item.budget?.candidate_max_run_ms ? formatDuration(item.budget.candidate_max_run_ms) : "不设上限"}；调用与 Token 熔断见产品公开资源</small>
+        <code>{item.source_revision ? shortHash(item.source_revision) : "版本未读到"}</code></>}</div>)}</div>
       <p className="diagnostic-note">{data?.platform?.formal_exam_enabled ? "正式考试已在主机上放行；" : "正式考试尚未放行；"}这里显示“就绪”只代表考生可以接考，正式成绩只来自完整冻结题库的正式运行。</p></section>
     <div className="metric-row">
       <Metric label="冻结数据集" value={loading ? "—" : counts.datasets ?? 0} foot={`${counts.cases ?? 0} 个版本化 Case`} href="/datasets" />

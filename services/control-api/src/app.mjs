@@ -1213,8 +1213,14 @@ export function createApp({
                 policy: frozenM31Manifest.candidate_resource_contract.policy,
               } : null });
           } catch (error) {
-            items.push({ ref, kind: "REAL_PRODUCT", configured: true, ready: false, status_label: "开考检查失败",
-              explanation: String(error?.message ?? error) });
+            const message = String(error?.message ?? error);
+            const busy = /physical lab is not idle: in_use/.test(message);
+            const running = busy ? store.listTrials(null, { includeReplays: false }).find((trial) => trial.status === "RUNNING") : null;
+            items.push({ ref, kind: "REAL_PRODUCT", configured: true, ready: false, checked: false, busy,
+              status_label: busy ? "考场占用中" : "开考检查失败",
+              explanation: busy
+                ? `实验室正被 ${running?.id ?? "另一场 Trial"} 使用；同一时间只开一场，空出来后再检查。`
+                : message });
           }
         }
         return json({ contract: "evalos-candidate-readiness.1", formal_exam_enabled: formalM3RunEnabled, items }, 200, cors);
