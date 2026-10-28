@@ -36,79 +36,63 @@
 
 ---
 
-## 0. 两条通道：考场走 WireGuard SSH，另两台走 Cloud Assistant
+## 0. 三台机全走 SSH（2026-10-29 起；云助手只剩账号层面的事）
 
-> **2026-09-20 重大更正**：本节此前写着「SSH 三台全部不通，唯一通道是 Cloud Assistant」。
-> **这句话已经过期，而且它让人白等了好几轮云凭据。**
-> 本机装着 WireGuard，隧道 `opsmind-management` 常驻运行（本机 `10.77.240.2`），
-> **考场那台机在隧道里是 `10.77.240.1`，可以直接 root SSH，完全不需要阿里云凭据。**
-> 实测：`ssh -i ~/.ssh/opsmind-evallab-ed25519 root@10.77.240.1` 秒连；
-> 2.8 MB 的发布包 `scp` **2.3 秒**传完，不用再切 157 块。
-> 隧道里**只有考场这一台**（`10.77.240.3/.4/.5` ping 得通但 SSH 不通，是假象）。
+> **2026-10-29 更正**：本节此前写「考场走 SSH、另两台走 Cloud Assistant」。10-27 实测三台都能经考场隧道 SSH，
+> 10-29 起工具链全部改走 SSH：入口**只写在 `remote-hosts.sh` 一个地方**，`run-on.sh` / `send-file.sh` /
+> `ah-deploy.sh` / `lg-deploy.sh` / `check-certs.sh` / `demo-window.sh` 都 source 它。
 
-| 主机 | 实例 ID | 怎么进 |
-|---|---|---|
-| 产品（AH + LG + DB） | `i-bp12nyanjsyue1vs5bu6` | Cloud Assistant，profile `opsmind-main-oauth` |
-| 5G 实验室 | `i-bp19u0lim79nhh4y7fkg` | Cloud Assistant，profile `opsmind-main-oauth` |
-| **考场 EvalOS** | `i-bp14ezltpnq8mxic1gsb` | **WireGuard SSH `root@10.77.240.1`**（钥匙 `~/.ssh/opsmind-evallab-ed25519`）；云助手 profile `opsmind-evallab` 只是备用 |
-
-剩下那两台仍走阿里云 Cloud Assistant（OpenAPI over HTTPS，不受安全组限制）。
-
-```bash
-./ca.sh      <实例ID> <超时秒> < 脚本文件     # 主账号：产品机 + 实验室
-./ca-eval.sh <实例ID> <超时秒> < 脚本文件     # 第二账号：EvalOS
+```
+本机 ──WireGuard(UDP)──► 考场 EvalOS 10.77.240.1   root，钥匙 opsmind-evallab-ed25519
+                           ├─► 产品机 10.77.240.4   root，钥匙 opsmind-aliyun，经考场 -W 转发
+                           └─► 实验室 10.77.240.3   ecs-user + sudo -n（root 被禁），同上
 ```
 
-| 主机 | 实例 ID | profile |
+| 行为 | 云助手时代 | 现在 |
 |---|---|---|
-| 产品（AH + LG + DB） | `i-bp12nyanjsyue1vs5bu6` | `opsmind-main-oauth` |
-| 5G 实验室 | `i-bp19u0lim79nhh4y7fkg` | `opsmind-main-oauth` |
-| EvalOS | `i-bp14ezltpnq8mxic1gsb` | `opsmind-evallab` |
+| 退出码 | 永远 exit 0，要解析 `### exit=N` | **就是远端退出码**；255 = SSH 自己连不上（会打提示） |
+| 时长 | 300 秒上限 | 没有；要限时给 `TIMEOUT=秒` |
+| 输出 | 会截断 | 不截断 |
+| 传文件 | 切 18 KB 一块、157 块往返 | 一条连接流式送达，远端核对 sha256 后才落地 |
 
-**注意事项：**
-- Cloud Assistant **输出有长度上限**，大 JSON 会被截断。大证据包要先落盘到服务器，再分块取或只取摘要。
-- **长任务必须用 `nohup` 后台跑 + 轮询日志**，否则 Cloud Assistant 超时。19.8 GB 库的全表扫描必超时。
-- **OAuth 是给人用的凭据，不是给机器用的**：实测有效期只有 **3 小时**，过期就要人重新扫码。
-  用它跑自动化，等于每 3 小时被打断一次。失效表现是 `refresh token 400`。
-  - **考场不受影响**——走 WireGuard SSH，不碰这套凭据。
-  - 另两台要重新授权时，命令是（**没有 `--region` 这个参数，加了直接报错**）：
-    `aliyun.exe configure --profile <名字> --mode OAuth --oauth-site-type CN`
-    注意 `aliyun.exe` 不在 PATH 里，PowerShell 要用 `& "<全路径>"` 调。
-  - 二维码可以由 Claude 调出来：上面那条命令会打印一个 `signin.aliyun.com/oauth2/...` 链接，
-    把它开在**本机**浏览器里（回调走 `127.0.0.1:1234x`，必须是本机），页面上就有扫码入口。
-  - **根治办法**：换成 AccessKey 或 RamRoleArn（`aliyun configure set --mode AK ...`），
-    长期有效、无人工步骤。这才是自动化该用的凭据类型。
+**连不上先查两件事**（不是认证问题）：本机 Clash 是不是被切成全局模式；当前网络是不是封 UDP。
 
-关键路径：
-- 阿里云 CLI：`D:/AIPM/.../OpsMind/.tools/aliyuncli/aliyun.exe`
-- Python：`D:/install/anaconda3/python.exe`
-- Git：`D:/install/Git/cmd/git.exe`
+**长任务一律在主机上脱离会话跑**（`setsid nohup … &`，再读日志）：10-29 中途断过一次线，
+LG 发版停在加白名单之前（线上没动，重跑即好）。实验室校准、考场发版窗口都按这个做。
+
+云助手（`ca.sh` / `ca-eval.sh`）只剩查到期日、改安全组这类阿里云账号层面的事，平时不用。
 
 ### 0.1 怎么跑这套工具（统一入口）
-
-`ca.sh` 从**标准输入**读脚本、**不转发命令行参数**，所以传参的办法是"在脚本前面拼环境变量"。
-以前每轮都在手搓这段管道，现在用 `run-on.sh`：
 
 ```bash
 ./run-on.sh <product|evalos|lab> <脚本文件> [VAR=值 ...]
 ./run-on.sh <product|evalos|lab> - '<直接执行的命令>'
+HOST=<product|evalos|lab> SRC=<本地文件> DEST=<远端路径> ./send-file.sh
 ```
 
 ```bash
 # 实验室状态与租约
 ./run-on.sh lab - 'opsmind-harness-labctl manage-status'
+# 新故障空跑校准（不花模型钱，44 次约 25 分钟，脱离会话跑）
+./run-on.sh lab lab-fault-calibration.sh [SCENARIOS="a b"] [CANDIDATES="ah lg"]
 
-# AH 直连：轮询 / 看提案 / 审批 / 封存 / 复位
+# AH 直连：提交 / 轮询 / 看提案 / 审批 / 封存 / 复位
+./run-on.sh product ah-direct-submit.sh NS=<命名空间> SOURCE=<唯一> NATIVE_TRIAL=<同 NS> EXPECT_AH_REV=<线上提交>
 ./run-on.sh product ah-progress.sh INV=<inv-id>
 ./run-on.sh product ah-inspect.sh  AID=<action-id>
 ./run-on.sh product ah-approve.sh  AID=<action-id> INV=<inv-id> NS=<本轮命名空间>
 ./run-on.sh product ah-seal.sh     INV=<inv-id> TAG=ah-chain1 BATCH=<证据批次目录>
 ./run-on.sh product ah-reset.sh    INV=<inv-id> NS=<本轮命名空间>
 
-# EvalOS 链路：EXPECT_REV 取生产标签指向的提交，SRC_EXP 取当前冻结源
-./run-on.sh evalos evalos-op.sh OP=preflight REF=agent-harness-v2             EXPECT_REV=$(git rev-list -n1 prod-evalos-20260915-test-isolation)             SRC_EXP=exp_d3e867ec11bc04410b25
+# 版本登记：产品机部署证明 → 考场只读发现 → 本机改三份配置（register-candidates.mjs）
+./run-on.sh product product-deployment-proof.sh TAG=<证据目录>
+./run-on.sh evalos  evalos-discover.sh
+
+# EvalOS 链路：EXPECT_REV 取线上 RELEASE.json 的 source_revision，SRC_EXP 取当次最新冻结源
+./run-on.sh evalos evalos-op.sh OP=preflight REF=agent-harness-v2 EXPECT_REV=<线上提交> SRC_EXP=<冻结源> CASES=M33-MAIN-14@3.3.0
 ./run-on.sh evalos evalos-op.sh OP=submit ... IDEM=<本轮唯一键>
-./run-on.sh evalos ev-seal.sh TID=<trial-id> TAG=ah-chain3-evalos BATCH=<证据批次目录>
+# 正式考试（完整题库 × 两考生，先预检 ready 才提交）
+./run-on.sh evalos evalos-formal.sh SRC_EXP=<冻结源> IDEM=<本轮唯一键> OP=submit
 ```
 
 **缺参数会被拒绝并打印用法**，不会悄悄用上一轮的编号。
