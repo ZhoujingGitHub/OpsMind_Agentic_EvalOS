@@ -348,7 +348,10 @@ function normalizedType(value) {
   if (/candidate|job.accept|task.receive|investigation.create/.test(name)) return "task.received";
   if (/investigation.start|run.start|worker.start/.test(name)) return "investigation.started";
   if (/tool.*fail|post_tool_failure|observation.*fail/.test(name)) return "candidate.tool.failed";
-  if (/retry|recover|resume/.test(name)) return "candidate.recovery.observed";
+  // Resuming a run from a checkpoint is a process restart, not a recovery
+  // from a failed observation.
+  if (/checkpoint|resum/.test(name)) return null;
+  if (/retry|recover/.test(name)) return "candidate.recovery.observed";
   if (/tool|evidence|observation|metric|log|alarm|probe/.test(name)) return "evidence.collected";
   if (/conclusion|report|finalize|completed/.test(name)) return "conclusion.recorded";
   if (/policy/.test(name)) return "policy.decided";
@@ -374,10 +377,19 @@ function semanticPayload(event, eventName, sourceRef) {
     ...allowed.filter((key) => source[key] !== undefined).map((key) => [key, source[key]])]);
 }
 
+// A product reports a failed tool call with a status on the event, whatever
+// the event itself is named.
+function failedToolEvent(name, payload) {
+  const visible = payload?.public_payload && typeof payload.public_payload === "object" ? payload.public_payload : payload;
+  return /tool/.test(String(name ?? "").toLowerCase())
+    && ["failed", "error"].includes(String(visible?.status ?? payload?.status ?? "").toLowerCase());
+}
+
 function translate(events, sourceSystem, refOf, nameOf) {
   const raw = events.map((event, index) => rawEvent(sourceSystem, refOf(event, index), event));
   const normalized = raw.flatMap((item) => {
-    const eventType = normalizedType(nameOf(item.payload));
+    const eventType = failedToolEvent(nameOf(item.payload), item.payload) ? "candidate.tool.failed"
+      : normalizedType(nameOf(item.payload));
     return eventType ? [{ event_type: eventType,
       actor: item.payload?.actor_id ?? item.payload?.source ?? sourceSystem,
       status: item.payload?.status ?? "RECORDED", raw_source_refs: [item.source_ref],
@@ -1003,6 +1015,7 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
   const api = client(origin, token, requestTimeoutMs, tenantHeaders, requestTransport, "candidate_submitter");
   const approvalApi = client(origin, approvalToken, requestTimeoutMs, tenantHeaders, requestTransport, "approval_oracle");
   const adminApi = client(origin, adminToken, requestTimeoutMs, tenantHeaders, requestTransport, "mode_administrator");
+  const previousModes = new Map();
   const frozen = assertAttestation(attestation);
   const runtimeLimits = deploymentLimits(declaredRuntimeLimits);
   const runs = new Map();
@@ -1106,10 +1119,22 @@ export function createAgentHarnessProductConnectorV5({ origin, token, approvalTo
     },
     async prepare({ executionContract }) {
       const operatingMode = executionContract.case.visible.operating_mode;
+      // The exam switches the tenant into the case's operating mode; it must
+      // hand the product back in the mode it found it in.
+      const context = await api.request("/v2/remediation/context");
+      previousModes.set(executionContract.trial.id, { operating_mode: context.operating_mode,
+        execution_mode: context.execution_mode });
       await adminApi.request("/v2/remediation/mode", { method: "PUT", body: {
         operating_mode: operatingMode, execution_mode: executionContract.execution_mode } });
-      return { tenant_id: tenantId, operating_mode: operatingMode,
+      return { tenant_id: tenantId, operating_mode: operatingMode, previous_operating_mode: context.operating_mode,
         execution_mode: executionContract.execution_mode, production_writes_available: false };
+    },
+    async restoreEvaluationContext({ executionContract }) {
+      const previous = previousModes.get(executionContract.trial.id);
+      if (!previous) return { restored: false, reason: "evaluation_context_not_prepared" };
+      await adminApi.request("/v2/remediation/mode", { method: "PUT", body: previous });
+      previousModes.delete(executionContract.trial.id);
+      return { restored: true, ...previous };
     },
     async start({ executionContract }) {
       if (latestNativeContract?.versions.repair_delivery !== "opsmind-repair-delivery/1.1") {
@@ -1317,6 +1342,7 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
   const api = client(origin, token, requestTimeoutMs, tenantHeaders, requestTransport, "candidate_submitter");
   const approvalApi = client(origin, approvalToken, requestTimeoutMs, tenantHeaders, requestTransport, "approval_oracle");
   const adminApi = client(origin, adminToken, requestTimeoutMs, tenantHeaders, requestTransport, "mode_administrator");
+  const previousModes = new Map();
   const frozen = assertAttestation(attestation);
   const runtimeLimits = deploymentLimits(declaredRuntimeLimits);
   let latestNativeContract = null;
@@ -1438,11 +1464,22 @@ export function createLangGraphProductConnectorV5({ origin, token, approvalToken
     },
     async prepare({ executionContract }) {
       const operatingMode = executionContract.case.visible.operating_mode;
+      const overview = await api.request("/api/v1/automation/overview");
+      previousModes.set(executionContract.trial.id, { operating_mode: overview.operating_mode,
+        execution_mode: overview.execution_mode });
       await adminApi.request("/api/v1/automation/mode", { method: "PUT", body: { operating_mode: operatingMode,
         execution_mode: executionContract.execution_mode, production_write_enabled: false,
         reason: `EvalOS冻结Trial ${executionContract.trial.id} 切换受控评测模式。` } });
-      return { tenant_id: tenantId, operating_mode: operatingMode,
+      return { tenant_id: tenantId, operating_mode: operatingMode, previous_operating_mode: overview.operating_mode,
         execution_mode: executionContract.execution_mode, production_writes_available: false };
+    },
+    async restoreEvaluationContext({ executionContract }) {
+      const previous = previousModes.get(executionContract.trial.id);
+      if (!previous) return { restored: false, reason: "evaluation_context_not_prepared" };
+      await adminApi.request("/api/v1/automation/mode", { method: "PUT", body: { ...previous,
+        production_write_enabled: false, reason: `EvalOS冻结Trial ${executionContract.trial.id} 结束，恢复原工作模式。` } });
+      previousModes.delete(executionContract.trial.id);
+      return { restored: true, ...previous };
     },
     async start({ executionContract }) {
       if (latestNativeContract?.supported !== true) {

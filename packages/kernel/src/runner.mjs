@@ -134,6 +134,19 @@ export class TrialRunner {
         throw error;
       }
     };
+    let candidateContextRestored = false;
+    const restoreCandidateContext = async (reason) => {
+      if (candidateContextRestored || typeof adapter?.restoreEvaluationContext !== "function") return;
+      candidateContextRestored = true;
+      try {
+        const restored = await adapter.restoreEvaluationContext({ executionContract });
+        event("candidate.evaluation_context.restored", "candidate-adapter", { reason, ...(restored ?? {}) });
+      } catch (restoreError) {
+        // A failed hand-back does not change this trial's result, but it must be
+        // visible: the next trial would otherwise start in a stale mode.
+        event("candidate.evaluation_context.restore_failed", "candidate-adapter", { reason, error: restoreError.message });
+      }
+    };
     const leaseTimer = setInterval(() => {
       try { maintainLease(); } catch {}
     }, heartbeatIntervalMs);
@@ -259,6 +272,7 @@ export class TrialRunner {
           throw finalizationError;
         }
       }
+      await restoreCandidateContext("trial_completed");
       if (typeof environment.reset === "function") {
         environmentReset = await environment.reset();
         event("environment.reset", "environment", environmentReset ?? { ok: true });
@@ -267,7 +281,8 @@ export class TrialRunner {
       const traceBeforeGrade = this.store.getTrace(trial.id);
       const gradeSpan = this.store.startSpan(trial.id, "grader.code", "EVALUATOR", "code-grader", {}, rootSpan);
       const grading = this.gradingService.grade({
-        trialId: trial.id, caseRef: trial.case_ref, outcome, trace: traceBeforeGrade, usage, budget: trial.budget,
+        trialId: trial.id, caseRef: trial.case_ref, candidateRef: trial.contestant_ref, outcome,
+        trace: traceBeforeGrade, usage, budget: trial.budget,
         resourceUsageAffectsScore: experiment.manifest.candidate_resource_contract?.policy?.usage_affects_score !== false,
         environmentState: environmentBeforeReset, environmentReset,
       });
@@ -373,6 +388,7 @@ export class TrialRunner {
             });
           }
         }
+        await restoreCandidateContext("trial_failed_after_candidate_terminal");
         try {
           environmentReset = await environment.reset();
           event("environment.reset_after_failure", "environment", environmentReset ?? { ok: true });

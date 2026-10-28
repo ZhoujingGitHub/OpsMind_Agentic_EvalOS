@@ -144,6 +144,13 @@ export function createCandidateAdapterV5({ id, connector, pollIntervalMs = 500, 
       if (result?.ok !== true) throw new Error("candidate product did not prove terminal cleanup handoff");
       return { required: true, ...result };
     },
+    // Put the product back in the operating mode it was in before the exam.
+    // Called once the candidate run is terminal (or never started); never while
+    // a quarantined run may still be acting.
+    async restoreEvaluationContext({ executionContract }) {
+      if (typeof connector.restoreEvaluationContext !== "function") return { restored: false, reason: "connector_owns_no_mode" };
+      return connector.restoreEvaluationContext({ executionContract });
+    },
     async preflight({ contestant, requiresTwin = false, budget = null, settlementBudget = null,
       resourcePolicy = null }) {
       const discovery = await connector.discover();
