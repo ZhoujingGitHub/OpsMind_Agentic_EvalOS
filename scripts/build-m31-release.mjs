@@ -81,7 +81,10 @@ writeFileSync(path.join(payloadRoot, "RELEASE.json"), `${JSON.stringify({ contra
 mkdirSync(deployRoot, { recursive: true });
 const archive = path.join(deployRoot, `${releaseId}.tar.gz`);
 rmSync(archive, { force: true });
-execFileSync("tar", ["-czf", archive, "-C", buildRoot, "evalos"], { cwd: root, stdio: "inherit" });
+// Relative paths on purpose: GNU tar (Git Bash) reads "D:\..." as host "D", so an
+// absolute Windows path fails there while Windows' own bsdtar accepts it.
+execFileSync("tar", ["-czf", path.relative(root, archive), "-C", path.relative(root, buildRoot), "evalos"],
+  { cwd: root, stdio: "inherit" });
 const archiveSha256 = sha256(readFileSync(archive));
 const result = { status: "BUILT", release_id: releaseId, source_revision: sourceRevision,
   content_digest: `sha256:${contentDigest}`, archive, archive_sha256: archiveSha256,
