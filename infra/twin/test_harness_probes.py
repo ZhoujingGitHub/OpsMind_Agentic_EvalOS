@@ -133,7 +133,10 @@ def test_a_service_that_answers_too_slowly_is_not_recovered(monkeypatch):
     outputs["dns"]["elapsed_ms"], outputs["http"]["duration_ms"] = 88.0, 55.0
     record = verify()
     assert record["passed"] is True
-    assert record["contract_version"] == "opsmind-mec-business-verification/1.1"
+    # Pinned by both products (LG checks the exact string); never bump it alone.
+    assert record["contract_version"] == "opsmind-mec-business-verification/1.0"
+    assert "response_within_objective" in record["required_checks"]
+    assert record["response_objective_ms"] == probes.BUSINESS_RESPONSE_OBJECTIVE_MS
     assert record["response_ms"] == {"dns": 88.0, "http": 55.0}
     outputs["dns"]["elapsed_ms"], outputs["http"]["duration_ms"] = 350.0, 560.0
     assert verify()["passed"] is False

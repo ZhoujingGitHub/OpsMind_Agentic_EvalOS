@@ -235,6 +235,7 @@ def probe(kind, parameters, scope, *, network, runner=None):
 # Without this objective a latency or rate-limit fault was graded as recovered
 # before anyone touched it.
 BUSINESS_RESPONSE_OBJECTIVE_MS = 300
+BUSINESS_VERIFICATION_CONTRACT = "opsmind-mec-business-verification/1.0"
 
 
 def response_ms(check):
@@ -256,7 +257,12 @@ def business_verification(scope, profile):
               and within_objective)
     unavailable = any(x.get("status") == "unavailable" or
                       x.get("error", {}).get("code") == "DEPENDENCY_UNAVAILABLE" for x in (dns, http))
-    record = {"contract_version": "opsmind-mec-business-verification/1.1",
+    # The contract version stays 1.0. Both products read this record and LG
+    # pins the exact string (protocol_lab/actions.py); the shape only gains
+    # fields, and the stricter rule describes itself in required_checks and
+    # response_objective_ms. 2026-10-29: bumping it to 1.1 stopped LG at its
+    # environment snapshot ("requires this Trial's business result").
+    record = {"contract_version": BUSINESS_VERIFICATION_CONTRACT,
               "required_checks": ["mec_dns_answer", "mec_http_health", "response_within_objective"],
               "response_objective_ms": BUSINESS_RESPONSE_OBJECTIVE_MS,
               "response_ms": {"dns": timings[0], "http": timings[1]},

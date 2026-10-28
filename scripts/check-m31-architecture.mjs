@@ -56,9 +56,9 @@ assert.match(app, /createLangGraphProductConnector/);
 assert.match(app, /createTestDouble\("test-double-a"/);
 assert.match(app, /test-double-a:ENGINEERING_TEST/);
 assert.match(runner, /buildEvaluationContract/);
-// 2026-10-29：业务真值改为 1.1（响应时间进门槛），判分版本跟着升到 7.0.1。
+// 2026-10-29：业务真值加了响应时间门槛（合同号仍是 1.0，两个产品都钉着它），判分版本升到 7.0.1。
 assert.match(grader, /export const GRADER_REF = "evalos-code-grader@7\.0\.1"/);
-assert.match(grader, /opsmind-mec-business-verification\/1\.1/);
+assert.match(grader, /opsmind-mec-business-verification\/1\.0/);
 assert.match(grader, /grader_version: context\.graderRef \?\? GRADER_REF/);
 // 2026-09-20：根因判据换成「指认那处被改动的状态」，判定规则变了版本号必须跟着变。
 assert.match(grader, /the parameters of the command the laboratory used to inject the fault/);

@@ -252,7 +252,7 @@
     },
     "grader": {
       "ref": "evalos-code-grader@7.0.1",
-      "digest": "sha256:aab28e3b263ccba6f2fe32053827bc7617908e5673956d58eb466975415bf09d"
+      "digest": "sha256:284dce3effc5a849b9d613be2d782f55596bb6ce82768c7b7c1a567f1245953d"
     },
     "twin": {
       "ref": "opsmind-m3-protocol-twin@1.0.0",

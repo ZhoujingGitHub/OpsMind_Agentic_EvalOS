@@ -98,7 +98,7 @@ function repairedClosure() {
 function laboratory({ changes = 0, recovered = true } = {}) {
   return { environmentState: { remote: { resource_scope: { namespace: NAMESPACE },
     changes: Array.from({ length: changes }, () => ({ action_type: "network_policy" })),
-    business_verification: { contract_version: "opsmind-mec-business-verification/1.1", passed: recovered } } },
+    business_verification: { contract_version: "opsmind-mec-business-verification/1.0", passed: recovered } } },
   environmentReset: { ok: true } };
 }
 
