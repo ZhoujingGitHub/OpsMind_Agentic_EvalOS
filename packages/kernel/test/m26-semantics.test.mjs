@@ -70,3 +70,23 @@ test("真实考生标准公开里程碑和Twin独立取证使用人话解释", (
     name: "environment.independent_capture", actor: "twin-manager" });
   assert.equal(capture.title.zh, "独立采集数字孪生现场证据");
 });
+
+test("M3.3 真实场次里出现过的事件名都有中文标题，不会退成「分类：原名」", () => {
+  // Measured on the 2026-10-29 M3.3 trials; each used to render as e.g. "Agent 决策：evidence.collected",
+  // and the approval oracle's decision even rendered under the grader category.
+  const seen = [["candidate.raw_event", "AGENT"], ["evidence.collected", "AGENT"], ["conclusion.recorded", "AGENT"],
+    ["candidate.tool.failed", "AGENT"], ["action.proposed", "AGENT"], ["archive.reconciled", "AGENT"],
+    ["candidate.presence_binding.verified", "AGENT"], ["investigation.started", "AGENT"], ["action.executed", "AGENT"],
+    ["action.started", "AGENT"], ["approval.decided", "AGENT"], ["approval.oracle.decision", "EVALUATOR"],
+    ["approval.oracle.responded", "AGENT"], ["approval.requested", "AGENT"], ["candidate.evaluation_binding.verified", "AGENT"],
+    ["candidate.evaluation_context.restored", "INTERNAL"], ["policy.decided", "AGENT"], ["ticket.issued", "AGENT"],
+    ["verification.completed", "AGENT"], ["candidate.environment.release_completed", "INTERNAL"],
+    ["candidate.evidence.frozen", "AGENT"], ["task.received", "AGENT"],
+    ["candidate.environment.release_completed_after_failure", "INTERNAL"], ["environment.reset_after_failure", "INTERNAL"],
+    ["trial.failed", "INTERNAL"]];
+  for (const [name, spanKind] of seen) {
+    const title = explainTraceRecord({ name, span_kind: spanKind }).title.zh;
+    assert.equal(title.includes(name), false, `${name} has no title: ${title}`);
+  }
+  assert.equal(explainTraceRecord({ name: "approval.oracle.decision", span_kind: "EVALUATOR" }).category.zh, "审批");
+});
