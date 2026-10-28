@@ -7,9 +7,9 @@ import {
   auditableGraderRunView, blindTraceView, blindTrialView, materializeSnapshotView, readSnapshotFile, redact,
   searchSnapshotFiles, sha256,
 } from "../../kernel/src/index.mjs";
-import { deepSeekEnvironment, isolatedBashCommand, toolPolicy } from "./claude-agent-sdk-runtime.mjs";
+import { EVALOS_DEFAULT_MODEL, deepSeekEnvironment, evalosIntelligenceModel, isolatedBashCommand, toolPolicy }
+  from "./claude-agent-sdk-runtime.mjs";
 
-const DEFAULT_MODEL = "deepseek-v4-flash";
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const DEFAULT_PLUGIN_ROOT = path.join(PROJECT_ROOT, "packages", "agent-runtime", "opsmind-plugin");
 const MCP_TOOLS = ["get_trial_bundle", "get_trace_index", "get_trace", "get_grader", "list_source_files", "search_source", "read_source_file",
@@ -186,7 +186,7 @@ async function fetchOfficialMethodology(value) {
     content_sha256: createHash("sha256").update(buffer).digest("hex"), content_excerpt: text };
 }
 
-export function createCaseInvestigator({ store, apiKey, model = DEFAULT_MODEL } = {}) {
+export function createCaseInvestigator({ store, apiKey, model = evalosIntelligenceModel() } = {}) {
   if (!store) throw new Error("EvalStore is required by the case investigator");
   return {
     id: "evalos-case-investigator",
@@ -320,7 +320,7 @@ export function createCaseInvestigator({ store, apiKey, model = DEFAULT_MODEL } 
         options: {
           model, cwd: namespace, maxTurns, maxBudgetUsd: Number(run.budget.cost_usd ?? 0.8),
           systemPrompt: [
-            "你是 OpsMind EvalOS 的只读 AI 调查员，由官方 Claude Agent SDK 原生 Agent Loop 驱动，底层模型为 DeepSeek V4 Flash。",
+            "你是 OpsMind EvalOS 的只读 AI 调查员，由官方 Claude Agent SDK 原生 Agent Loop 驱动，底层模型经 DeepSeek 的 Anthropic 格式接口调用。",
             "你只能解释证据、评分和改进方向，不能改变正式分数、重写确定性 Code Grader 结果或代替考生执行任务。",
             "你不是评分器，不能修改官方得分、Trial、源码、孪生环境、Manifest、盲态、安全门禁或账本。",
             "你自主形成可证伪假设，按需查看 Trial、轨迹、逐维评分、冻结源码和相关 Trial；不存在固定步骤、静态节点图或预写修复流程。",
@@ -412,7 +412,7 @@ export function createCaseInvestigator({ store, apiKey, model = DEFAULT_MODEL } 
 }
 
 export const CASE_INVESTIGATOR_RUNTIME = Object.freeze({
-  sdk: "@anthropic-ai/claude-agent-sdk", provider: "deepseek", model: DEFAULT_MODEL,
+  sdk: "@anthropic-ai/claude-agent-sdk", provider: "deepseek", model: EVALOS_DEFAULT_MODEL,
   orchestration: "model-driven-read-only-investigation-loop", graphFramework: null,
   authority: "diagnostic-only; cannot mutate scores, Trials, source, Twin, policy or ledger",
   tools: { native: NATIVE_TOOLS, mcp: MCP_TOOLS },

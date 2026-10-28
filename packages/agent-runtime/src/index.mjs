@@ -1,6 +1,5 @@
 export * from "./claude-agent-sdk-runtime.mjs";
 export * from "./blind-judge.mjs";
-export * from "./evalos-lead-agent.mjs";
 export * from "./judge-orchestrator.mjs";
 export * from "./case-investigator.mjs";
 export * from "./candidate-adapter-v5.mjs";

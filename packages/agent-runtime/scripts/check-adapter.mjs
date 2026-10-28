@@ -10,7 +10,7 @@ const checks = {
   tool: typeof sdk.tool === "function",
   createSdkMcpServer: typeof sdk.createSdkMcpServer === "function",
   zod: typeof zod.z.object === "function",
-  model: DEEPSEEK_AGENT_RUNTIME.model === "deepseek-v4-flash",
+  model: DEEPSEEK_AGENT_RUNTIME.model === "deepseek-flash",
   anthropicInterface: DEEPSEEK_AGENT_RUNTIME.baseUrl === "https://api.deepseek.com/anthropic",
   noGraphFramework: DEEPSEEK_AGENT_RUNTIME.graphFramework === null,
 };

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { BLIND_JUDGE_RUNTIME, DEEPSEEK_AGENT_RUNTIME, EVALOS_LEAD_RUNTIME, blindJudgePromptMaterial, deepSeekEnvironment, isolatedBashCommand, judgeAttentionDecision, normalizeInvestigatorReport, toMcpToolResult, toolPolicy } from "../src/index.mjs";
+import { BLIND_JUDGE_RUNTIME, DEEPSEEK_AGENT_RUNTIME, blindJudgePromptMaterial, deepSeekEnvironment, isolatedBashCommand, judgeAttentionDecision, normalizeInvestigatorReport, toMcpToolResult, toolPolicy } from "../src/index.mjs";
 import { CASES } from "../../kernel/src/index.mjs";
 
 // deepSeekEnvironment falls back to the ambient provider variables, so a shell that
@@ -12,7 +12,7 @@ for (const name of PROVIDER_ENVIRONMENT) delete process.env[name];
 
 test("runtime uses Claude Agent SDK over DeepSeek Anthropic endpoint without a graph framework", () => {
   assert.equal(DEEPSEEK_AGENT_RUNTIME.sdk, "@anthropic-ai/claude-agent-sdk");
-  assert.equal(DEEPSEEK_AGENT_RUNTIME.model, "deepseek-v4-flash");
+  assert.equal(DEEPSEEK_AGENT_RUNTIME.model, "deepseek-flash");
   assert.equal(DEEPSEEK_AGENT_RUNTIME.baseUrl, "https://api.deepseek.com/anthropic");
   assert.equal(DEEPSEEK_AGENT_RUNTIME.orchestration, "model-driven-tool-loop");
   assert.deepEqual(
@@ -165,14 +165,6 @@ test("冻结发布把参评Agent指纹与EvalOS平台指纹分离", () => {
   assert.match(source, /platform_artifact_digest/);
   assert.doesNotMatch(source, /"packages\/agent-runtime\/test"/);
   assert.doesNotMatch(source, /contestant_artifact_digest: `sha256:\$\{platformDigest\.sha256\}`/);
-});
-
-test("EvalOS Lead Agent本身也是Claude Agent SDK动态组织层而非固定工作流", () => {
-  assert.equal(EVALOS_LEAD_RUNTIME.sdk, "@anthropic-ai/claude-agent-sdk");
-  assert.equal(EVALOS_LEAD_RUNTIME.orchestration, "model-driven-tool-loop");
-  assert.equal(EVALOS_LEAD_RUNTIME.graphFramework, null);
-  assert.deepEqual(EVALOS_LEAD_RUNTIME.specialistAgents, ["failure-diagnosis", "meta-eval-auditor", "evidence-reporter"]);
-  assert.ok(EVALOS_LEAD_RUNTIME.deterministicControls.includes("graders"));
 });
 
 test("代码与三路Judge分歧、未知、低置信或安全风险只生成辅助注意信号", () => {

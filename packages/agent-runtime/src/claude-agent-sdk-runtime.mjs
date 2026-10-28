@@ -1,7 +1,13 @@
 import path from "node:path";
 
 const DEEPSEEK_ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic";
-const DEFAULT_MODEL = "deepseek-v4-flash";
+// EvalOS's own read-only intelligence (AI investigator, advisory judges) runs
+// on one configurable model. DeepSeek renamed its Flash model to
+// `deepseek-flash` on 2026-10-17; the legacy name is only routed temporarily.
+export const EVALOS_DEFAULT_MODEL = "deepseek-flash";
+export function evalosIntelligenceModel() {
+  return process.env.EVALOS_INTELLIGENCE_MODEL || EVALOS_DEFAULT_MODEL;
+}
 const NATIVE_TOOLS = ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "WebSearch", "WebFetch", "Skill", "ToolSearch", "TodoWrite"];
 const DESTRUCTIVE_COMMAND = /(?:\brm\s+-[^\n]*r|\bshutdown\b|\breboot\b|\bmkfs\b|\bdd\s+if=|\bgit\s+(?:reset\s+--hard|clean\s+-|push\s+--force)|\bcurl\b[^\n]*(?:api[_-]?key|token|password|secret))/i;
 const OUTSIDE_SANDBOX_COMMAND = /(?:\.\.[\\/]|(?:^|[\s"'=])(?:[A-Za-z]:[\\/]|\\\\|~[\\/]|\/(?:etc|home|root|proc|sys|var|Users|mnt)(?:[\\/]|\b)))/i;
@@ -10,7 +16,7 @@ const SDK_ENV_ALLOWLIST = ["PATH", "Path", "PATHEXT", "SystemRoot", "WINDIR", "C
   "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR", "SHELL", "LANG", "LC_ALL", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
   "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS"];
 
-export function deepSeekEnvironment({ apiKey, model = DEFAULT_MODEL, trialNamespace } = {}) {
+export function deepSeekEnvironment({ apiKey, model = evalosIntelligenceModel(), trialNamespace } = {}) {
   const token = apiKey ?? process.env.DEEPSEEK_API_KEY ?? process.env.ANTHROPIC_AUTH_TOKEN ?? process.env.ANTHROPIC_API_KEY;
   if (!token) throw new Error("DeepSeek API key is required at runtime; set DEEPSEEK_API_KEY or ANTHROPIC_AUTH_TOKEN");
   const safeHostEnvironment = Object.fromEntries(SDK_ENV_ALLOWLIST
@@ -85,7 +91,7 @@ export function toolPolicy(namespace, { allowedNativeTools = NATIVE_TOOLS, allow
 }
 
 export const DEEPSEEK_AGENT_RUNTIME = Object.freeze({
-  sdk: "@anthropic-ai/claude-agent-sdk", provider: "deepseek", model: DEFAULT_MODEL,
+  sdk: "@anthropic-ai/claude-agent-sdk", provider: "deepseek", model: EVALOS_DEFAULT_MODEL,
   baseUrl: DEEPSEEK_ANTHROPIC_BASE_URL, orchestration: "model-driven-tool-loop", graphFramework: null,
   nativeTools: NATIVE_TOOLS, role: "eval-intelligence-read-only",
 });

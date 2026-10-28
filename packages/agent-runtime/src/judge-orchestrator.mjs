@@ -1,5 +1,6 @@
 import { sha256 } from "../../kernel/src/utils.mjs";
 import { BLIND_JUDGE_VERSION, JUDGE_ROLES, judgeBlindTrial, summarizeJudgeRuns } from "./blind-judge.mjs";
+import { evalosIntelligenceModel } from "./claude-agent-sdk-runtime.mjs";
 
 export function judgeAttentionDecision({ codeGrade, judgeBundle }) {
   const judgeRuns = judgeBundle.runs ?? [];
@@ -35,7 +36,7 @@ export async function judgeRecordAndSummarize({ store, gradingCase, trial, names
     finalState: trial.final_state ?? {}, namespace, apiKey, model, roles: missingRoles,
     onRunCompleted: async (run) => {
       const promptHash = sha256(run.prompt_material);
-      store.addJudgeRun(trial.id, { blindId: trial.blind_id, role: run.role, model: model ?? "deepseek-v4-flash",
+      store.addJudgeRun(trial.id, { blindId: trial.blind_id, role: run.role, model: model ?? evalosIntelligenceModel(),
         judgeRef: BLIND_JUDGE_VERSION, promptHash, result: run.result });
       newRuns.set(run.role, run);
     } });

@@ -1,9 +1,8 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { blindContentView, evaluationEvidenceTraceView } from "../../kernel/src/projections.mjs";
-import { deepSeekEnvironment } from "./claude-agent-sdk-runtime.mjs";
+import { EVALOS_DEFAULT_MODEL, deepSeekEnvironment, evalosIntelligenceModel } from "./claude-agent-sdk-runtime.mjs";
 
-const DEFAULT_MODEL = "deepseek-v4-flash";
 export const JUDGE_ROLES = Object.freeze(["outcome", "evidence", "trajectory"]);
 export const BLIND_JUDGE_VERSION = "m15-independent-judges-2.2.0";
 
@@ -134,7 +133,7 @@ export function summarizeJudgeRuns(runs) {
 }
 
 export async function judgeBlindTrial({ caseSpec, outcome, trace = [], finalState = {}, namespace, apiKey,
-  model = DEFAULT_MODEL, roles = JUDGE_ROLES, onRunCompleted = null, runJudge = runOneJudge }) {
+  model = evalosIntelligenceModel(), roles = JUDGE_ROLES, onRunCompleted = null, runJudge = runOneJudge }) {
   if (!Array.isArray(roles) || new Set(roles).size !== roles.length || roles.some((role) => !JUDGE_ROLES.includes(role))) {
     throw new Error("Judge roles must be a unique subset of the frozen three roles");
   }
@@ -149,4 +148,4 @@ export async function judgeBlindTrial({ caseSpec, outcome, trace = [], finalStat
 }
 
 export const BLIND_JUDGE_RUNTIME = Object.freeze({ sdk: "@anthropic-ai/claude-agent-sdk", provider: "deepseek",
-  model: DEFAULT_MODEL, blind: true, roles: JUDGE_ROLES, independent: true, authority: "advisory-only", tools: [] });
+  model: EVALOS_DEFAULT_MODEL, blind: true, roles: JUDGE_ROLES, independent: true, authority: "advisory-only", tools: [] });
