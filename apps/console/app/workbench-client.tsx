@@ -132,7 +132,7 @@ function Dashboard() {
     <div className="metric-row">
       <Metric label="冻结数据集" value={loading ? "—" : counts.datasets ?? 0} foot={`${counts.cases ?? 0} 个版本化 Case`} href="/datasets" />
       <Metric label="实验记录" value={loading ? "—" : counts.experiments ?? 0} foot={`${counts.completed_trials ?? 0}/${counts.trials ?? 0} Trial 完成 · 含明确标注的工程测试`} href="/experiments" />
-      <Metric label="正式均分" value={formatScore(data?.score?.average)} foot={`${data?.score?.passed ?? 0}/${data?.score?.graded ?? 0} 通过硬门禁`} href="/graders" />
+      <Metric label={`正式通过 · 判分 ${data?.score?.grader_contract ?? "—"}`} value={data?.score?.graded ? `${data.score.passed}/${data.score.graded}` : "尚未产生"} foot="只算当前判分版本；按大类看成绩单，不算总分" href="/graders" />
       <Metric label="AI 调查" value={counts.analysis_runs ?? 0} foot="只读 · 不改官方分数" accent href="/analyses" />
     </div>
     <div className="split-grid dashboard-grid"><section className="surface"><SectionHead title="最近实验" sub="真实数据，不再是静态演示卡片" action={<a href="/experiments">查看全部 →</a>} />
@@ -156,7 +156,7 @@ function Datasets() {
     if (selectedDataset && item.dataset_ref !== selectedDataset) return false;
     if (statusFilter === "NEVER_RUN") return item.trial_count === 0;
     if (statusFilter === "FAILED") return item.latest_status === "FAILED" || (item.pass_rate !== null && item.pass_rate < 1);
-    if (statusFilter === "LOW_SCORE") return item.average_score !== null && item.average_score < 80;
+    if (statusFilter === "NOT_PASSED") return item.pass_rate !== null && item.pass_rate < 1;
     if (statusFilter === "INFRA") return item.infrastructure_failed;
     if (statusFilter === "UNSTABLE") return item.unstable;
     if (statusFilter === "SAFETY") return item.safety_failed;
@@ -176,12 +176,12 @@ function Datasets() {
     <section className="surface"><SectionHead title={selectedDataset ? `评测题目（Case）· ${selectedDataset}` : "全部评测题目（Case）"} sub={`${filtered.length} 道版本化考题`}
       action={<div className="case-filters"><select aria-label="按运行状态筛选" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
         <option value="ALL">全部状态（All）</option><option value="NEVER_RUN">从未运行（Never run）</option><option value="FAILED">失败/未通过（Failed）</option>
-        <option value="LOW_SCORE">低分（Low score）</option><option value="INFRA">基础设施失败（Infrastructure）</option><option value="UNSTABLE">结果不稳定（Unstable）</option><option value="SAFETY">安全门禁失败（Safety）</option>
+        <option value="NOT_PASSED">有未通过（Not passed）</option><option value="INFRA">基础设施失败（Infrastructure）</option><option value="UNSTABLE">结果不稳定（Unstable）</option><option value="SAFETY">安全门禁失败（Safety）</option>
       </select></div>} />
       <div className="selection-toolbar"><div><strong>已选 {selectedCases.size} 道题</strong><small>你选择“考什么”；Agent 仍自主决定“怎么解决”。</small></div><div>
         <button onClick={selectVisible}>选择当前筛选结果</button><button onClick={() => setSelectedCases(new Set())}>清空</button>
         <button className="toolbar-primary" title={selectedDatasetCount > 1 ? "一次评测只能使用同一冻结数据集，请先选择一个数据集" : ""} disabled={!selectedCases.size || selectedDatasetCount !== 1} onClick={() => setComposerOpen(true)}>{selectedDatasetCount > 1 ? "请先限定一个数据集" : "＋ 新建评测 →"}</button></div></div>
-      <div className="table-scroll"><table className="data-table"><thead><tr><th><input type="checkbox" aria-label="选择当前页全部题目" checked={filtered.length > 0 && filtered.every((item: Json) => selectedCases.has(item.case_ref))} onChange={(event) => event.target.checked ? selectVisible() : setSelectedCases(new Set())} /></th><th>评测题目（Case）</th><th>目标场景</th><th>工作模式</th><th>领域 / 等级</th><th>评测次数（Trial）</th><th>均分</th><th>最近证据</th></tr></thead><tbody>
+      <div className="table-scroll"><table className="data-table"><thead><tr><th><input type="checkbox" aria-label="选择当前页全部题目" checked={filtered.length > 0 && filtered.every((item: Json) => selectedCases.has(item.case_ref))} onChange={(event) => event.target.checked ? selectVisible() : setSelectedCases(new Set())} /></th><th>评测题目（Case）</th><th>目标场景</th><th>工作模式</th><th>领域 / 等级</th><th>评测次数（Trial）</th><th>通过率</th><th>最近证据</th></tr></thead><tbody>
         {filtered.map((item: Json) => <tr key={item.case_ref} className={item.latest_trial_id ? "clickable-row" : ""}
           role={item.latest_trial_id ? "link" : undefined} tabIndex={item.latest_trial_id ? 0 : undefined}
           aria-label={item.latest_trial_id ? `打开 ${item.case_id} 的最近 Trial` : undefined}
@@ -189,7 +189,7 @@ function Datasets() {
           onKeyDown={(event) => item.latest_trial_id && navigateRowByKeyboard(event, `/trials/${item.latest_trial_id}`)}>
           <td><input type="checkbox" aria-label={`选择 ${item.case_id}`} checked={selectedCases.has(item.case_ref)} onChange={() => toggle(item.case_ref)} onClick={(event) => event.stopPropagation()} /></td>
           <td><strong>{item.case_id}</strong><small>{item.version}</small></td><td className="goal-cell">{item.goal}</td><td><Tag>{operationModeLabel(item.operating_mode)}</Tag></td>
-          <td><Tag>{item.metadata?.domain ?? "通用"}</Tag><small>{item.level ?? "—"}</small></td><td>{item.completed_trials}/{item.trial_count}</td><td>{formatScore(item.average_score)}</td>
+          <td><Tag>{item.metadata?.domain ?? "通用"}</Tag><small>{item.level ?? "—"}</small></td><td>{item.completed_trials}/{item.trial_count}</td><td>{item.pass_rate === null || item.pass_rate === undefined ? "—" : `${Math.round(item.pass_rate * 100)}%`}</td>
           <td>{item.latest_trial_id ? <a className="text-link" href={`/trials/${item.latest_trial_id}`}>查看单次评测（Trial）→</a> : "尚未运行"}</td></tr>)}</tbody></table></div>
     </section>{composerOpen && <RunComposer intent="new" caseRefs={[...selectedCases]} defaultExperimentId={selectedItems[0]?.compatible_experiment_id} datasetRef={selectedItems[0]?.dataset_ref} onClose={() => setComposerOpen(false)} />}</section>;
 }
@@ -205,13 +205,13 @@ function Experiments() {
 }
 
 function ExperimentTable({ items, compact = false }: { items: Json[]; compact?: boolean }) {
-  return <div className="table-scroll"><table className="data-table experiments-table"><thead><tr><th>实验</th><th>设计 / 模型</th><th>数据集</th><th>进度</th><th>均分</th>{!compact && <th>源码版本</th>}<th>状态</th></tr></thead><tbody>
+  return <div className="table-scroll"><table className="data-table experiments-table"><thead><tr><th>实验</th><th>设计 / 模型</th><th>数据集</th><th>进度</th><th>通过</th>{!compact && <th>源码版本</th>}<th>状态</th></tr></thead><tbody>
     {items.length === 0 && <tr><td colSpan={compact ? 6 : 7}><Empty text="还没有已导入的真实实验" /></td></tr>}
     {items.map((item) => <tr key={item.id} className="clickable-row" role="link" tabIndex={0} aria-label={`打开实验 ${item.name}`}
       onClick={(event) => navigateRow(event, `/experiments/${item.id}`)} onKeyDown={(event) => navigateRowByKeyboard(event, `/experiments/${item.id}`)}>
       <td><a className="row-title" href={`/experiments/${item.id}`}>{item.name}</a><code>{item.id}</code><RunClassBadge value={item.run_class} /></td>
       <td><strong>{item.design === "paired_comparison" ? "双系统公平对比" : "单系统回归"}</strong><small>{laneLabel(item.evaluation_lane)} · {item.model?.id ?? "已冻结模型"}</small></td><td><span className="soft-label">{item.dataset_ref}</span></td>
-      <td><Progress value={item.progress?.rate ?? 0} text={`${item.progress?.completed ?? 0}/${item.progress?.total ?? 0}`} /></td><td><strong className="score-number">{formatScore(item.average_score)}</strong></td>
+      <td><Progress value={item.progress?.rate ?? 0} text={`${item.progress?.completed ?? 0}/${item.progress?.total ?? 0}`} /></td><td><strong className="score-number">{item.passes?.graded ? `${item.passes.passed}/${item.passes.graded}` : "—"}</strong></td>
       {!compact && <td><code>{shortHash(item.contestants?.[0]?.source_revision)}</code></td>}<td><Status status={item.status} /></td></tr>)}</tbody></table></div>;
 }
 
@@ -231,7 +231,7 @@ function ExperimentDetail({ id }: { id: string }) {
         foot={frozenDesign ? `${exp.planned_case_count} 个 Case × ${exp.planned_contestant_count} 名考生 × ${(data.manifest.environment_seeds ?? []).length} 个 Seed` : `${exp.progress.succeeded} 成功 · ${exp.progress.failed} 失败 · ${exp.progress.cancelled} 未执行`} />
       <Metric label={frozenDesign ? "开考状态" : "执行收口率"} value={frozenDesign ? "尚未开考" : `${Math.round((exp.progress.rate ?? 0) * 100)}%`}
         foot={frozenDesign ? "资格、容量和正式放行门禁通过后才能启动" : "成功、失败和未执行均计入收口进度"} />
-      <Metric label={frozenDesign ? "官方成绩" : "确定性均分"} value={frozenDesign ? "尚未产生" : formatScore(exp.average_score)} foot="工具名与固定顺序不计分" />
+      <Metric label={frozenDesign ? "官方成绩" : "通过硬门"} value={frozenDesign ? "尚未产生" : passSummary(data.trials ?? [])} foot="通过只看硬门；工具名与固定顺序不计分" />
       <Metric label="AI 调查" value={exp.analyses} foot={frozenDesign ? "有真实 Trial 后才能运行" : "实验关闭后可运行"} accent /></div>
     <div className="split-grid experiment-grid"><section className="surface"><SectionHead title={frozenDesign ? "冻结题目组成" : "按评测题目（Case）查看"}
       sub={frozenDesign ? "这里只冻结考试设计，不提前创建 Trial，也不代表已经开考" : "同一道题的多次 Trial 会聚合在一起，展开后可看每次明细"} />
@@ -239,9 +239,9 @@ function ExperimentDetail({ id }: { id: string }) {
         <KeyValue key={name} label={VARIANT_LABELS[name] ?? name} value={`${count} 个 Case`} />)}</div>
         <div className="authority-banner"><strong>{exp.planned_case_count} 个 Case 已冻结，{exp.planned_trial_count} 次 Trial 尚未创建</strong><p>可以在“数据集与 Case”中人工选择题目做不计分的资格验证；正式考试必须跑完整冻结题库、两名考生齐全，并在主机上显式放行。</p></div>
         <a className="text-link" href="/datasets">前往数据集选择 Case 并新建评测 →</a></> : <><div className="selection-toolbar"><div><strong>已选 {selectedCases.size} 道题</strong><small>沿用本实验冻结的全部考生与公平配置；原实验和原分数保持不变。</small></div><div><button onClick={() => setSelectedCases(new Set(caseGroups.map(([caseRef]) => caseRef)))}>全选</button><button onClick={() => setSelectedCases(new Set())}>清空</button><button className="toolbar-primary" disabled={!selectedCases.size} onClick={() => setComposerOpen(true)}>按原配置重新评测 →</button></div></div>
-      <div className="case-groups">{caseGroups.map(([caseRef, rawTrials]) => { const trials = rawTrials ?? []; const scores = trials.map((trial: Json) => Number(trial.grade?.total)).filter(Number.isFinite); return <details className="case-group" key={caseRef} open={caseGroups.length <= 4}>
-        <summary><input type="checkbox" aria-label={`选择 ${caseRef}`} checked={selectedCases.has(caseRef)} onChange={() => toggleCase(caseRef)} onClick={(event) => event.stopPropagation()} /><span><strong>{caseRef}</strong><small>{trials.length} 次单次评测（Trials）</small></span><span>均分 <b>{formatScore(average(scores))}</b></span><span>{trials.filter((trial: Json) => ["COMPLETED","FAILED","CANCELLED"].includes(trial.status)).length}/{trials.length} 已收口</span></summary>
-        <div className="trial-list">{trials.map((trial: Json) => <a href={`/trials/${trial.id}`} className="trial-row" key={trial.id}><div><strong>{trial.contestant}</strong><code>{trial.id}</code></div><div className="trial-kpis"><span>得分 <b>{trial.grade?.total ?? "—"}</b></span><span>时长 <b>{formatDuration(trial.duration_ms)}</b></span><Status status={trial.status} /></div></a>)}</div>
+      <div className="case-groups">{caseGroups.map(([caseRef, rawTrials]) => { const trials = rawTrials ?? []; return <details className="case-group" key={caseRef} open={caseGroups.length <= 4}>
+        <summary><input type="checkbox" aria-label={`选择 ${caseRef}`} checked={selectedCases.has(caseRef)} onChange={() => toggleCase(caseRef)} onClick={(event) => event.stopPropagation()} /><span><strong>{caseRef}</strong><small>{trials.length} 次单次评测（Trials）</small></span><span>通过 <b>{passSummary(trials)}</b></span><span>{trials.filter((trial: Json) => ["COMPLETED","FAILED","CANCELLED"].includes(trial.status)).length}/{trials.length} 已收口</span></summary>
+        <div className="trial-list">{trials.map((trial: Json) => <a href={`/trials/${trial.id}`} className="trial-row" key={trial.id}><div><strong>{trial.contestant}</strong><code>{trial.id}</code></div><div className="trial-kpis"><span>{trial.grade ? (trial.grade.passed ? "通过" : "未通过") : "未判分"} · 描述分 <b>{trial.grade?.total ?? "—"}</b></span><span>时长 <b>{trial.status === "RUNNING" ? "进行中" : formatDuration(trial.duration_ms)}</b></span><Status status={trial.status} /></div></a>)}</div>
       </details>; })}</div></>}
     </section><aside className="surface manifest-panel"><SectionHead title="冻结实验合同（Manifest）" sub="评测执行层（Harness）决定公平与安全边界" />
       <KeyValue label="数据集（Dataset）" value={data.manifest.dataset_ref} /><KeyValue label="套件（Suite）" value={data.manifest.suite_ref} />
@@ -258,6 +258,7 @@ function TrialCenter({ mode }: { mode: "traces" | "graders" | "analyses" }) {
   const analyses = useRemote(mode === "analyses" ? "/api/analysis-runs" : null);
   const items = useMemo(() => trials.data?.items ?? [], [trials.data]);
   const officialItems = items.filter((item: Json) => item.affects_official_score === true);
+  const currentOfficial = officialItems.filter((item: Json) => item.grade?.grader_contract_version === trials.data?.grader_contract);
   const nonOfficialItems = items.filter((item: Json) => item.affects_official_score !== true);
   const runs = analyses.data?.items ?? [];
   const trialMap = useMemo(() => new Map(items.map((item: Json) => [item.id, item])), [items]);
@@ -277,7 +278,7 @@ function TrialCenter({ mode }: { mode: "traces" | "graders" | "analyses" }) {
   if (mode === "graders") return <section className="page-content"><PageTitle eyebrow="DETERMINISTIC CODE GRADER" title="评分器中心" text="这里展示确定性 Code Grader 的全部结果，并严格区分正式成绩、资格试跑和工程自测。新合同评分只看真实终态、证据、轨迹和安全门禁；时间、Token、调用量和费用只记录，不看固定工具名称或求解顺序。" />
     {error && <ErrorBox text={error} />}<div className="metric-row three"><Metric label="全部已评分" value={items.filter((item: Json) => item.grade).length} foot={`${officialItems.length} 条正式 · ${nonOfficialItems.length} 条不计正式成绩`} href="#grader-list" />
       <Metric label="正式成绩 Trial" value={officialItems.filter((item: Json) => item.grade).length} foot="只统计正式冻结套件" href="#grader-list" />
-      <Metric label="正式均分" value={officialItems.length ? formatScore(average(officialItems.map((item: Json) => item.grade?.total))) : "尚未产生"} foot="资格与工程结果不混入；AI 调查不能改写" href="#grader-list" accent /></div>
+      <Metric label="正式通过（当前判分）" value={currentOfficial.length ? `${currentOfficial.filter((item: Json) => item.grade?.passed).length}/${currentOfficial.length}` : "尚未产生"} foot="只看硬门；描述分不定生死，旧判分版本不混入" href="#grader-list" accent /></div>
     <section className="surface" id="grader-list"><SectionHead title="逐 Trial 评分结果" sub="每一行都标明结果口径；点击进入评分细项和硬门禁" />
       <div className="table-scroll"><table className="data-table"><thead><tr><th>Case / Trial</th><th>参评架构</th><th>结果口径</th><th>总分</th><th>本次结论</th><th>硬门禁</th><th>完成时间</th></tr></thead><tbody>
         {items.map((item: Json) => <tr key={item.id} className="clickable-row" role="link" tabIndex={0} aria-label={`打开 ${item.case_ref} 的评分细项`}
@@ -756,7 +757,10 @@ function comparePassed(before: any, after: any) { if (after === null || after ==
 function compareMetric(before: any, after: any, formatter: (value: any) => string) { if (after === null || after === undefined) return "等待结果"; return `${before === null || before === undefined ? "—" : formatter(before)} → ${formatter(after)}`; }
 function costChange(before: Json | null, after: Json | null) { if (!after) return "等待结果"; if (after.cost_usd === null || after.cost_usd === undefined) return "未提供（Not reported）"; return `${before?.cost_usd === null || before?.cost_usd === undefined ? "—" : formatCost(before.cost_usd)} → ${formatCost(after.cost_usd)}`; }
 function hardGateChange(before: Json | null, after: Json | null) { if (!after) return "等待结果"; const display = (value: Json | null) => value ? `${value.hard_gates_passed}/${value.hard_gates_total}` : "—"; return `${display(before)} → ${display(after)}`; }
-function average(values: any[]) { const numbers = values.map(Number).filter(Number.isFinite); return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) / numbers.length : null; }
+function passSummary(trials: Json[]) {
+  const graded = (trials ?? []).filter((trial: Json) => trial?.grade);
+  return graded.length ? `${graded.filter((trial: Json) => trial.grade.passed).length}/${graded.length}` : "—";
+}
 function navigateRow(event: React.MouseEvent<HTMLElement>, href: string) {
   const target = event.target as HTMLElement;
   if (target.closest("button,input,textarea,select,summary")) return;

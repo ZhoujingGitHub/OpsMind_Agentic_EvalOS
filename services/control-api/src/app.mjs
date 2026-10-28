@@ -549,6 +549,10 @@ export function createApp({
       progress: { completed: summary.terminal_trials, succeeded: summary.completed_trials,
         failed: summary.failed_trials, cancelled: summary.cancelled_trials, total: summary.trial_count,
         rate: summary.completion_rate }, average_score: summary.average_score,
+      // Verdicts, not totals: within one experiment every paper has the same grader.
+      passes: (() => { const graded = trials.map((trial) => gradeFor(trial.id)?.result).filter(Boolean);
+        return { passed: graded.filter((result) => result.passed).length, graded: graded.length,
+          grader_versions: [...new Set(graded.map((result) => result.grader_version))] }; })(),
       analyses: trials.reduce((sum, trial) => sum + store.listAnalysisRuns(trial.id).length, 0),
       created_at: experiment.created_at, started_at: experiment.started_at, completed_at: experiment.completed_at };
   });
@@ -1547,7 +1551,10 @@ export function createApp({
         const trials = store.listTrials(null, { includeReplays: false });
         const formalExperimentIds = new Set(store.listExperiments().filter((item) => evaluationMode(item) === "FORMAL").map((item) => item.id));
         const formalTrialIds = new Set(trials.filter((item) => formalExperimentIds.has(item.experiment_id)).map((item) => item.id));
-        const grades = store.listGraderRuns().filter((item) => item.dimension === "overall" && formalTrialIds.has(item.trial_id));
+        // Only papers graded under the current contract are comparable; older
+        // versions stay readable on their own trials but are not counted here.
+        const grades = store.listGraderRuns().filter((item) => item.dimension === "overall" && formalTrialIds.has(item.trial_id)
+          && item.result?.grader_contract_version === GRADER_CONTRACT_VERSION);
         return json({ contract: "evalos-workbench.4", milestone: frozenM31Manifest.milestone, platform: {
           core: "Claude Agent SDK + DeepSeek + MCP + Skills + Harness", workflow_graph: null,
           official_score_source: "deterministic_code_grader", ai_analysis_authority: "diagnostic_only",
@@ -1558,7 +1565,7 @@ export function createApp({
         }, counts: { datasets: store.listDatasets().length, cases: store.listCases().length,
           experiments: experiments.length, trials: trials.length, completed_trials: trials.filter((item) => item.status === "COMPLETED").length,
           analysis_runs: store.listAnalysisRuns().length, evaluation_tasks: store.listEvaluationRunRequests().length }, score: {
-          average: grades.length ? Number((grades.reduce((sum, item) => sum + Number(item.result.total ?? 0), 0) / grades.length).toFixed(2)) : null,
+          grader_contract: GRADER_CONTRACT_VERSION,
           passed: grades.filter((item) => item.result.passed).length, graded: grades.length,
         }, experiments: experiments.slice(0, 8), ledger: ledger.verify() }, 200, cors);
       }
@@ -1583,7 +1590,7 @@ export function createApp({
         return json({ items: workbenchExperiments() }, 200, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/workbench/trials") {
-        return json({ items: workbenchTrials() }, 200, cors);
+        return json({ items: workbenchTrials(), grader_contract: GRADER_CONTRACT_VERSION }, 200, cors);
       }
       // The report card (24 甲): by fault category, never a total. Identities stay
       // blinded until the experiment is closed, exactly as on the trial list.
