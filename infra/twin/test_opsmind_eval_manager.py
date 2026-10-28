@@ -233,7 +233,7 @@ class BusinessTruthSnapshotTest(unittest.TestCase):
             ("langgraph-v1", manager.harness_probes.LANGGRAPH_NETWORK),
         ):
             with self.subTest(contestant_ref=contestant_ref):
-                verification = {"contract_version": "opsmind-mec-business-verification/1.0",
+                verification = {"contract_version": "opsmind-mec-business-verification/1.1",
                                 "passed": False, "status": "failed"}
                 response, seen = self.snapshot(contestant_ref, verification)
                 self.assertTrue(response["ok"])
@@ -247,7 +247,7 @@ class BusinessTruthSnapshotTest(unittest.TestCase):
     def test_unobservable_business_is_reported_as_unknown_not_as_recovered(self):
         response, _ = self.snapshot(
             "langgraph-v1",
-            {"contract_version": "opsmind-mec-business-verification/1.0",
+            {"contract_version": "opsmind-mec-business-verification/1.1",
              "passed": None, "status": "inconclusive"},
         )
         self.assertIsNone(response["snapshot"]["healthy"])

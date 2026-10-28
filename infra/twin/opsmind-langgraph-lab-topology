@@ -113,10 +113,11 @@ up_all() {
   ip -n opsmind-lg-a route add "$UE_NET" via 10.60.0.1 dev lg-a-host
   ip route replace "$SERVICE_NET" via 10.60.0.2 dev lg-host-a
 
-  iptables -C FORWARD -i ogstun -o lg-host-a -j ACCEPT >/dev/null 2>&1 || \
-    iptables -I FORWARD 1 -i ogstun -o lg-host-a -j ACCEPT
-  iptables -C FORWARD -i lg-host-a -o ogstun -j ACCEPT >/dev/null 2>&1 || \
-    iptables -I FORWARD 1 -i lg-host-a -o ogstun -j ACCEPT
+  # No FORWARD accept of our own: the base twin's chain already accepts the UE
+  # network both ways, *after* its fault chain. An accept inserted at position 1
+  # (as this script used to do) lets UE traffic skip every injected fault —
+  # 2026-10-29 calibration: dns-blocked left LG's MEC DNS answering. The cleanup
+  # below still deletes those two legacy rules wherever they survive.
 
   # Preserve UE source addresses only on the dedicated MEC path, so the MEC can
   # reply into the UE network instead of the shared MASQUERADE address.
@@ -151,7 +152,7 @@ apply_fault() {
       tc -n opsmind-lg-b qdisc add dev lg-b-c root netem loss 60%
       ;;
     transport-rate-limit)
-      tc -n opsmind-lg-b qdisc add dev lg-b-c root tbf rate 16kbit burst 1600 latency 20ms
+      tc -n opsmind-lg-b qdisc add dev lg-b-c root tbf rate 1kbit burst 200 latency 50ms
       ;;
     transport-route-loop)
       ip -n opsmind-lg-b route replace "$SERVICE_NET" via 10.60.0.5 dev lg-b-a

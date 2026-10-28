@@ -133,7 +133,9 @@ def test_langgraph_teardown_removes_every_rule_it_installed():
     installed = [line.strip() for line in source.splitlines()
                  if line.strip().startswith("iptables ") and (" -I " in line or " -A " in line)]
     removed = [line.strip() for line in source.splitlines() if line.strip().startswith("delete_rule ")]
-    assert len(installed) == 3 and len(removed) == 3
+    # One rule installed (the NAT exception); teardown also deletes the two
+    # FORWARD accepts older releases inserted ahead of the fault chain.
+    assert len(installed) == 1 and len(removed) == 3
 
     def rule(text):
         """Normalize `iptables [-t table] -I chain N ...` and `delete_rule table chain ...`."""
@@ -145,7 +147,9 @@ def test_langgraph_teardown_removes_every_rule_it_installed():
             chain, *match = parts[1:]
         return table, chain, tuple(item for item in match if not item.isdigit())
 
-    assert sorted(rule(item) for item in installed) == sorted(rule(item) for item in removed)
+    legacy = {("filter", "FORWARD", ("-i", "ogstun", "-o", "lg-host-a", "-j", "ACCEPT")),
+              ("filter", "FORWARD", ("-i", "lg-host-a", "-o", "ogstun", "-j", "ACCEPT"))}
+    assert {rule(item) for item in removed} == {rule(item) for item in installed} | legacy
 
 
 def test_langgraph_adapter_is_released_and_installed_by_the_single_controller_entry():

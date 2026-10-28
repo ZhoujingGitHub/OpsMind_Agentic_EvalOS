@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { validateCandidateRegistration } from "./candidate-release-registration.mjs";
+import { GRADER_REF } from "../packages/kernel/src/grader.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const read = (file) => readFileSync(path.join(root, file), "utf8");
@@ -55,7 +56,9 @@ assert.match(app, /createLangGraphProductConnector/);
 assert.match(app, /createTestDouble\("test-double-a"/);
 assert.match(app, /test-double-a:ENGINEERING_TEST/);
 assert.match(runner, /buildEvaluationContract/);
-assert.match(grader, /export const GRADER_REF = "evalos-code-grader@7\.0\.0"/);
+// 2026-10-29：业务真值改为 1.1（响应时间进门槛），判分版本跟着升到 7.0.1。
+assert.match(grader, /export const GRADER_REF = "evalos-code-grader@7\.0\.1"/);
+assert.match(grader, /opsmind-mec-business-verification\/1\.1/);
 assert.match(grader, /grader_version: context\.graderRef \?\? GRADER_REF/);
 // 2026-09-20：根因判据换成「指认那处被改动的状态」，判定规则变了版本号必须跟着变。
 assert.match(grader, /the parameters of the command the laboratory used to inject the fault/);
@@ -85,7 +88,7 @@ for (const name of executableManifests) {
   const manifest = JSON.parse(read(name.startsWith("config/") ? name : `config/${name}`));
   if (name === "m15-smoke.manifest.json") {
     assert.equal(manifest.manifest_version, "6.0", "工程测试替身必须继续使用历史隔离的 Manifest 6.0");
-    assert.equal(manifest.frozen_dependencies.grader.ref, "evalos-code-grader@7.0.0",
+    assert.equal(manifest.frozen_dependencies.grader.ref, GRADER_REF,
       "当前可执行工程测试不得偷偷保留旧 Grader 路径");
   }
   if (name === "m3-formal-agent-capability.manifest.json") {
@@ -104,7 +107,7 @@ assert.equal(formal.dataset_ref, "m3-l2-ops-categories@3.3.0");
 assert.equal(formal.suite_ref, "m3-ops-category-acceptance@3.3.0");
 assert.equal(formal.case_refs.length, 40);
 assert.equal(formal.case_refs.every((ref) => ref.endsWith("@3.3.0")), true);
-assert.equal(formal.frozen_dependencies.grader.ref, "evalos-code-grader@7.0.0");
+assert.equal(formal.frozen_dependencies.grader.ref, GRADER_REF);
 const graderSourceDigest = "sha256:" + createHash("sha256").update(
   // 判分代码全在这三份里。少算一份，改了判据也能顶着旧摘要混过去——
   // fault-delta.mjs 是 2026-09-20 新加的根因判据，必须一起进摘要。

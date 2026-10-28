@@ -25,7 +25,7 @@ import { measuredUsage } from "../src/runner.mjs";
 // The laboratory samples whether the business works; the scenario score does not.
 // Fixtures state the two separately so a test can make them disagree on purpose.
 const businessFact = (passed) => ({
-  contract_version: "opsmind-mec-business-verification/1.0",
+  contract_version: "opsmind-mec-business-verification/1.1",
   status: passed === true ? "passed" : passed === false ? "failed" : "inconclusive",
   passed,
   observed_at: "2026-09-11T16:20:00.000Z",

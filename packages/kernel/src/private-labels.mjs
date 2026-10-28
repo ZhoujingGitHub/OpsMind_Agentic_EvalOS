@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { gradeTrial } from "./grader.mjs";
+import { GRADER_REF, gradeTrial } from "./grader.mjs";
 import { isoNow, parseJson, sha256, stableStringify } from "./utils.mjs";
 
 export class PrivateLabelStore {
@@ -32,7 +32,7 @@ export class PrivateLabelStore {
 }
 
 export class DeterministicGradingService {
-  constructor({ labelStore, executionCaseResolver, graderRef = "evalos-code-grader@7.0.0" }) {
+  constructor({ labelStore, executionCaseResolver, graderRef = GRADER_REF }) {
     this.labelStore = labelStore;
     this.executionCaseResolver = executionCaseResolver;
     this.graderRef = graderRef;

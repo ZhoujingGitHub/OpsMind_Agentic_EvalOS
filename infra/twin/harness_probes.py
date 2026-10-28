@@ -229,19 +229,37 @@ def probe(kind, parameters, scope, *, network, runner=None):
             "duration_ms": round((time.monotonic() - started) * 1000, 3)}
 
 
+# A service that answers, but slowly, is not a healthy service. Measured on
+# 2026-10-29 on both candidate topologies: healthy DNS 86-107 ms and HTTP
+# 48-73 ms; with 250 ms of user-plane delay DNS 339-356 ms and HTTP 553-576 ms.
+# Without this objective a latency or rate-limit fault was graded as recovered
+# before anyone touched it.
+BUSINESS_RESPONSE_OBJECTIVE_MS = 300
+
+
+def response_ms(check):
+    value = check.get("elapsed_ms", check.get("duration_ms"))
+    return value if isinstance(value, (int, float)) else None
+
+
 def business_verification(scope, profile):
     """Fresh sampling by the verifier; no model results or cached booleans."""
     network = topology(profile)
     dns = probe("dns", {}, scope, network=network)
     http = probe("http", {}, scope, network=network)
     expected_address = network["mec_address"]
+    timings = [response_ms(check) for check in (dns, http)]
+    within_objective = all(value is not None and value <= BUSINESS_RESPONSE_OBJECTIVE_MS for value in timings)
     passed = (dns.get("resolved") is True and expected_address in dns.get("answers", [])
               and http.get("healthy") is True
-              and dns.get("source") == http.get("source"))
+              and dns.get("source") == http.get("source")
+              and within_objective)
     unavailable = any(x.get("status") == "unavailable" or
                       x.get("error", {}).get("code") == "DEPENDENCY_UNAVAILABLE" for x in (dns, http))
-    record = {"contract_version": "opsmind-mec-business-verification/1.0",
-              "required_checks": ["mec_dns_answer", "mec_http_health"],
+    record = {"contract_version": "opsmind-mec-business-verification/1.1",
+              "required_checks": ["mec_dns_answer", "mec_http_health", "response_within_objective"],
+              "response_objective_ms": BUSINESS_RESPONSE_OBJECTIVE_MS,
+              "response_ms": {"dns": timings[0], "http": timings[1]},
               "status": "passed" if passed else "inconclusive" if unavailable else "failed",
               "passed": True if passed else None if unavailable else False,
               "checks": {"dns": dns, "http": http}, "observed_at": now()}

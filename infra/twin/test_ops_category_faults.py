@@ -54,7 +54,22 @@ class InjectionTest(unittest.TestCase):
                          [["tc", "qdisc", "add", "dev", "opsmindue0", "root", "netem", "loss", "40%"]])
         self.assertEqual(self.inject("radio-link-down"), [["ip", "link", "set", "opsmindue0", "down"]])
         self.assertEqual(self.inject("harmless-rule"),
-                         [["iptables", "-A", "OPSMIND_TWIN_IN", "-p", "tcp", "--dport", "7777", "-j", "DROP"]])
+                         [["iptables", "-A", "OPSMIND_TWIN_IN", "-p", "tcp", "--dport", "23", "-j", "DROP"]])
+
+    def test_nrf_outage_is_injected_so_that_the_amf_has_to_discover_again(self) -> None:
+        # NRF down alone left the business untouched (AMF cache); measured 2026-10-29.
+        self.assertEqual(self.inject("nrf-process-down"),
+                         [["systemctl", "stop", "open5gs-nrfd"], ["systemctl", "restart", "open5gs-amfd"]])
+
+    def test_the_langgraph_topology_never_accepts_traffic_ahead_of_the_fault_chain(self) -> None:
+        text = (Path(__file__).with_name("opsmind-langgraph-lab-topology")).read_text(encoding="utf-8")
+        self.assertNotRegex(text, r"iptables\s+-I\s+FORWARD")
+        self.assertIn("delete_rule filter FORWARD -i ogstun -o lg-host-a -j ACCEPT", text)
+
+    def test_the_rate_limit_is_strong_enough_to_be_seen_on_both_topologies(self) -> None:
+        for name in ["opsmind-harness-lab-topology", "opsmind-langgraph-lab-topology"]:
+            text = (Path(__file__).with_name(name)).read_text(encoding="utf-8")
+            self.assertIn("tbf rate 1kbit burst 200 latency 50ms", text, name)
 
     def test_transport_faults_and_the_clean_baseline_inject_nothing_in_the_base_twin(self) -> None:
         # Transport faults live on each candidate's own hops; the topology owner applies them.

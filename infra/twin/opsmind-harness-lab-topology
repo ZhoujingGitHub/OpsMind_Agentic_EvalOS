@@ -139,7 +139,7 @@ apply_fault() {
       tc -n opsmind-ah-b qdisc add dev ah-b-c root netem loss 60%
       ;;
     transport-rate-limit)
-      tc -n opsmind-ah-b qdisc add dev ah-b-c root tbf rate 16kbit burst 1600 latency 20ms
+      tc -n opsmind-ah-b qdisc add dev ah-b-c root tbf rate 1kbit burst 200 latency 50ms
       ;;
     transport-route-loop)
       ip -n opsmind-ah-b route replace "$SERVICE_NET" via 10.61.0.5 dev ah-b-a

@@ -111,8 +111,8 @@ def test_fresh_business_verification_requires_both_services_and_same_source(monk
         return outputs[kind]
     monkeypatch.setattr(probes, "probe", sample)
     outputs.update(dns={"resolved": True, "answers": [NETWORK["mec_address"]],
-                        "source": {"interface": "uesimtun1"}},
-                   http={"healthy": False, "source": {"interface": "uesimtun1"}})
+                        "source": {"interface": "uesimtun1"}, "elapsed_ms": 88.0},
+                   http={"healthy": False, "source": {"interface": "uesimtun1"}, "duration_ms": 52.0})
     verify = lambda: probes.business_verification(scope(), probes.HARNESS_NETWORK)
     assert verify()["passed"] is False
     outputs["http"]["healthy"] = True
@@ -120,6 +120,28 @@ def test_fresh_business_verification_requires_both_services_and_same_source(monk
     outputs["http"]["source"] = {"interface": "uesimtun2"}
     assert verify()["passed"] is False
     assert calls == ["dns", "http"] * 3
+
+
+def test_a_service_that_answers_too_slowly_is_not_recovered(monkeypatch):
+    # Measured 2026-10-29: healthy DNS ~90 ms / HTTP ~55 ms; 250 ms of user-plane
+    # delay gave DNS ~350 ms / HTTP ~560 ms and used to pass as "recovered".
+    monkeypatch.setattr(probes, "topology", lambda profile: NETWORK)
+    outputs = {"dns": {"resolved": True, "answers": [NETWORK["mec_address"]], "source": {"interface": "uesimtun1"}},
+               "http": {"healthy": True, "source": {"interface": "uesimtun1"}}}
+    monkeypatch.setattr(probes, "probe", lambda kind, *_, **__: outputs[kind])
+    verify = lambda: probes.business_verification(scope(), probes.HARNESS_NETWORK)
+    outputs["dns"]["elapsed_ms"], outputs["http"]["duration_ms"] = 88.0, 55.0
+    record = verify()
+    assert record["passed"] is True
+    assert record["contract_version"] == "opsmind-mec-business-verification/1.1"
+    assert record["response_ms"] == {"dns": 88.0, "http": 55.0}
+    outputs["dns"]["elapsed_ms"], outputs["http"]["duration_ms"] = 350.0, 560.0
+    assert verify()["passed"] is False
+    outputs["dns"]["elapsed_ms"] = 88.0
+    assert verify()["passed"] is False
+    # No timing at all cannot be shown to meet the objective.
+    del outputs["http"]["duration_ms"]
+    assert verify()["passed"] is False
 
 
 def test_manifest_profile_must_name_a_known_candidate_and_stay_self_consistent(monkeypatch):

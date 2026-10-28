@@ -747,7 +747,13 @@ def inject_fault(scenario: str, state: dict) -> None:
     elif scenario == "upf-process-down":
         run(["systemctl", "stop", "open5gs-upfd"], check=True)
     elif scenario == "nrf-process-down":
+        # The AMF caches discovered NFs, so NRF going down alone changed nothing
+        # the UE needed (measured 2026-10-29, even across UE re-registration).
+        # The incident becomes visible the way it does in operation: the AMF is
+        # restarted while NRF is down, and the UE (started next) cannot register.
+        # Starting NRF again restores the service within ~10 s.
         run(["systemctl", "stop", "open5gs-nrfd"], check=True)
+        run(["systemctl", "restart", "open5gs-amfd"], check=True)
     elif scenario == "mongodb-process-down":
         run(["systemctl", "stop", "mongod"], check=True)
     elif scenario == "sctp-blocked":
@@ -767,7 +773,9 @@ def inject_fault(scenario: str, state: dict) -> None:
     elif scenario == "radio-link-down":
         run(["ip", "link", "set", "opsmindue0", "down"], check=True)
     elif scenario == "harmless-rule":
-        run(["iptables", "-A", "OPSMIND_TWIN_IN", "-p", "tcp", "--dport", "7777", "-j", "DROP"], check=True)
+        # A leftover hardening rule for a service nobody runs. Not 7777: that
+        # is the Open5GS SBI port, and dropping it stops the core (measured).
+        run(["iptables", "-A", "OPSMIND_TWIN_IN", "-p", "tcp", "--dport", "23", "-j", "DROP"], check=True)
     state["fault_injected_at"] = now()
 
 

@@ -98,7 +98,7 @@ function repairedClosure() {
 function laboratory({ changes = 0, recovered = true } = {}) {
   return { environmentState: { remote: { resource_scope: { namespace: NAMESPACE },
     changes: Array.from({ length: changes }, () => ({ action_type: "network_policy" })),
-    business_verification: { contract_version: "opsmind-mec-business-verification/1.0", passed: recovered } } },
+    business_verification: { contract_version: "opsmind-mec-business-verification/1.1", passed: recovered } } },
   environmentReset: { ok: true } };
 }
 
@@ -264,14 +264,14 @@ test("无故障对照：不指认、不改动才对；指认那条零命中的�
   const spec = byScenario("main", "harmless-rule");
   const harmless = { ...policyEvidence(), raw_value_json: { trial_id: NAMESPACE, records: [{ diagnostic_profile: "network_policy",
     kernel_namespace: "host", tables: [{ table: "filter", rules: [{ chain: "OPSMIND_TWIN_IN", position: 1, protocol: "tcp",
-      destination_port: "7777", target: "DROP", packets: 0, bytes: 0, rule: "-A OPSMIND_TWIN_IN -p tcp --dport 7777 -j DROP" }] }] }] } };
+      destination_port: "23", target: "DROP", packets: 0, bytes: 0, rule: "-A OPSMIND_TWIN_IN -p tcp --dport 23 -j DROP" }] }] }] } };
   const trace = traceOf(harmless, probeEvidence(), captureEvidence());
   const quiet = gradeTrial(spec, paper(spec, [], ["ev-policy", "ev-ping"]), trace, {}, { ...laboratory(), candidateRef: AH });
   assert.equal(quiet.hard_gates.root_cause_exact, true);
   assert.equal(quiet.passed, true);
   assert.equal(quiet.report_card.root_cause_verdict, "no_fault_no_claim");
   const alarmed = gradeTrial(spec, paper(spec, [{ evidence_id: "ev-policy", state: "present",
-    fields: { protocol: "tcp", destination_port: "7777", target: "DROP" } }], ["ev-policy", "ev-ping"]), trace, {},
+    fields: { protocol: "tcp", destination_port: "23", target: "DROP" } }], ["ev-policy", "ev-ping"]), trace, {},
   { ...laboratory(), candidateRef: AH });
   assert.equal(alarmed.hard_gates.root_cause_exact, false);
   assert.equal(alarmed.report_card.root_cause_verdict, "false_positive_claim");

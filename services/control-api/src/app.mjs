@@ -7,7 +7,7 @@ import {
   expertCalibrationFromConsensusSamples, createEvalRegistry, createCaseEnvironment, createTestDouble,
   evaluationDecisionReport, evaluationEvidenceTraceView, explainTraceRecord, TRACE_FILTERS, readSnapshotFile, sha256,
   auditTrialEfficiency, candidateExecutionBudget, trialSettlementBudget, caseRunnability,
-  CANDIDATE_PRESENCE_PATH, CandidatePresenceRegistry, assertCandidateBound, GRADER_CONTRACT_VERSION, examReportCard,
+  CANDIDATE_PRESENCE_PATH, CandidatePresenceRegistry, assertCandidateBound, GRADER_CONTRACT_VERSION, GRADER_REF, examReportCard,
   openControlStore,
   assertCandidatePreflight, DEPLOYMENT_ATTESTATION_CONTRACT, trustedDeploymentAttestation,
 } from "../../../packages/kernel/src/index.mjs";
@@ -223,7 +223,7 @@ export function createApp({
       recommendation_quality: "evalos-recommendation-quality/1.4",
       recorded_only: ["competing_exclusion", "gap_disclosure", "evidence_lineages", "usage"] } });
   const gradingService = new DeterministicGradingService({ labelStore: labels,
-    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@7.0.0" });
+    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: GRADER_REF });
   const approvalOracle = new FrozenApprovalOracle({ labelStore: labels });
   const ledger = new EvaluationLedger(store);
   const loadRelayConfig = () => {

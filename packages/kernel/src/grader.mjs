@@ -3,10 +3,12 @@ import { protocolEvidenceReferences } from "./product-evidence-semantics.mjs";
 import { sha256 } from "./utils.mjs";
 
 export const GRADER_CONTRACT_VERSION = "7.0";
-export const GRADER_REF = "evalos-code-grader@7.0.0";
+// 7.0.1 (2026-10-29): business truth is contract 1.1 — answering within the
+// response objective is part of "recovered" (lab calibration, see harness_probes).
+export const GRADER_REF = "evalos-code-grader@7.0.1";
 
 // The single business-truth contract both candidates and the laboratory speak.
-const BUSINESS_VERIFICATION_CONTRACT = "opsmind-mec-business-verification/1.0";
+const BUSINESS_VERIFICATION_CONTRACT = "opsmind-mec-business-verification/1.1";
 
 // The 100-point total is a diagnosis-quality description and never decides a
 // verdict. Since 7.0 it only counts what the exam can verify: whether the

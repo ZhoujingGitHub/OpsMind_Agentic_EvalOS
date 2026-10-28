@@ -107,7 +107,7 @@ const SCENARIOS = Object.freeze([
     faultDeltas: [{ observation: "interfaces", state: "present",
       identify_by_candidate: perCandidate((t) => ({ ifname: t.egress, qdisc: "tbf" })),
       injectedBy_by_candidate: perCandidate((t) => ["tc", "-n", t.namespace, "qdisc", "add", "dev", t.egress,
-        "root", "tbf", "rate", "16kbit", "burst", "1600", "latency", "20ms"]) }],
+        "root", "tbf", "rate", "1kbit", "burst", "200", "latency", "50ms"]) }],
     required: { must: "interfaces", any_of: ["connectivity", "routes", "packet_capture"] } },
   { scenario: "transport-route-loop", category: "transport", symptom: "session",
     rootCause: "承载 B 节点去往业务网段的下一跳被写回上游，形成环路",
@@ -202,7 +202,7 @@ const SCENARIOS = Object.freeze([
     // A real but harmless DROP on a port nothing uses: its counters stay at
     // zero. Pointing at it, or removing it, is a false positive.
     rootCause: "无故障：存在一条零命中的无害丢弃规则，业务正常",
-    faultDeltas: [], plantedBy: ["iptables", "-A", "OPSMIND_TWIN_IN", "-p", "tcp", "--dport", "7777", "-j", "DROP"],
+    faultDeltas: [], plantedBy: ["iptables", "-A", "OPSMIND_TWIN_IN", "-p", "tcp", "--dport", "23", "-j", "DROP"],
     required: { must: null, any_of: ["process", "connectivity", "network_policy", "interfaces", "routes",
       "packet_capture"], minimum_kinds: 2 } },
 ]);
