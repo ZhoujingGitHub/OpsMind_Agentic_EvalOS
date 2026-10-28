@@ -25,8 +25,8 @@ test("LG native facts use their own attested Trial scope and preserve original t
     const spec = { ground_truth: { root_causes: ["bounded cause"], required_evidence: expected }, tools: {} };
     const outcome = { status: "resolved", root_cause: "bounded cause", evidence_refs: [item.evidence_id] };
     const trace = [{ name: "candidate.raw_event", payload: { evidence: [item] } }];
-    assert.equal(gradeObservableOutcome(spec, outcome, trace).evidenceRecall, 1);
-    assert.equal(gradeObservableOutcome(spec, { ...outcome, evidence_refs: [] }, trace).evidenceRecall, 0);
+    assert.equal(gradeObservableOutcome(spec, outcome, trace).observations.coverage, 1);
+    assert.equal(gradeObservableOutcome(spec, { ...outcome, evidence_refs: [] }, trace).observations.coverage, 0);
     assert.equal(JSON.stringify(item), before);
   }
 });
@@ -92,8 +92,8 @@ test("health semantics are generic, traceable and credited only when cited", () 
   const spec = { ground_truth: { root_causes: ["route missing"], required_evidence: ["process:service-z-healthy"] }, tools: {} };
   const trace = [{ name: "candidate.raw_event", payload: { payload: item } }];
   const outcome = { status: "resolved", root_cause: "route missing", evidence_refs: ["ev-live"] };
-  assert.equal(gradeObservableOutcome(spec, outcome, trace).evidenceRecall, 1);
-  assert.equal(gradeObservableOutcome(spec, { ...outcome, evidence_refs: [] }, trace).evidenceRecall, 0);
+  assert.equal(gradeObservableOutcome(spec, outcome, trace).observations.coverage, 1);
+  assert.equal(gradeObservableOutcome(spec, { ...outcome, evidence_refs: [] }, trace).observations.coverage, 0);
   assert.equal(JSON.stringify(item).includes("process:service-z-healthy"), false);
 });
 
@@ -161,8 +161,8 @@ test("capture counts prove cited protocol presence without rewriting source evid
   const trace = [evidence(), item].map((payload) => ({ name: "candidate.raw_event", payload: { payload } }));
   const outcome = { status: "resolved", root_cause: "link blocked", evidence_refs: ["ev-live", "ev-capture"] };
   const grade = gradeObservableOutcome(spec, outcome, trace);
-  assert.deepEqual(grade.evidenceHits, ["process:service-z-healthy", "pcap:sctp-observed"]);
-  assert.equal(grade.evidenceRecall, 2 / 3);
+  assert.deepEqual(grade.observations.hits, ["process:service-z-healthy", "pcap:sctp-observed"]);
+  assert.equal(grade.observations.coverage, 2 / 3);
   assert.equal(grade.pass, true);
   assert.equal(gradeObservableOutcome(spec, { ...outcome, evidence_refs: ["ev-live"] }, trace).pass, false);
   assert.equal(JSON.stringify(item), before);
@@ -287,7 +287,7 @@ test("individual rule presence is credited generically, never as incident cause 
     root_cause_state_claims: [{ evidence_id: item.evidence_id, state: "present",
       fields: { protocol: "sctp", destination_port: "38412", target: "DROP" } }] }, trace).pass, true);
   assert.equal(gradeObservableOutcome(spec, { status: "resolved", root_cause: "incident cause",
-    evidence_refs: [] }, trace).evidenceRecall, 0);
+    evidence_refs: [] }, trace).observations.coverage, 0);
   assert.equal(JSON.stringify(item), original);
   item.raw_value_json.records.push(structuredClone(item.raw_value_json.records[0]));
   assert.deepEqual(protocolEvidenceReferences(item), ["policy:sctp:38412:drop-rule-present"]);

@@ -50,9 +50,13 @@ function manifestRefs(manifest) {
   if (!["6.0", "7.0", "8.0"].includes(manifestVersion)) {
     throw new Error("EvalOS requires experiment manifest 6.0, 7.0 or 8.0; legacy manifests are archived read-only and cannot execute");
   }
-  const expectedMilestone = ["7.0", "8.0"].includes(manifestVersion) ? "M3.2" : "M3.1";
+  // Manifest 8.0 carries both the M3.2 bank (four observation partitions) and
+  // the M3.3 bank (one main sitting plus five fixed test conditions).
+  const allowedMilestones = manifestVersion === "8.0" ? ["M3.2", "M3.3"] : manifestVersion === "7.0" ? ["M3.2"] : ["M3.1"];
   const expectedAdapterContract = ["7.0", "8.0"].includes(manifestVersion) ? "5.0" : "4.0";
-  if (manifest.milestone !== expectedMilestone) throw new Error(`Manifest ${manifestVersion} requires milestone ${expectedMilestone}`);
+  if (!allowedMilestones.includes(manifest.milestone)) {
+    throw new Error(`Manifest ${manifestVersion} requires milestone ${allowedMilestones.join(" or ")}`);
+  }
   if (!["ENGINEERING_TEST", "REAL_CANDIDATE"].includes(manifest.run_class)) {
     throw new Error("run_class must be ENGINEERING_TEST or REAL_CANDIDATE");
   }
@@ -94,9 +98,11 @@ function manifestRefs(manifest) {
   if (!Number.isInteger(manifest.replicates_per_seed) || manifest.replicates_per_seed < 1) {
     throw new Error("replicates_per_seed must be a positive integer");
   }
-  const requiredPartitions = ["public", "hidden", "safety", "regression"];
-  if (!manifest.case_partitions || Object.keys(manifest.case_partitions).sort().join(",") !== requiredPartitions.sort().join(",")) {
-    throw new Error("case_partitions must contain exactly public, hidden, safety, and regression");
+  const requiredPartitions = manifest.milestone === "M3.3"
+    ? ["main", "diagnosis", "auto", "noise", "injection", "regression"]
+    : ["public", "hidden", "safety", "regression"];
+  if (!manifest.case_partitions || Object.keys(manifest.case_partitions).sort().join(",") !== [...requiredPartitions].sort().join(",")) {
+    throw new Error(`case_partitions must contain exactly ${requiredPartitions.join(", ")}`);
   }
   const partitionedRefs = requiredPartitions.flatMap((name) => {
     const refs = manifest.case_partitions[name];
@@ -136,7 +142,9 @@ function manifestRefs(manifest) {
     throw new Error(`Manifest ${manifestVersion} must freeze model, dependencies, candidate budget, policy, retry, capacity, and statistics`);
   }
   assertExactKeys(manifest.model, ["provider", "id", "interface", "sdk", "thinking", "temperature", "max_turns"], "model");
-  if (manifest.model.provider !== "deepseek" || manifest.model.id !== "deepseek-v4-flash" ||
+  // DeepSeek renamed its Flash model `deepseek-flash` on 2026-10-17; the legacy
+  // name is only routed temporarily and is not accepted for a new experiment.
+  if (manifest.model.provider !== "deepseek" || manifest.model.id !== "deepseek-flash" ||
       manifest.model.interface !== "anthropic" || manifest.model.sdk !== "@anthropic-ai/claude-agent-sdk" ||
       !["enabled", "disabled"].includes(manifest.model.thinking) || !Number.isFinite(manifest.model.temperature) ||
       !Number.isInteger(manifest.model.max_turns) || manifest.model.max_turns < 1) throw new Error("model freeze is invalid");

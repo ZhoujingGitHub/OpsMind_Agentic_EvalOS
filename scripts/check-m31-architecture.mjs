@@ -23,7 +23,8 @@ const packageFiles = ["package.json", "packages/agent-runtime/package.json", "ap
   .map(read).join("\n");
 
 assert.match(runtime, /@anthropic-ai\/claude-agent-sdk/);
-assert.match(runtime, /deepseek-v4-flash/);
+assert.match(runtime, /EVALOS_DEFAULT_MODEL = "deepseek-flash"/);
+assert.match(runtime, /EVALOS_INTELLIGENCE_MODEL/);
 assert.match(runtime, /model-driven-tool-loop/);
 assert.doesNotMatch(blindJudge, /maxBudgetUsd\s*:/,
   "三位 AI Judge 不得设置费用截断上限；Token、费用和耗时只记录，不据此中断或评分");
@@ -54,12 +55,16 @@ assert.match(app, /createLangGraphProductConnector/);
 assert.match(app, /createTestDouble\("test-double-a"/);
 assert.match(app, /test-double-a:ENGINEERING_TEST/);
 assert.match(runner, /buildEvaluationContract/);
-assert.match(grader, /grader_version: context\.graderRef \?\? "evalos-code-grader@6\.3\.0"/);
+assert.match(grader, /export const GRADER_REF = "evalos-code-grader@7\.0\.0"/);
+assert.match(grader, /grader_version: context\.graderRef \?\? GRADER_REF/);
 // 2026-09-20：根因判据换成「指认那处被改动的状态」，判定规则变了版本号必须跟着变。
 assert.match(grader, /the parameters of the command the laboratory used to inject the fault/);
+// 31 甲: a repair the laboratory parameterised can never stand in for the diagnosis.
+assert.match(grader, /Root cause is a hard gate on every case/);
+assert.doesNotMatch(grader, /rootCauseHit \|\| businessRecovered/);
 assert.doesNotMatch(grader, /root_cause_fact_refs/,
   "考场自己发明的事实编号不许再出现在任何判分路径里");
-assert.match(grader, /recommendation quality is a separate zero-weight qualification signal/);
+assert.match(grader, /recommendation quality, time, tokens, calls and cost are recorded only/);
 assert.match(grader, /DETERMINISTIC_CODE_GRADER/);
 assert.match(twinEnvironment, /ExternalProductTwinEnvironment/);
 assert.match(twinEnvironment, /real candidate product must invoke its own MCP tools/i);
@@ -80,12 +85,12 @@ for (const name of executableManifests) {
   const manifest = JSON.parse(read(name.startsWith("config/") ? name : `config/${name}`));
   if (name === "m15-smoke.manifest.json") {
     assert.equal(manifest.manifest_version, "6.0", "工程测试替身必须继续使用历史隔离的 Manifest 6.0");
-    assert.equal(manifest.frozen_dependencies.grader.ref, "evalos-code-grader@6.3.0",
+    assert.equal(manifest.frozen_dependencies.grader.ref, "evalos-code-grader@7.0.0",
       "当前可执行工程测试不得偷偷保留旧 Grader 路径");
   }
   if (name === "m3-formal-agent-capability.manifest.json") {
     assert.equal(manifest.manifest_version, "8.0", "新的真实产品冻结源必须使用 Manifest 8.0 开放资源合同");
-    assert.equal(manifest.milestone, "M3.2");
+    assert.equal(manifest.milestone, "M3.3");
     assert.equal(manifest.contestants.every((item) => item.adapter_contract_version === "5.0"), true);
     assert.equal(manifest.contestants.every((item) => item.adapter_version === "candidate-adapter-5.0.0"), true);
     assert.equal(manifest.contestants.every((item) => item.candidate_runtime?.models?.length > 0), true);
@@ -95,10 +100,11 @@ for (const name of executableManifests) {
   }
 }
 const formal = JSON.parse(read("config/m3-formal-agent-capability.manifest.json"));
-assert.equal(formal.dataset_ref, "m3-l2-agentic-formal@3.1.0");
-assert.equal(formal.suite_ref, "m3-formal-80@3.1.0");
-assert.equal(formal.case_refs.every((ref) => ref.endsWith("@3.1.0")), true);
-assert.equal(formal.frozen_dependencies.grader.ref, "evalos-code-grader@6.3.0");
+assert.equal(formal.dataset_ref, "m3-l2-ops-categories@3.3.0");
+assert.equal(formal.suite_ref, "m3-ops-category-acceptance@3.3.0");
+assert.equal(formal.case_refs.length, 40);
+assert.equal(formal.case_refs.every((ref) => ref.endsWith("@3.3.0")), true);
+assert.equal(formal.frozen_dependencies.grader.ref, "evalos-code-grader@7.0.0");
 const graderSourceDigest = "sha256:" + createHash("sha256").update(
   // 判分代码全在这三份里。少算一份，改了判据也能顶着旧摘要混过去——
   // fault-delta.mjs 是 2026-09-20 新加的根因判据，必须一起进摘要。
@@ -110,7 +116,7 @@ assert.equal(formal.frozen_dependencies.grader.digest, graderSourceDigest,
 assert.equal(JSON.parse(read("config/m15-smoke.manifest.json")).frozen_dependencies.grader.digest, graderSourceDigest);
 
 assert.equal(formal.model.sdk, "@anthropic-ai/claude-agent-sdk");
-assert.equal(formal.model.id, "deepseek-v4-flash");
+assert.equal(formal.model.id, "deepseek-flash");
 assert.deepEqual(formal.contestants.find((item) => item.ref === "langgraph-v1")
   .candidate_runtime.models.map((item) => item.id), ["deepseek-flash", "deepseek-v4-pro"]);
 // Both candidates must declare DeepSeek's current name; the legacy deepseek-v4-flash
@@ -158,4 +164,4 @@ assert.match(statistics, /clusteredPairedBootstrap/);
 assert.match(app, /trial.infrastructure_retry_scheduled/);
 assert.match(app, /decision_report_digest/);
 assert.match(app, /evalos-operations-health.1/);
-console.log("M3.2 架构检查通过：EvalOS 保持 Claude Agent SDK + DeepSeek V4 Flash 开放式单 Agent；Manifest 8 按架构开放产品最大资源且用量不评分，Manifest 7/6 只读保留历史证据。");
+console.log("M3.3 架构检查通过：EvalOS 保持 Claude Agent SDK + DeepSeek Flash 开放式单 Agent；判分 7.0 与 40 场题库冻结一致；Manifest 8 按架构开放产品最大资源且用量不评分，Manifest 7/6 只读保留历史证据。");

@@ -32,19 +32,21 @@ export class PrivateLabelStore {
 }
 
 export class DeterministicGradingService {
-  constructor({ labelStore, executionCaseResolver, graderRef = "m15-code-grader@2.1.0" }) {
+  constructor({ labelStore, executionCaseResolver, graderRef = "evalos-code-grader@7.0.0" }) {
     this.labelStore = labelStore;
     this.executionCaseResolver = executionCaseResolver;
     this.graderRef = graderRef;
   }
 
-  grade({ trialId = null, caseRef, outcome, trace, usage, budget, stability = null,
+  // The candidate is part of the answer key: each one owns its own transport
+  // hops, so a delta living on them names that candidate's interfaces.
+  grade({ trialId = null, caseRef, candidateRef = null, outcome, trace, usage, budget, stability = null,
     resourceUsageAffectsScore = true, environmentState = null, environmentReset = null }) {
     const execution = this.executionCaseResolver(caseRef);
     const label = this.labelStore.getLabel(caseRef);
     if (!execution || !label) throw new Error(`grading material unavailable for ${caseRef}`);
     const result = gradeTrial({ ...execution, ground_truth: label.ground_truth }, outcome, trace, usage,
-      { trialId, budget, stability, resourceUsageAffectsScore,
+      { trialId, candidateRef, budget, stability, resourceUsageAffectsScore,
         graderRef: this.graderRef, environmentState, environmentReset });
     return { grader_ref: this.graderRef, result, label_hash: label.label_hash };
   }

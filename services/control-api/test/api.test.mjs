@@ -285,7 +285,7 @@ test("清理核验必须先确认真实考生终态，再通过受限Twin管理�
   const contestant = formalM3Manifest.contestants[0];
   const smallManifest = { ...formalM3Manifest, name: "清理核验测试", design: "single_system_acceptance",
     evaluation_mode: "QUALIFICATION", contestants: [contestant], case_refs: [caseRef], environment_seeds: [2026082301],
-    replicates_per_seed: 1, case_partitions: { public: [caseRef], hidden: [], safety: [], regression: [] },
+    replicates_per_seed: 1, case_partitions: { main: [caseRef], diagnosis: [], auto: [], noise: [], injection: [], regression: [] },
     candidate_resource_contract: { ...formalM3Manifest.candidate_resource_contract,
       profiles: formalM3Manifest.candidate_resource_contract.profiles
         .filter((item) => item.contestant_ref === contestant.ref) } };
@@ -346,7 +346,7 @@ test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏
     assert.equal(ready.formal_run.enabled, false);
     const health = await (await app.handler(new Request("http://local/health"))).json();
     assert.equal(health.contract, "evalos.7");
-    assert.equal(health.milestone, "M3.2");
+    assert.equal(health.milestone, "M3.3");
     assert.equal(health.formal_run.enabled, false);
     assert.equal(health.operations.contract, "evalos-operations-health.1");
     assert.equal(health.operations.ledger.valid, true);
@@ -355,7 +355,7 @@ test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏
     assert.equal(operationsHealth.evidence.unresolved_cleanup_trials, 0);
     const capabilities = await (await app.handler(new Request("http://local/api/runtime/capabilities"))).json();
     assert.equal(capabilities.candidate_execution, "external-real-products-only");
-    assert.equal(capabilities.eval_intelligence.model, "deepseek-v4-flash");
+    assert.equal(capabilities.eval_intelligence.model, "deepseek-flash");
     assert.equal(capabilities.eval_intelligence.graphFramework, null);
     assert.equal(capabilities.eval_intelligence.score_authority, false);
     assert.equal(capabilities.trust_boundary.execution_plane_private_labels, false);
@@ -406,7 +406,7 @@ test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏
     const readiness = await (await app.handler(new Request("http://local/api/workbench/candidate-readiness", {
       headers: { authorization: "Bearer admin-secret" } }))).json();
     assert.equal(readiness.contract, "evalos-candidate-readiness.1");
-    assert.equal(readiness.formal_480_enabled, false);
+    assert.equal(readiness.formal_exam_enabled, false);
     assert.equal(readiness.items.every((item) => item.kind === "REAL_PRODUCT" && item.ready === false), true);
     const workbenchTrials = await (await app.handler(new Request("http://local/api/workbench/trials", {
       headers: { authorization: "Bearer admin-secret" } }))).json();
@@ -748,73 +748,53 @@ test("真实能力门禁失败后收口未开考Trial并关闭实验，不留下
     assert.equal(failureEvent.payload.cancelled_queued_trials > 0, true);
   } finally { app.close(); }
 });
-test("M3冻结设计可用于新建评测预检但不能绕过门禁直接启动480 Trial", async () => {
+test("M3.3冻结设计可用于新建评测预检但不能绕过门禁直接启动正式考试", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "evalos-api-m3-frozen-design-"));
   const app = createApp({ databasePath: path.join(root, "control.sqlite"), privateLabelDatabasePath: path.join(root, "private.sqlite"),
     runtimeRoot: root, apiToken: "control-secret", bootstrapM3Design: true, formalM3RunEnabled: false });
   try {
     const headers = { authorization: "Bearer control-secret" };
     const templates = await (await app.handler(new Request("http://local/api/workbench/run-templates", { headers }))).json();
-    assert.equal(templates.items.length, 2);
-    // Since 2026-09-19 both designs carry 80 cases, so they are told apart by
-    // dataset membership rather than by size.
-    const frozen = templates.items.find((item) => item.case_refs.includes("M3-PUB-001@3.1.0"));
-    const observation = templates.items.find((item) => item.case_refs.includes("M3-OBS-001@3.2.2"));
-    assert.equal(observation.status, "FROZEN");
-    assert.equal(observation.case_refs.length, 80);
+    // One frozen exam: the M3.3 bank. The M3.0-3.2 designs are history, not templates.
+    assert.equal(templates.items.length, 1);
+    const frozen = templates.items[0];
+    assert.equal(frozen.status, "FROZEN");
+    assert.equal(frozen.case_refs.length, 40);
+    assert.deepEqual(frozen.contestants.map((item) => item.ref).sort(), ["agent-harness-v2", "langgraph-v1"]);
     assert.equal(app.store.listTrials().length, 0);
     assert.equal(app.store.listEvaluationRunRequests().length, 0);
-    const symptomPreflight = await app.handler(new Request("http://local/api/workbench/run-requests/preflight", {
-      method: "POST", headers: { ...headers, "content-type": "application/json" },
-      body: JSON.stringify({ request_kind: "NEW_EVALUATION", evaluation_purpose: "SINGLE_SYSTEM_REGRESSION",
-        mode: "QUICK_VALIDATION", source_experiment_id: observation.id, case_refs: ["M3-OBS-001@3.2.2"],
-        contestant_refs: ["agent-harness-v2"], environment_seeds: [formalM3Manifest.environment_seeds[0]],
-        repetitions: 1, requested_by: "api-test-operator", reason: "检查无提示题面可选择且不会自动开考" }) }));
-    assert.equal(symptomPreflight.status, 200);
-    const symptomResult = (await symptomPreflight.json()).preflight;
-    assert.equal(symptomResult.total_trials, 1);
-    assert.equal(symptomResult.blockers.some((item) => item.includes("参评适配器未就绪")), true);
-    // M3-OBS-001 is one of the sixteen the laboratory can actually mint an answer for.
-    assert.equal(symptomResult.blockers.some((item) => item.includes("不能进考场")), false);
-    // A case whose disease fact the laboratory cannot mint is stopped before the exam
-    // starts, and the reason says which proof is missing in words an operator can act on.
-    const unanswerable = await app.handler(new Request("http://local/api/workbench/run-requests/preflight", {
-      method: "POST", headers: { ...headers, "content-type": "application/json" },
-      body: JSON.stringify({ request_kind: "NEW_EVALUATION", evaluation_purpose: "SINGLE_SYSTEM_REGRESSION",
-        mode: "QUICK_VALIDATION", source_experiment_id: observation.id, case_refs: ["M3-OBS-PUB-001@3.2.2"],
-        contestant_refs: ["agent-harness-v2"], environment_seeds: [formalM3Manifest.environment_seeds[0]],
-        repetitions: 1, requested_by: "api-test-operator", reason: "实验室开不出证明的题必须在开考前拦住" }) }));
-    assert.equal(unanswerable.status, 200);
-    const unanswerableResult = (await unanswerable.json()).preflight;
-    assert.equal(unanswerableResult.ready, false);
-    const stoppedCase = unanswerableResult.blockers.find((item) => item.includes("不能进考场"));
-    assert.ok(stoppedCase, JSON.stringify(unanswerableResult.blockers));
-    assert.match(stoppedCase, /实验室/);
-    assert.equal(app.store.listTrials().length, 0);
-    assert.equal(frozen.status, "FROZEN");
-    assert.equal(frozen.case_refs.length, 80);
-    assert.deepEqual(frozen.contestants.map((item) => item.ref).sort(), ["agent-harness-v2", "langgraph-v1"]);
-    assert.equal(app.store.listTrials(frozen.id).length, 0);
     const detail = await (await app.handler(new Request(`http://local/api/workbench/experiments/${frozen.id}`, { headers }))).json();
-    assert.equal(detail.experiment.planned_case_count, 80);
-    assert.equal(detail.experiment.planned_trial_count, 480);
-    assert.deepEqual(detail.experiment.partition_counts, { PUB: 20, HID: 20, SAFE: 20, REG: 20 });
+    assert.equal(detail.experiment.planned_case_count, 40);
+    assert.equal(detail.experiment.planned_trial_count, 80);
+    assert.deepEqual(detail.experiment.partition_counts, { main: 22, diagnosis: 6, auto: 3, noise: 3, injection: 3, regression: 3 });
     const blocked = await app.handler(new Request(`http://local/api/experiments/${frozen.id}/run`, { method: "POST", headers }));
     assert.equal(blocked.status, 423);
+    const anchor = frozen.case_refs[0];
     const preflight = await app.handler(new Request("http://local/api/workbench/run-requests/preflight", { method: "POST",
       headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ request_kind: "NEW_EVALUATION",
         evaluation_purpose: "PAIRED_COMPARISON", mode: "QUICK_VALIDATION", source_experiment_id: frozen.id,
-        case_refs: ["M3-PUB-001@3.1.0"], contestant_refs: ["agent-harness-v2", "langgraph-v1"], repetitions: 1,
+        case_refs: [anchor], contestant_refs: ["agent-harness-v2", "langgraph-v1"], repetitions: 1,
         requested_by: "api-test-operator", reason: "验证冻结设计可以生成预检但不会误启动正式评测" }) }));
     assert.equal(preflight.status, 200);
     const preflightBody = (await preflight.json()).preflight;
-    assert.equal(preflightBody.total_trials, 6);
+    assert.equal(preflightBody.total_trials, 2);
     assert.equal(preflightBody.affects_official_score, false);
     assert.equal(preflightBody.blockers.some((item) => item.includes("Manifest 8.0")), false);
     assert.equal(preflightBody.blockers.some((item) => item.includes("参评适配器未就绪")), true);
+    // Every question of the bank is answerable against the live laboratory.
+    assert.equal(preflightBody.blockers.some((item) => item.includes("不可考") || item.includes("判分 7.0")), false);
     assert.deepEqual(preflightBody.budget.per_contestant["agent-harness-v2"].candidate_public_maximum,
       formalM3Manifest.candidate_resource_contract.profiles
         .find((item) => item.contestant_ref === "agent-harness-v2").candidate_resources);
+    // The formal exam is the complete suite with both candidates; it stays locked without the host switch.
+    const formal = await app.handler(new Request("http://local/api/workbench/run-requests/preflight", { method: "POST",
+      headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ request_kind: "NEW_EVALUATION",
+        evaluation_purpose: "PAIRED_COMPARISON", mode: "FORMAL", source_experiment_id: frozen.id,
+        case_refs: frozen.case_refs, contestant_refs: ["agent-harness-v2", "langgraph-v1"], repetitions: 1,
+        requested_by: "api-test-operator", reason: "正式考试必须显式放行" }) }));
+    const formalBody = (await formal.json()).preflight;
+    assert.equal(formalBody.total_trials, 80);
+    assert.equal(formalBody.ready, false);
   } finally { app.close(); }
 });
 
@@ -829,6 +809,7 @@ for (const version of ["6.0", "7.0"]) {
       const legacy = structuredClone(formalM3Manifest);
       legacy.manifest_version = version;
       legacy.milestone = version === "6.0" ? "M3.1" : "M3.2";
+      legacy.case_partitions = { public: [...legacy.case_refs], hidden: [], safety: [], regression: [] };
       legacy.budget = structuredClone(manifest.budget);
       legacy.statistics_policy = structuredClone(manifest.statistics_policy);
       delete legacy.candidate_resource_contract;
@@ -881,10 +862,9 @@ test("M3冻结合同变更会新增可审计设计而不会覆盖历史或阻塞
     bootstrapM3Design: true, m3DesignManifest: revised });
   try {
     const designs = second.store.listExperiments();
-    assert.equal(designs.length, 4);
-    assert.equal(new Set(designs.map((item) => item.manifest_hash)).size, 4);
+    assert.equal(designs.length, 2);
+    assert.equal(new Set(designs.map((item) => item.manifest_hash)).size, 2);
     assert.equal(designs.filter((item) => item.manifest.suite_ref === original.suite_ref).length, 2);
-    assert.equal(designs.filter((item) => item.manifest.suite_ref === "m3-symptom-acceptance@3.2.2").length, 2);
     assert.equal(designs.every((item) => second.store.listTrials(item.id).length === 0), true);
   } finally { second.close(); }
 });

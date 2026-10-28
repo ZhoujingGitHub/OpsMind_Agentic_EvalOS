@@ -65,7 +65,7 @@ function runInstaller(t, failure = "", recoveryFailure = "") {
   put("package/evalos/config/candidate-presence-public-keys.json", "{}");
   put("package/evalos/RELEASE.json", JSON.stringify({
     contract: "evalos-release.2", release_id: releaseId, source_revision: "a".repeat(40),
-    content_digest: "sha256:" + "b".repeat(64), includes_external_candidate_source: false, formal_480_enabled: false,
+    content_digest: "sha256:" + "b".repeat(64), includes_external_candidate_source: false, formal_exam_auto_enabled: false,
   }, null, 2));
   if (failure === "duplicate") {
     mkdirSync(path.join(directory, "opt/opsmind-evalos/releases", releaseId), { recursive: true });

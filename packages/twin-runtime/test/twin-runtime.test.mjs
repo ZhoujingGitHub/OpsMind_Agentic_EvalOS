@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { M2_CASES, M3_CASES, M3_FORMAL_PARTITIONS } from "../../kernel/src/index.mjs";
+import { M2_CASES, OPS_CASES, OPS_CASE_PARTITIONS } from "../../kernel/src/index.mjs";
+
+const opsCase = (variant, scenario) => Object.values(OPS_CASES)
+  .find((item) => item.ground_truth.variant === variant && item.ground_truth.scenario_id === scenario);
 import { ExternalProductTwinEnvironment, InMemoryTwinClient, ProtocolTwinEnvironment, managedTwinTrialId,
   validateTwinManagerRequest, validateTwinManagerResponse, validateTwinRequest } from "../src/index.mjs";
 
@@ -109,7 +112,7 @@ test("外部真实考生由 EvalOS 考务控制器准备独立前缀 Trial，考
     if (request.operation === "reset") { active = null; return { ok: true, operation: "reset", clean: true }; }
     throw new Error("unexpected manager operation");
   } };
-  const caseSpec = M3_CASES["M3-PUB-003"];
+  const caseSpec = opsCase("main", "amf-process-down");
   const externalTrial = { id: "trial_external_1", contestant_ref: "agent-harness-v2", environment_seed: 2026081601 };
   const candidateBinding = { context_digest: `sha256:${"a".repeat(64)}`,
     environment_ref: "evalos-twin:trial_external_1", service_ids: ["amf"], resource_refs: [{
@@ -179,7 +182,7 @@ test("考务管理器不再保留候选SSH授权、远程观察或健康监督�
 });
 
 test("候选租约准备失败归入平台配置，回滚不干净则停队并归入清场故障", async () => {
-  const caseSpec = M3_CASES["M3-PUB-003"];
+  const caseSpec = opsCase("main", "amf-process-down");
   const externalTrial = { id: "trial_binding_failure", contestant_ref: "agent-harness-v2",
     environment_seed: 2026081601 };
   const candidateBinding = { context_digest: `sha256:${"a".repeat(64)}`,
@@ -203,23 +206,24 @@ test("候选租约准备失败归入平台配置，回滚不干净则停队并�
   });
 });
 
-test("M3 冻结 80 个真实观测条件 Case，四个分区各 20 且互不重叠", () => {
-  assert.equal(Object.keys(M3_CASES).length, 80);
-  const all = Object.values(M3_FORMAL_PARTITIONS).flat();
-  assert.deepEqual(Object.fromEntries(Object.entries(M3_FORMAL_PARTITIONS).map(([name, refs]) => [name, refs.length])),
-    { public: 20, hidden: 20, safety: 20, regression: 20 });
-  assert.equal(new Set(all).size, 80);
-  assert.equal(Object.values(M3_CASES).every((item) => item.source.level === "L2" && item.environment.reset_required), true);
-  assert.equal(Object.values(M3_CASES).every((item) => item.version === "3.1.0"), true);
-  assert.equal(Object.values(M3_CASES).every((item) => item.visible.task_contract.safe_stop_when_insufficient === true
+test("M3.3 冻结 40 场：主考 22 + 只诊断 6 + 受控自动 3 + 三种干扰各 3，互不重叠", () => {
+  assert.equal(Object.keys(OPS_CASES).length, 40);
+  const all = Object.values(OPS_CASE_PARTITIONS).flat();
+  assert.deepEqual(Object.fromEntries(Object.entries(OPS_CASE_PARTITIONS).map(([name, refs]) => [name, refs.length])),
+    { main: 22, diagnosis: 6, auto: 3, noise: 3, injection: 3, regression: 3 });
+  assert.equal(new Set(all).size, 40);
+  assert.equal(Object.values(OPS_CASES).every((item) => item.source.level === "L2" && item.environment.reset_required), true);
+  assert.equal(Object.values(OPS_CASES).every((item) => item.version === "3.3.0"), true);
+  assert.equal(Object.values(OPS_CASES).every((item) => item.visible.task_contract.safe_stop_when_insufficient === true
     && item.visible.task_contract.remediate_when_justified === (item.visible.operating_mode !== "diagnosis_only")), true);
-  assert.match(M3_CASES["M3-PUB-001"].goal, /不得执行任何会改变实验环境的动作/);
-  assert.equal(M3_CASES["M3-REG-001"].environment.regression_failure_mode, "source_unavailable");
-  assert.equal(M3_CASES["M3-REG-002"].environment.regression_failure_mode, "timeout");
+  assert.match(opsCase("diagnosis", "amf-process-down").goal, /不得执行任何会改变实验环境的动作/);
+  const regression = Object.values(OPS_CASES).filter((item) => item.ground_truth.variant === "regression");
+  assert.deepEqual(regression.map((item) => item.environment.regression_failure_mode),
+    ["source_unavailable", "timeout", "source_unavailable"]);
 });
 
-test("M3.1 Case真实覆盖只诊断、人工审批和受控自动修复三种产品模式", () => {
-  const cases = Object.values(M3_CASES);
+test("M3.3 Case覆盖只诊断、人工审批和受控自动修复三种产品模式，且模式不随题号轮转", () => {
+  const cases = Object.values(OPS_CASES);
   const modes = new Set(cases.map((item) => item.visible.operating_mode));
   assert.deepEqual([...modes].sort(), ["controlled_auto", "diagnosis_only", "human_collaboration"]);
   assert.ok(cases.filter((item) => item.visible.operating_mode === "diagnosis_only")
@@ -227,13 +231,16 @@ test("M3.1 Case真实覆盖只诊断、人工审批和受控自动修复三种�
   assert.ok(cases.filter((item) => item.visible.operating_mode === "human_collaboration")
     .every((item) => item.ground_truth.approval_oracle?.decision));
   assert.ok(cases.filter((item) => item.visible.operating_mode === "controlled_auto")
-    .every((item) => item.visible.task_contract.mode_instruction.includes("授权包")));
+    .every((item) => item.visible.task_contract.mode_instruction.includes("授权包")
+      && item.ground_truth.expected_behavior === "safe_stop"));
+  assert.ok(cases.filter((item) => item.ground_truth.variant === "main")
+    .every((item) => item.visible.operating_mode === "human_collaboration"));
 });
 
-test("M3 隐藏、安全和恢复分区真实改变观测行为而非只改标签", async () => {
-  const hiddenCase = M3_CASES["M3-HID-001"];
+test("M3.3 噪声、注入和首查失败三种干扰真实改变观测行为而非只改标签", async () => {
+  const hiddenCase = opsCase("noise", "sctp-blocked");
   const hiddenClient = new InMemoryTwinClient({ evidenceByScenario: {
-    [hiddenCase.environment.scenario_id]: hiddenCase.ground_truth.required_evidence,
+    [hiddenCase.environment.scenario_id]: [],
   } });
   const hidden = new ProtocolTwinEnvironment({ client: hiddenClient, caseSpec: hiddenCase, trial: trial("m3-hidden") });
   await hidden.prepare();
@@ -241,9 +248,9 @@ test("M3 隐藏、安全和恢复分区真实改变观测行为而非只改标�
   assert.equal(hiddenResult.data.background_observations.length, 2);
   await hidden.reset();
 
-  const safetyCase = M3_CASES["M3-SAFE-001"];
+  const safetyCase = opsCase("injection", "sctp-blocked");
   const safetyClient = new InMemoryTwinClient({ evidenceByScenario: {
-    [safetyCase.environment.scenario_id]: safetyCase.ground_truth.required_evidence,
+    [safetyCase.environment.scenario_id]: [],
   } });
   const safety = new ProtocolTwinEnvironment({ client: safetyClient, caseSpec: safetyCase, trial: trial("m3-safety") });
   await safety.prepare();
@@ -252,9 +259,9 @@ test("M3 隐藏、安全和恢复分区真实改变观测行为而非只改标�
   assert.match(safetyResult.data.untrusted_telemetry.content, /another tenant/);
   await safety.reset();
 
-  const recoveryCase = M3_CASES["M3-REG-001"];
+  const recoveryCase = opsCase("regression", "sctp-blocked");
   const recoveryClient = new InMemoryTwinClient({ evidenceByScenario: {
-    [recoveryCase.environment.scenario_id]: recoveryCase.ground_truth.required_evidence,
+    [recoveryCase.environment.scenario_id]: [],
   } });
   const recovery = new ProtocolTwinEnvironment({ client: recoveryClient, caseSpec: recoveryCase, trial: trial("m3-recovery") });
   await recovery.prepare();

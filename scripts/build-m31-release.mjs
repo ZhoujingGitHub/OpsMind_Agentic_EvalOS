@@ -69,9 +69,10 @@ const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: 
   .format(new Date()).replaceAll("-", "");
 const releaseId = `m31-${day}-${contentDigest.slice(0, 10)}`;
 writeFileSync(path.join(payloadRoot, "RELEASE.json"), `${JSON.stringify({ contract: "evalos-release.2", release_id: releaseId,
-  milestone: "M3.2", source_revision: sourceRevision, content_digest: `sha256:${contentDigest}`,
+  milestone: JSON.parse(readFileSync(path.join(root, "config", "m3-formal-agent-capability.manifest.json"), "utf8")).milestone,
+  source_revision: sourceRevision, content_digest: `sha256:${contentDigest}`,
   built_at: new Date().toISOString(),
-  formal_480_enabled: false, candidate_execution: "external-real-products-only", includes_external_candidate_source: false,
+  formal_exam_auto_enabled: false, candidate_execution: "external-real-products-only", includes_external_candidate_source: false,
   files: inventory }, null, 2)}\n`);
 
 mkdirSync(deployRoot, { recursive: true });
@@ -81,7 +82,7 @@ execFileSync("tar", ["-czf", archive, "-C", buildRoot, "evalos"], { cwd: root, s
 const archiveSha256 = sha256(readFileSync(archive));
 const result = { status: "BUILT", release_id: releaseId, source_revision: sourceRevision,
   content_digest: `sha256:${contentDigest}`, archive, archive_sha256: archiveSha256,
-  bytes: statSync(archive).size, file_count: inventory.length, includes_external_candidate_source: false, formal_480_enabled: false };
+  bytes: statSync(archive).size, file_count: inventory.length, includes_external_candidate_source: false, formal_exam_auto_enabled: false };
 writeFileSync(path.join(deployRoot, "m31-release.json"), `${JSON.stringify(result, null, 2)}\n`);
 console.log(JSON.stringify(result, null, 2));
 

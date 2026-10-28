@@ -52,7 +52,7 @@ assert.match(adapterV5, /synthesize-missing-evidence/);
 assert.match(adapterV5, /REAL_CANDIDATE/);
 assert.match(evaluationContract, /run_class:\s*experiment\.manifest\.run_class/);
 assert.match(app, /test-double-a:ENGINEERING_TEST/);
-assert.match(app, /480_TRIAL_NOT_AUTHORIZED/);
+assert.match(app, /FORMAL_EXAM_NOT_AUTHORIZED/);
 assert.match(app, /EVALOS_AGENT_HARNESS_TOKEN/);
 assert.match(app, /EVALOS_LANGGRAPH_TOKEN/);
 assert.match(app, /candidate_tenant_isolation/);
@@ -175,8 +175,10 @@ assert.match(consoleRoot, /auth_basic_user_file \/etc\/nginx\/opsmind-console\.h
 assert.doesNotMatch(consoleRoot, /\ballow\s+[0-9]/,
   "Console access must not fall back to a network allowlist");
 assert.doesNotMatch(nginx, /candidate-observation/);
-assert.match(deploymentSmoke, /m3-l2-agentic-formal@3\.1\.0/);
-assert.match(deploymentSmoke, /case_count, 80/);
+// The smoke check reads the frozen bank from the deployed manifest instead of a
+// hard-coded dataset name, so a bank upgrade cannot leave it checking the old one.
+assert.match(deploymentSmoke, /frozenManifest\.dataset_ref/);
+assert.match(deploymentSmoke, /frozenManifest\.case_refs\.length/);
 assert.doesNotMatch(`${app}\n${adapterV5}\n${connectorsV5}`,
   /(?:DEEPSEEK_API_KEY|ANTHROPIC_AUTH_TOKEN|EVALOS_AGENT_HARNESS_TOKEN|EVALOS_LANGGRAPH_TOKEN)\s*=\s*["'][^"']+["']/);
 assert.match(failurePolicy, /capability.*failure|CANDIDATE_CAPABILITY_FAILURE/i);
@@ -188,4 +190,4 @@ assert.match(failurePolicy, /retryable: false/);
 assert.match(statistics, /authority === "FORMAL_DECISION"/);
 assert.match(app, /authenticated workbench session required/);
 assert.match(app, /adapter overrides are restricted to named ENGINEERING_TEST test doubles/);
-assert.match(app, /480_TRIAL_NOT_AUTHORIZED/);console.log("M3.1 安全检查通过：凭据只来自环境变量、正式480 Trial保持关闭、审批裁判不泄题、真实考生证据可回指且EvalOS不具备生产写权限。");
+assert.match(app, /FORMAL_EXAM_NOT_AUTHORIZED/);console.log("M3.1 安全检查通过：凭据只来自环境变量、正式考试需显式放行、审批裁判不泄题、真实考生证据可回指且EvalOS不具备生产写权限。");

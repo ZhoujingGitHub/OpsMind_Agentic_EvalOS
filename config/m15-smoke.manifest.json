@@ -4,7 +4,9 @@
   "run_class": "ENGINEERING_TEST",
   "evaluation_mode": "QUALIFICATION",
   "evaluation_lane": "ENGINEERING_TEST",
-  "operating_modes": ["diagnosis_only"],
+  "operating_modes": [
+    "diagnosis_only"
+  ],
   "execution_mode": "controlled_simulation",
   "approval_oracle": {
     "ref": "evalos-test-approval-oracle@1.0.0",
@@ -17,29 +19,92 @@
   "name": "M1.5 可信测量内核冒烟",
   "suite_ref": "m15-kernel-smoke@1.0.0",
   "dataset_ref": "m15-l0-test-doubles@1.0.0",
-  "case_refs": ["SMOKE-RCA-001@1.0.0", "SMOKE-RECOVERY-001@1.0.0"],
+  "case_refs": [
+    "SMOKE-RCA-001@1.0.0",
+    "SMOKE-RECOVERY-001@1.0.0"
+  ],
   "case_partitions": {
-    "public": ["SMOKE-RCA-001@1.0.0"],
+    "public": [
+      "SMOKE-RCA-001@1.0.0"
+    ],
     "hidden": [],
     "safety": [],
-    "regression": ["SMOKE-RECOVERY-001@1.0.0"]
+    "regression": [
+      "SMOKE-RECOVERY-001@1.0.0"
+    ]
   },
-  "environment_seeds": [20260813],
+  "environment_seeds": [
+    20260813
+  ],
   "replicates_per_seed": 3,
   "contestants": [
-    { "ref": "test-double-a", "kind": "TEST_DOUBLE", "architecture": "TEST_DOUBLE", "adapter_contract_version": "4.0", "adapter_version": "test-double-adapter-4.0.0", "source_revision": "m31-local-test-double-a", "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "runtime_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "runtime_manifest_digest": "sha256:abababababababababababababababababababababababababababababababab", "capability_contract_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" },
-    { "ref": "test-double-b", "kind": "TEST_DOUBLE", "architecture": "TEST_DOUBLE", "adapter_contract_version": "4.0", "adapter_version": "test-double-adapter-4.0.0", "source_revision": "m31-local-test-double-b", "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "runtime_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "runtime_manifest_digest": "sha256:babababababababababababababababababababababababababababababababa", "capability_contract_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }
+    {
+      "ref": "test-double-a",
+      "kind": "TEST_DOUBLE",
+      "architecture": "TEST_DOUBLE",
+      "adapter_contract_version": "4.0",
+      "adapter_version": "test-double-adapter-4.0.0",
+      "source_revision": "m31-local-test-double-a",
+      "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "runtime_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "runtime_manifest_digest": "sha256:abababababababababababababababababababababababababababababababab",
+      "capability_contract_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    {
+      "ref": "test-double-b",
+      "kind": "TEST_DOUBLE",
+      "architecture": "TEST_DOUBLE",
+      "adapter_contract_version": "4.0",
+      "adapter_version": "test-double-adapter-4.0.0",
+      "source_revision": "m31-local-test-double-b",
+      "artifact_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "runtime_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "runtime_manifest_digest": "sha256:babababababababababababababababababababababababababababababababa",
+      "capability_contract_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
   ],
-  "model": { "provider": "deepseek", "id": "deepseek-v4-flash", "interface": "anthropic", "sdk": "@anthropic-ai/claude-agent-sdk", "thinking": "disabled", "temperature": 0, "max_turns": 20 },
+  "model": {
+    "provider": "deepseek",
+    "id": "deepseek-flash",
+    "interface": "anthropic",
+    "sdk": "@anthropic-ai/claude-agent-sdk",
+    "thinking": "disabled",
+    "temperature": 0,
+    "max_turns": 20
+  },
   "frozen_dependencies": {
-    "mcp_catalog": { "ref": "m15-mock-mcp@1.0.0", "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111" },
-    "agent_harness_skill_pack": { "ref": "m15-mock-skills@1.0.0", "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222" },
-    "langgraph_knowledge_pack": { "ref": "m15-mock-knowledge@1.0.0", "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333" },
-    "scope_policy": { "ref": "m15-scope@1.0.0", "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444" },
-    "grader": { "ref": "evalos-code-grader@6.3.0", "digest": "sha256:7623e162c0a4dd5647e52124e30e9ac2a115ce6149f655e5775789c26e040bdc" },
-    "twin": { "ref": "m15-test-double@1.0.0", "digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666" },
-    "trace_schema": { "ref": "evalos-trace@3.0.0", "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777" },
-    "product_adapter_contract": { "ref": "evalos-candidate-adapter@4.0.0", "digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888" }
+    "mcp_catalog": {
+      "ref": "m15-mock-mcp@1.0.0",
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "agent_harness_skill_pack": {
+      "ref": "m15-mock-skills@1.0.0",
+      "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "langgraph_knowledge_pack": {
+      "ref": "m15-mock-knowledge@1.0.0",
+      "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "scope_policy": {
+      "ref": "m15-scope@1.0.0",
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "grader": {
+      "ref": "evalos-code-grader@7.0.0",
+      "digest": "sha256:10cb94e15d8aaced8d709b31126dfd2e4dac520cc599b0c92f780816de19366d"
+    },
+    "twin": {
+      "ref": "m15-test-double@1.0.0",
+      "digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+    },
+    "trace_schema": {
+      "ref": "evalos-trace@3.0.0",
+      "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    "product_adapter_contract": {
+      "ref": "evalos-candidate-adapter@4.0.0",
+      "digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888"
+    }
   },
   "budget": {
     "input_tokens": 4000,
@@ -52,15 +117,54 @@
     "cost_usd": 0.1
   },
   "policy": {
-    "allowed_tools": ["get_alerts", "query_metrics", "query_logs", "run_probe"],
-    "allowed_native_tools": ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "Skill", "ToolSearch"],
-    "forbidden_actions": ["write_production", "change_policy", "read_hidden_answer", "cross_tenant_access"],
+    "allowed_tools": [
+      "get_alerts",
+      "query_metrics",
+      "query_logs",
+      "run_probe"
+    ],
+    "allowed_native_tools": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Write",
+      "Edit",
+      "Bash",
+      "Skill",
+      "ToolSearch"
+    ],
+    "forbidden_actions": [
+      "write_production",
+      "change_policy",
+      "read_hidden_answer",
+      "cross_tenant_access"
+    ],
     "heartbeat_ms": 5000,
     "result_contract": "opsmind.investigation-result.v2",
     "production_writes": false,
-    "action_approval": { "mode": "case-driven-approval-oracle", "max_writes_per_trial": 1 }
+    "action_approval": {
+      "mode": "case-driven-approval-oracle",
+      "max_writes_per_trial": 1
+    }
   },
-  "retry_policy": { "max_infrastructure_retries": 1, "retryable_categories": ["RATE_LIMIT", "TRANSPORT_RESET", "TEMPORARY_UNAVAILABLE"], "capability_failures_retryable": false },
-  "capacity_policy": { "runner_workers": 1, "twin_slots": 1, "max_queue_depth": 12 },
-  "statistics_policy": { "paired_by_case_seed": true, "confidence_level": 0.95, "cluster_by_case": true, "report_failures": true }
+  "retry_policy": {
+    "max_infrastructure_retries": 1,
+    "retryable_categories": [
+      "RATE_LIMIT",
+      "TRANSPORT_RESET",
+      "TEMPORARY_UNAVAILABLE"
+    ],
+    "capability_failures_retryable": false
+  },
+  "capacity_policy": {
+    "runner_workers": 1,
+    "twin_slots": 1,
+    "max_queue_depth": 12
+  },
+  "statistics_policy": {
+    "paired_by_case_seed": true,
+    "confidence_level": 0.95,
+    "cluster_by_case": true,
+    "report_failures": true
+  }
 }

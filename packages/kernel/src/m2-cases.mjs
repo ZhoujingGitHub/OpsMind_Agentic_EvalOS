@@ -451,6 +451,15 @@ function toolsFor(required) {
   return { ...observations, ...actions };
 }
 
+// The observation and action tool catalogue a live-only bank reuses. Live
+// tools carry no fixture receipt: everything a candidate can cite is minted by
+// the laboratory at run time.
+export function liveToolCatalog() {
+  const tools = toolsFor([]);
+  for (const tool of Object.values(tools)) delete tool.result;
+  return tools;
+}
+
 function causeFactRefs(definition) {
   // Publish both vocabularies so a live answer and a static answer describing
   // the same kernel fact are both accepted.

@@ -81,7 +81,9 @@ grep -q "\"release_id\": \"$release_id\"" "$release_root/evalos/RELEASE.json"
 grep -Eq '"source_revision": "[a-f0-9]{40}"' "$release_root/evalos/RELEASE.json"
 grep -Eq '"content_digest": "sha256:[a-f0-9]{64}"' "$release_root/evalos/RELEASE.json"
 grep -q '"includes_external_candidate_source": false' "$release_root/evalos/RELEASE.json"
-grep -q '"formal_480_enabled": false' "$release_root/evalos/RELEASE.json"
+# A release never switches the formal exam on by itself; that is an explicit
+# environment decision (EVALOS_M3_FORMAL_RUN_ENABLED) made on the host.
+grep -q '"formal_exam_auto_enabled": false' "$release_root/evalos/RELEASE.json"
 
 # 发布安装只解析冻结 lockfile，不在切换窗口做联网审计或募资查询。
 # prefer-offline 会优先复用服务器已有 npm 缓存；硬超时确保云助手超时后

@@ -2,16 +2,16 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  CASES, M2_CASES, M3_CASES, M3_OBSERVATION_CASES, CandidateRelayBroker, DeterministicGradingService, EvalStore, EvaluationLedger, FrozenApprovalOracle, PrivateLabelStore, TrialRunner,
+  CASES, M2_CASES, OPS_CASES, OPS_CATEGORIES, OPS_DATASET_REF, OPS_SUITE_REF, CandidateRelayBroker, DeterministicGradingService, EvalStore, EvaluationLedger, FrozenApprovalOracle, PrivateLabelStore, TrialRunner,
   auditableGraderRunView, blindExperimentView, blindGraderRunView, blindTraceView, blindTrialView,
-  expertCalibrationFromConsensusSamples, createEvalRegistry, createObservationDesign, createCaseEnvironment, createTestDouble,
+  expertCalibrationFromConsensusSamples, createEvalRegistry, createCaseEnvironment, createTestDouble,
   evaluationDecisionReport, evaluationEvidenceTraceView, explainTraceRecord, TRACE_FILTERS, readSnapshotFile, sha256,
-  auditTrialEfficiency, candidateExecutionBudget, trialSettlementBudget, liveEvidenceMintability,
-  CANDIDATE_PRESENCE_PATH, CandidatePresenceRegistry, assertCandidateBound,
+  auditTrialEfficiency, candidateExecutionBudget, trialSettlementBudget, caseRunnability,
+  CANDIDATE_PRESENCE_PATH, CandidatePresenceRegistry, assertCandidateBound, GRADER_CONTRACT_VERSION,
   assertCandidatePreflight, DEPLOYMENT_ATTESTATION_CONTRACT, trustedDeploymentAttestation,
 } from "../../../packages/kernel/src/index.mjs";
 import {
-  BLIND_JUDGE_VERSION, CASE_INVESTIGATOR_RUNTIME, createAgentHarnessProductConnectorV5,
+  BLIND_JUDGE_VERSION, CASE_INVESTIGATOR_RUNTIME, createAgentHarnessProductConnectorV5, evalosIntelligenceModel,
   createCandidateAdapterV5, createCaseInvestigator,
   createLangGraphProductConnectorV5, judgeRecordAndSummarize,
   candidateEvaluationContext, candidateManagedNamespace, candidateResourceReferences, candidateServiceIdentifiers,
@@ -197,7 +197,8 @@ export function createApp({
   twinManagerClientOverride = null,
   candidatePresenceConfig = null,
 } = {}) {
-  const registry = createEvalRegistry({ m15Cases: CASES, m2Cases: M2_CASES, m3Cases: M3_CASES, observationCases: M3_OBSERVATION_CASES });
+  const registry = createEvalRegistry({ m15Cases: CASES, m2Cases: M2_CASES, opsCases: OPS_CASES,
+    opsBank: { datasetRef: OPS_DATASET_REF, suiteRef: OPS_SUITE_REF, categories: OPS_CATEGORIES } });
   const loadedCandidatePresenceConfig = (() => {
     if (candidatePresenceConfig) return candidatePresenceConfig;
     const configPath = process.env.EVALOS_CANDIDATE_PRESENCE_CONFIG;
@@ -224,14 +225,15 @@ export function createApp({
     migrationPath: path.join(ROOT, "infra", "migrations", "sqlite", "001_private_labels.sql") });
   const privateLabelHash = labels.publishRegistry(registry);
   store.publishRegistry(registry, { privateLabelHash });
-  store.registerGraderSpec({ id: "evalos-code-grader", version: "5.6.0", type: "code", status: "APPROVED",
-    definition: { weights: "25/15/15/15/15/5/5/5", safety: "non-compensable-hard-gate",
-      l2_environment_task: "non-compensable-hard-gate", evidence_resolution: "preserved-product-evidence-content",
+  store.registerGraderSpec({ id: "evalos-code-grader", version: "7.0.0", type: "code", status: "APPROVED",
+    definition: { verdict: "every-applicable-hard-gate-in-funnel-order", descriptive_weights: "40/30/30",
+      root_cause: "hard-gate-on-every-case:fault-state-delta", no_fault_case: "any-claim-is-a-false-positive",
+      evidence: "traceable-and-required-live-observation-kinds", safety: "non-compensable-hard-gate",
       network_observation_contract: "opsmind-network-observation/1.0",
       recommendation_quality: "evalos-recommendation-quality/1.4",
-      diagnosis_and_recovery: "independent-advice-and-task-judgments" } });
+      recorded_only: ["competing_exclusion", "gap_disclosure", "evidence_lineages", "usage"] } });
   const gradingService = new DeterministicGradingService({ labelStore: labels,
-    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@6.3.0" });
+    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@7.0.0" });
   const approvalOracle = new FrozenApprovalOracle({ labelStore: labels });
   const ledger = new EvaluationLedger(store);
   const loadRelayConfig = () => {
@@ -255,7 +257,7 @@ export function createApp({
   if (bootstrapM3Design) {
     // Content-hashed designs are immutable and only selectable here.
     // Explicit run requests remain the authority to schedule Trials.
-    for (const frozenManifest of [frozenM31Manifest, createObservationDesign(frozenM31Manifest)]) {
+    for (const frozenManifest of [frozenM31Manifest]) {
       const designKey = "m3-formal-agent-capability-design:" + sha256(frozenManifest);
       const frozen = store.createExperiment(frozenManifest, designKey, { scheduleTrials: false });
       if (frozen.created) ledger.append({ entityType: "experiment", entityId: frozen.experiment.id,
@@ -538,8 +540,8 @@ export function createApp({
     const plannedContestants = experiment.manifest.contestants ?? [];
     const plannedSeeds = experiment.manifest.environment_seeds ?? [];
     const plannedReplicates = Number(experiment.manifest.replicates_per_seed ?? 1);
-    const partitionCounts = Object.fromEntries(["PUB", "HID", "SAFE", "REG"].map((partition) =>
-      [partition, plannedCaseRefs.filter((caseRef) => caseRef.startsWith(`M3-${partition}-`)).length]));
+    const partitionCounts = Object.fromEntries(Object.entries(experiment.manifest.case_partitions ?? {})
+      .map(([partition, refs]) => [partition, Array.isArray(refs) ? refs.length : 0]));
     return { id: experiment.id, name: experiment.name, status: frozenDesign ? "FROZEN" : experiment.status, design: experiment.manifest.design,
       manifest_version: experiment.manifest.manifest_version,
       run_class: experiment.manifest.run_class, evaluation_lane: experiment.manifest.evaluation_lane,
@@ -679,14 +681,14 @@ export function createApp({
     }
     const totalTrials = caseRefs.length * contestants.length * environmentSeeds.length * repetitions;
     const needsTwin = caseRefs.some((caseRef) => store.getExecutionCase(caseRef)?.source?.level === "L2");
-    // A case whose disease fact the laboratory cannot mint is unanswerable, and
-    // running it burns a physical lease to produce a wrong conclusion about the
-    // product. Say which proof is missing, in words an operator can act on.
+    // A case the live laboratory cannot answer burns a physical lease to produce
+    // a wrong conclusion about the product. Say what is missing, in words an
+    // operator can act on.
     const unanswerableCases = caseRefs.flatMap((caseRef) => {
       const execution = store.getExecutionCase(caseRef);
       const groundTruth = labels.getLabel(caseRef)?.ground_truth;
       if (!execution || !groundTruth) return [];
-      const verdict = liveEvidenceMintability({ ...execution, ground_truth: groundTruth });
+      const verdict = caseRunnability({ ...execution, ground_truth: groundTruth });
       return verdict.applicable && !verdict.runnable ? [`${caseRef}：${verdict.reason_zh}`] : [];
     });
     const missingAdapters = contestants.filter((item) => !adapterFor(item.ref, source.manifest.evaluation_lane,
@@ -1152,14 +1154,14 @@ export function createApp({
       if (request.method === "GET" && url.pathname === "/ready") {
         return json({ status: "ok", ready: true, service: "opsmind-evalos-control-api",
           contract: "evalos-readiness.1", milestone: frozenM31Manifest.milestone,
-          formal_run: { enabled: false, guard: "480_TRIAL_NOT_AUTHORIZED" } }, 200, cors);
+          formal_run: { enabled: formalM3RunEnabled, guard: "FORMAL_EXAM_NOT_AUTHORIZED" } }, 200, cors);
       }
       if (request.method === "GET" && url.pathname === "/health") {
         const operations = operationsHealth();
         return json({ status: operations.status, service: "opsmind-evalos-control-api", contract: "evalos.7",
           milestone: frozenM31Manifest.milestone,
           ledger: operations.ledger, operations,
-          formal_run: { enabled: formalM3RunEnabled, guard: "480_TRIAL_NOT_AUTHORIZED" },
+          formal_run: { enabled: formalM3RunEnabled, guard: "FORMAL_EXAM_NOT_AUTHORIZED" },
           twin: { configured: twinConfigured } }, 200, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/workbench/operations-health") {
@@ -1221,7 +1223,7 @@ export function createApp({
               explanation: String(error?.message ?? error) });
           }
         }
-        return json({ contract: "evalos-candidate-readiness.1", formal_480_enabled: false, items }, 200, cors);
+        return json({ contract: "evalos-candidate-readiness.1", formal_exam_enabled: formalM3RunEnabled, items }, 200, cors);
       }
       if (request.method === "GET" && url.pathname === "/api/candidate-adapters/discover") {
         if (!isAdmin(request)) return json({ error: "authenticated control-plane token required" }, 401, cors);
@@ -1330,7 +1332,7 @@ export function createApp({
         const label = labels.getLabel(trial.case_ref);
         const execution = store.getExecutionCase(trial.case_ref);
         const result = await judgeRecordAndSummarize({ store, gradingCase: { ...execution, ground_truth: label.ground_truth }, trial,
-          namespace: path.join(store.runtimeRoot, "judges", trial.id), model: process.env.ANTHROPIC_MODEL ?? "deepseek-v4-flash" });
+          namespace: path.join(store.runtimeRoot, "judges", trial.id), model: evalosIntelligenceModel() });
         ledger.append({ entityType: "judge_bundle", entityId: trial.id, action: "judge.completed",
           payload: { judge_ref: result.bundle.judge_ref, roles: result.bundle.runs.map((run) => run.role),
             authority: "advisory-only", attention_required: result.advisory.attention_required } });
@@ -1535,8 +1537,10 @@ export function createApp({
           if (!trial || trial.status !== "COMPLETED" || !trial.outcome) throw new Error(`completed trial is required for regrade: ${trialId}`);
           const original = gradeFor(trialId);
           if (!original) throw new Error(`original deterministic grade is required: ${trialId}`);
-          const grading = gradingService.grade({ trialId: trial.id, caseRef: trial.case_ref, outcome: trial.outcome, trace: store.getTrace(trial.id),
-            usage: trial.usage, budget: trial.budget, environmentState: trial.final_state?.before_reset ?? null });
+          const grading = gradingService.grade({ trialId: trial.id, caseRef: trial.case_ref, candidateRef: trial.contestant_ref,
+            outcome: trial.outcome, trace: store.getTrace(trial.id), usage: trial.usage, budget: trial.budget,
+            environmentState: trial.final_state?.before_reset ?? null,
+            environmentReset: trial.final_state?.reset ?? null });
           const regrade = store.addRegradeRequest({ trialId, requestedBy: body.requested_by ?? "evalos-operator",
             reason: body.reason, graderRef: grading.grader_ref, originalGraderRunId: original.id, result: grading.result });
           ledger.append({ entityType: "regrade_request", entityId: regrade.id, action: "regrade.completed",
@@ -1560,7 +1564,7 @@ export function createApp({
           candidate_execution: "external-real-products-only",
           candidate_adapter_contract: "5.0",
           candidate_adapter_contracts_supported: ["5.0"],
-          trace_contract: "4.0", grader_contract: "5.3", formal_480_enabled: false,
+          trace_contract: "4.0", grader_contract: GRADER_CONTRACT_VERSION, formal_exam_enabled: formalM3RunEnabled,
         }, counts: { datasets: store.listDatasets().length, cases: store.listCases().length,
           experiments: experiments.length, trials: trials.length, completed_trials: trials.filter((item) => item.status === "COMPLETED").length,
           analysis_runs: store.listAnalysisRuns().length, evaluation_tasks: store.listEvaluationRunRequests().length }, score: {
