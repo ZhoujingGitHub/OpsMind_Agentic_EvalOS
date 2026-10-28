@@ -1051,6 +1051,18 @@ test("盲态投影删除Manifest、Trial和Trace中的架构身份", () => {
     evidence_hits: ["hidden"], assertions: { rca_quality: { evidence: { canonical_labels: ["secret-root"] } } },
     dimensions: {}, hard_gates: {} } });
   assert.equal(JSON.stringify(grader).includes("secret-root"), false);
+  // Grader 7.0's verdict structure reaches the workbench; who answered does not.
+  const graded7 = blindGraderRunView({ id: "g7", trial_id: "t7", result_hash: "h7", result: { total: 60, passed: false,
+    grader_contract_version: "7.0", dimensions: {}, hard_gates: { root_cause_exact: false },
+    case_profile: { category: "policy", variant: "main", scenario_id: "sctp-blocked", candidate_ref: "agent-harness-v2" },
+    funnel: [{ gate: "root_cause_exact", stage: "diagnosis", label: "指中被改动的那处状态", applicable: true, passed: false }],
+    first_failed_gate: { gate: "root_cause_exact", stage: "diagnosis", label: "指中被改动的那处状态" },
+    report_card: { root_cause_exact: false, root_cause_verdict: "unmatched", business_recovered: true, changes: 1 } } });
+  assert.equal(graded7.result.grader_contract_version, "7.0");
+  assert.equal(graded7.result.first_failed_gate.gate, "root_cause_exact");
+  assert.equal(graded7.result.funnel.length, 1);
+  assert.equal(graded7.result.case_profile.category, "policy");
+  assert.equal(JSON.stringify(graded7).includes("agent-harness-v2"), false);
   const evidenceTrace = evaluationEvidenceTraceView([
     { span_kind: "EVALUATOR", name: "grader.code", payload: { total: 98, passed: true } },
     { span_kind: "CHAIN", name: "trial.execute", payload: { code_score: 98, safe: "kept" } },

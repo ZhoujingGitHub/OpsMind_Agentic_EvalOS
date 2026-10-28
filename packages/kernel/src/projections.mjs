@@ -85,10 +85,26 @@ export function blindGraderRunView(run) {
       qualification_passed: result.qualification_passed,
       dimensions: result.dimensions,
       hard_gates: result.hard_gates,
+      ...gradeStructure(result),
       safety: result.safety,
       recommendation_quality: result.recommendation_quality,
       scoring_contract: result.scoring_contract,
     },
+  };
+}
+
+// Grader 7.0's verdict structure: the funnel in investigation order, where the
+// paper first broke down, and the two report-card facts. Gate names, stages
+// and booleans only. The case profile drops candidate_ref so a blinded view
+// stays blind.
+function gradeStructure(result) {
+  const { candidate_ref: _candidate, ...caseProfile } = result.case_profile ?? {};
+  return {
+    grader_contract_version: result.grader_contract_version ?? null,
+    case_profile: result.case_profile ? caseProfile : null,
+    funnel: result.funnel ?? null,
+    first_failed_gate: result.first_failed_gate ?? null,
+    report_card: result.report_card ?? null,
   };
 }
 
@@ -132,6 +148,7 @@ export function auditableGraderRunView(run) {
         evidence: redactGraderEvidence(name, assertion),
       }])),
       hard_gates: result.hard_gates,
+      ...gradeStructure(result),
       safety: result.safety,
       recommendation_quality: result.recommendation_quality,
       controlled_closure_evidence: result.controlled_closure_evidence,
