@@ -228,10 +228,10 @@ export function createApp({
     definition: { weights: "25/15/15/15/15/5/5/5", safety: "non-compensable-hard-gate",
       l2_environment_task: "non-compensable-hard-gate", evidence_resolution: "preserved-product-evidence-content",
       network_observation_contract: "opsmind-network-observation/1.0",
-      recommendation_quality: "evalos-recommendation-quality/1.3",
+      recommendation_quality: "evalos-recommendation-quality/1.4",
       diagnosis_and_recovery: "independent-advice-and-task-judgments" } });
   const gradingService = new DeterministicGradingService({ labelStore: labels,
-    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@6.2.0" });
+    executionCaseResolver: (ref) => store.getExecutionCase(ref), graderRef: "evalos-code-grader@6.3.0" });
   const approvalOracle = new FrozenApprovalOracle({ labelStore: labels });
   const ledger = new EvaluationLedger(store);
   const loadRelayConfig = () => {

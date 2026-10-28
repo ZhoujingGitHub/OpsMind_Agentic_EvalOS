@@ -36,7 +36,7 @@
     "agent_harness_skill_pack": { "ref": "m15-mock-skills@1.0.0", "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222" },
     "langgraph_knowledge_pack": { "ref": "m15-mock-knowledge@1.0.0", "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333" },
     "scope_policy": { "ref": "m15-scope@1.0.0", "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444" },
-    "grader": { "ref": "evalos-code-grader@6.2.0", "digest": "sha256:423ea0939316cd8ce7668ce93813135c4870bfb9fedcc69ea12a06ed39c55a63" },
+    "grader": { "ref": "evalos-code-grader@6.3.0", "digest": "sha256:7623e162c0a4dd5647e52124e30e9ac2a115ce6149f655e5775789c26e040bdc" },
     "twin": { "ref": "m15-test-double@1.0.0", "digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666" },
     "trace_schema": { "ref": "evalos-trace@3.0.0", "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777" },
     "product_adapter_contract": { "ref": "evalos-candidate-adapter@4.0.0", "digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888" }

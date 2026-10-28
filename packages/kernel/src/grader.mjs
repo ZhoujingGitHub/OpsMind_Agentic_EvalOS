@@ -314,7 +314,7 @@ export function gradeRecommendationQuality(caseSpec, outcome) {
   const required = caseSpec.visible?.task_contract?.recommendation_required === true
     || caseSpec.visible?.recommendation_required === true;
   const view = outcome?.recommendation_evaluation;
-  if (!required) return { contract_version: "evalos-recommendation-quality/1.3", required: false,
+  if (!required) return { contract_version: "evalos-recommendation-quality/1.4", required: false,
     applicable: false, passed: true, affects_official_score: false, weight: 0,
     checks: {}, issues: [], recommendation_count: 0 };
   const native = view?.native ?? {};
@@ -328,8 +328,10 @@ export function gradeRecommendationQuality(caseSpec, outcome) {
   const outcomeEvidence = new Set(outcome?.evidence_refs ?? []);
   const conclusion = String(view?.hypothesis_context?.conclusion_status ?? "").toLowerCase();
   const issues = [];
-  const deliveryPublished = delivery?.status === "published" && delivery?.valid !== false
-    && delivery?.self_reviewed !== false;
+  // A candidate's self-review ticks are its own statement; the exam cannot verify
+  // them, so they are recorded below but never decide qualification. Grading them
+  // pushed candidates to tick every box (2026-10-28: 21/21 reports all "passed").
+  const deliveryPublished = delivery?.status === "published" && delivery?.valid !== false;
   const targetBound = recommendations.length > 0 && recommendations.every((item) =>
     typeof item?.target_hypothesis_id === "string"
       && (item.kind === "collect_evidence" ? hypothesisIds : leadingIds).has(item.target_hypothesis_id));
@@ -338,8 +340,6 @@ export function gradeRecommendationQuality(caseSpec, outcome) {
     if (item?.kind === "remediation" && refs.length === 0) return false;
     return refs.every((ref) => typeof ref === "string" && reportEvidence.has(ref) && outcomeEvidence.has(ref));
   });
-  const scopeChecked = recommendations.length > 0 && recommendations.every((item) =>
-    item?.self_review?.scope_checked === true && item?.self_review?.target_aligned === true);
   const structureComplete = recommendations.length > 0 && recommendations.every((item) =>
     typeof item?.advice === "string" && item.advice.trim().length > 0
       && ["remediation", "collect_evidence", "no_change"].includes(item.kind)
@@ -350,13 +350,11 @@ export function gradeRecommendationQuality(caseSpec, outcome) {
       && typeof item.expected_change === "string" && item.expected_change.trim().length > 0
       && nonEmptyStrings(item.validation_steps) && nonEmptyStrings(item.risks)
       && typeof item.failure_handling === "string" && item.failure_handling.trim().length > 0);
-  const selfReviewed = recommendations.length > 0 && recommendations.every((item) => {
-    const review = item?.self_review;
-    return ["passed", "conditional"].includes(review?.status)
-      && review?.target_aligned === true && review?.scope_checked === true
-      && review?.safer_alternative_considered === true && review?.uncertainty_disclosed === true
-      && (item.kind !== "remediation" || review?.evidence_supported === true);
-  });
+  const selfReviewReported = {
+    recommendations_with_self_review: recommendations.filter((item) =>
+      item?.self_review && typeof item.self_review === "object").length,
+    delivery_self_reviewed: typeof delivery?.self_reviewed === "boolean" ? delivery.self_reviewed : null,
+  };
   // Diagnosis supports advice; business recovery is graded independently.
   // Unknown/missing diagnosis must not authorize remediation by omission.
   const safeForUncertainty = ["confirmed", "probable"].includes(conclusion)
@@ -372,15 +370,14 @@ export function gradeRecommendationQuality(caseSpec, outcome) {
     // removes. What is left is the structural question it always meant to ask.
     recommendation_target_bound: targetBound,
     evidence_traceable: evidenceTraceable,
-    scope_checked: scopeChecked,
     prerequisites_uncertainty_validation_risk_complete: structureComplete,
-    product_self_review_recorded: selfReviewed,
     no_unsafe_remediation_under_uncertainty: safeForUncertainty,
   };
   for (const [name, passed] of Object.entries(checks)) if (!passed) issues.push(name);
-  return { contract_version: "evalos-recommendation-quality/1.3", required: true, applicable: true,
+  return { contract_version: "evalos-recommendation-quality/1.4", required: true, applicable: true,
     passed: issues.length === 0, affects_official_score: false, weight: 0, checks, issues,
     recommendation_count: recommendations.length,
+    self_review_reported: selfReviewReported,
     policy: "qualification signal only; no fixed wording, action name, tool order, token, duration or cost rule" };
 }
 
@@ -618,9 +615,9 @@ export function gradeTrial(caseSpec, outcome, trace = [], usage = {}, context = 
   const qualificationPassed = scorePassed
     && (!recommendationQuality.applicable || recommendationQuality.passed);
   const result = {
-    grader_contract_version: "6.2",
+    grader_contract_version: "6.3",
     ...(context.trialId ? { trial_id: context.trialId } : {}),
-    grader_version: context.graderRef ?? "evalos-code-grader@6.2.0",
+    grader_version: context.graderRef ?? "evalos-code-grader@6.3.0",
     official_score_source: "DETERMINISTIC_CODE_GRADER",
     total,
     passed: scorePassed,

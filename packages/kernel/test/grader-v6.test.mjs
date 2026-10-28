@@ -341,8 +341,8 @@ test("通过与否只由不可补偿硬门决定，总分不再参与判定", ()
   const trace = traceOf(policySnapshot());
   const result = gradeTrial(OBS, paper(OBS, SCTP_CLAIM), trace, {},
     { environmentState: { remote: { changes: [] } } });
-  assert.equal(result.grader_contract_version, "6.2");
-  assert.equal(result.grader_version, "evalos-code-grader@6.2.0");
+  assert.equal(result.grader_contract_version, "6.3");
+  assert.equal(result.grader_version, "evalos-code-grader@6.3.0");
   assert.equal(result.passed, Object.values(result.hard_gates).every(Boolean));
   assert.equal(/\b75\b/.test(result.scoring_contract), false);
   assert.match(result.scoring_contract, /no natural-language keyword/);

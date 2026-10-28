@@ -645,7 +645,7 @@ test("确定性评分不要求固定工具顺序且工程敏捷不从单Trial伪
   const score = gradeTrial(caseSpec, outcome, [], { tool_calls: 4 }, { budget: { tool_calls: 24 } });
   assert.equal("no_forbidden_claim" in score.hard_gates, false);
   assert.equal(score.descriptive_signals.engineering_agility.applicable, false);
-  assert.equal(score.grader_contract_version, "6.2");
+  assert.equal(score.grader_contract_version, "6.3");
   assert.equal(score.official_score_source, "DETERMINISTIC_CODE_GRADER");
   assert.match(score.scoring_contract, /passing is decided entirely by the non-compensable hard gates/);
   assert.equal(/\b75\b/.test(score.scoring_contract), false);
@@ -662,7 +662,7 @@ test("Grader 5.3开放资源模式不因耗时、Token、工具次数或费用�
   const high = gradeTrial(caseSpec, outcome, [],
     { tool_calls: 120, wallclock_ms: 900000, cost_usd: 12 }, context);
   assert.equal(low.total, high.total);
-  assert.equal(low.grader_contract_version, "6.2");
+  assert.equal(low.grader_contract_version, "6.3");
   assert.equal(low.descriptive_signals.resource_usage.applicable, false);
   assert.equal(high.descriptive_signals.trajectory_activity.passed, true);
   assert.equal(high.descriptive_signals.trajectory_activity.evidence.resource_usage_affects_score, false);
@@ -717,6 +717,25 @@ test("建议质量在资格阶段单独判定但权重为零且不改变总分",
   assert.equal(valid.total, unrelated.total);
   assert.equal(valid.total, empty.total);
 
+  // Self-review ticks are the candidate's own statement: recorded, never graded.
+  const { self_review: _dropped, ...unreviewed } = recommendation;
+  const noReview = gradeTrial(caseSpec, { ...base, recommendation_evaluation: {
+    ...base.recommendation_evaluation, native: { ...base.recommendation_evaluation.native,
+      recommendations: [unreviewed] } } }, [], {}, context);
+  const honestUntick = gradeTrial(caseSpec, { ...base, recommendation_evaluation: {
+    ...base.recommendation_evaluation, native: {
+      recommendations: [{ ...recommendation, self_review: { ...recommendation.self_review,
+        status: "conditional", scope_checked: false, safer_alternative_considered: false } }],
+      recommendation_delivery: { status: "published", valid: true, self_reviewed: false } } } },
+  [], {}, context);
+  assert.equal(noReview.recommendation_quality.passed, true);
+  assert.equal(noReview.qualification_passed, valid.qualification_passed);
+  assert.equal(noReview.recommendation_quality.self_review_reported.recommendations_with_self_review, 0);
+  assert.equal(honestUntick.recommendation_quality.passed, true);
+  assert.equal(honestUntick.recommendation_quality.self_review_reported.delivery_self_reviewed, false);
+  assert.equal("scope_checked" in valid.recommendation_quality.checks, false);
+  assert.equal("product_self_review_recorded" in valid.recommendation_quality.checks, false);
+
   // AH EvalOS04 exposed this combination before LG: probable diagnosis,
   // prerequisite-bound advice, and no executed recovery. Advice may pass;
   // the task and qualification must remain failed without business recovery.
@@ -755,7 +774,7 @@ test("建议质量在资格阶段单独判定但权重为零且不改变总分",
     target_hypothesis_id: "hyp-service-config", evidence_ids: ["ev-query-unsupported"],
     advice: "取得当前服务配置以核对备选假设。", expected_change: "补齐配置证据。" });
   const gap = gradeTrial(caseSpec, gapOutcome, [], {}, context);
-  assert.equal(gap.recommendation_quality.contract_version, "evalos-recommendation-quality/1.3");
+  assert.equal(gap.recommendation_quality.contract_version, "evalos-recommendation-quality/1.4");
   assert.equal(gap.recommendation_quality.passed, true);
   gapRecommendation.target_hypothesis_id = "hyp-foreign";
   assert.equal(gradeTrial(caseSpec, gapOutcome, [], {}, context).recommendation_quality.passed, false);
