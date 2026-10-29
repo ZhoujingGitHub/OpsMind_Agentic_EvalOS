@@ -526,6 +526,16 @@ export function createApp({
     } finally { cleanupReconciliationRunning = false; }
   };
   const gradeFor = (trialId) => store.listGraderRuns(trialId).find((item) => item.dimension === "overall") ?? null;
+  // The frozen source of exactly the version that ran the trial. It is bound to
+  // the trial when an analysis starts; before that the workbench still shows the
+  // registered snapshot instead of calling a real candidate a test double (10-29).
+  const registeredSourceFor = (trial, experiment = store.getExperiment(trial?.experiment_id)) => {
+    const contestant = experiment?.manifest?.contestants?.find((item) => item.ref === trial?.contestant_ref);
+    return contestant?.source_revision && contestant?.artifact_digest ? store.findSourceSnapshot({ contestantRef: contestant.ref,
+      sourceRevision: contestant.source_revision, artifactDigest: contestant.artifact_digest }) : null;
+  };
+  const sourceSnapshotFor = (trial, experiment) => trial
+    ? store.getTrialSourceSnapshot(trial.id) ?? registeredSourceFor(trial, experiment) : null;
   const evaluationMode = (experiment) => experiment?.manifest?.evaluation_mode ?? "FORMAL";
   const gradePassedForExperiment = (grade, experiment) => Boolean(evaluationMode(experiment) === "FORMAL"
     ? grade?.passed : grade?.qualification_passed ?? grade?.passed);
@@ -599,7 +609,7 @@ export function createApp({
     const experiment = store.getExperiment(trial.experiment_id);
     const grade = gradeFor(trial.id);
     const trace = store.getTrace(trial.id);
-    const snapshot = store.getTrialSourceSnapshot(trial.id);
+    const snapshot = sourceSnapshotFor(trial, experiment);
     const attempts = attemptsByTrial.get(trial.id) ?? [];
     return {
       id: trial.id,
@@ -1681,7 +1691,7 @@ export function createApp({
       const workbenchTrialSourceContentMatch = url.pathname.match(/^\/api\/workbench\/trials\/([^/]+)\/source\/content$/);
       if (request.method === "GET" && workbenchTrialSourceContentMatch) {
         const trialId = decodeURIComponent(workbenchTrialSourceContentMatch[1]);
-        const snapshot = store.getTrialSourceSnapshot(trialId);
+        const snapshot = sourceSnapshotFor(store.getTrial(trialId));
         if (!snapshot) return json({ error: "frozen source snapshot not found" }, 404, cors);
         const requestedPath = url.searchParams.get("path");
         if (!requestedPath) return json({ error: "source path is required" }, 400, cors);
@@ -1689,7 +1699,7 @@ export function createApp({
       }
       const workbenchTrialSourceMatch = url.pathname.match(/^\/api\/workbench\/trials\/([^/]+)\/source$/);
       if (request.method === "GET" && workbenchTrialSourceMatch) {
-        const snapshot = store.getTrialSourceSnapshot(decodeURIComponent(workbenchTrialSourceMatch[1]));
+        const snapshot = sourceSnapshotFor(store.getTrial(decodeURIComponent(workbenchTrialSourceMatch[1])));
         return snapshot ? json({ snapshot: safeSnapshot(snapshot, { includeFiles: true }) }, 200, cors)
           : json({ error: "frozen source snapshot not found" }, 404, cors);
       }
@@ -1719,7 +1729,7 @@ export function createApp({
             artifacts: store.listArtifacts(trial.id).map(({ path: _path, ...artifact }) => artifact) },
           graders: store.listGraderRuns(trial.id).map(auditableGraderRunView), judges: store.listJudgeRuns(trial.id).map((item) => ({
             id: item.id, role: item.judge_role, result: item.result, authority: "advisory_only", created_at: item.created_at })),
-          source_snapshot: safeSnapshot(store.getTrialSourceSnapshot(trial.id)), analyses: store.listAnalysisRuns(trial.id),
+          source_snapshot: safeSnapshot(sourceSnapshotFor(trial, experiment)), analyses: store.listAnalysisRuns(trial.id),
           regrades: store.listRegradeRequests(trial.id), attempts: store.listTrialAttemptResults(trial.id).map(attemptView),
           cleanup_reconciliations: store.listTrialCleanupReconciliations(trial.id),
         }, 200, cors);
@@ -1738,9 +1748,7 @@ export function createApp({
         if (!experimentClosed(experiment)) return json({ error: "experiment must be closed before AI analysis" }, 409, cors);
         // A trial is bound to the frozen source of exactly the version that ran it:
         // same candidate, same source revision, same artifact digest. Nothing else.
-        const contestant = experiment.manifest.contestants?.find((item) => item.ref === trial.contestant_ref);
-        const registered = contestant ? store.findSourceSnapshot({ contestantRef: contestant.ref,
-          sourceRevision: contestant.source_revision, artifactDigest: contestant.artifact_digest }) : null;
+        const registered = registeredSourceFor(trial, experiment);
         const snapshot = store.getTrialSourceSnapshot(trial.id)
           ?? (registered ? store.attachTrialSourceSnapshot(trial.id, registered.snapshot_ref) : null);
         if (!snapshot) return json({ error: "frozen source snapshot of the candidate version that ran this trial is not registered" }, 409, cors);

@@ -455,7 +455,7 @@ function SourcePanel({ trialId, snapshot }: { trialId: string; snapshot: Json | 
   const source = useRemote(snapshot ? `/api/workbench/trials/${encodeURIComponent(trialId)}/source` : null);
   const [selected, setSelected] = useState(""); const [file, setFile] = useState<Json | null>(null); const [error, setError] = useState("");
   const load = (name: string) => { setSelected(name); setError(""); requestJson(`/api/workbench/trials/${encodeURIComponent(trialId)}/source/content?path=${encodeURIComponent(name)}`).then(setFile).catch((reason) => setError(reason.message)); };
-  if (!snapshot) return <section className="surface"><SectionHead title="本 Trial 没有冻结源码" sub="Frozen source unavailable" /><Empty text="这是工程测试替身产生的自测记录，不绑定真实考生源码；它不会被送给 AI 调查员，也不会冒充真实产品证据。" /></section>;
+  if (!snapshot) return <section className="surface"><SectionHead title="本 Trial 没有冻结源码" sub="Frozen source unavailable" /><Empty text="工程测试替身的自测记录不绑定源码；真实考生的场次出现这条，说明跑这场的那个版本还没登记冻结源码。没有源码就不会送给 AI 调查员。" /></section>;
   return <div className="source-layout"><aside className="surface file-tree"><SectionHead title="冻结源码" sub={`${snapshot?.file_count ?? 0} 文件 · ${formatBytes(snapshot?.size_bytes)}`} />
     <div className="snapshot-seal"><span>不可变快照</span><code>{shortHash(snapshot?.tree_hash)}</code><small>{snapshot?.contestant_ref}<br/>{shortHash(snapshot?.artifact_digest)}</small></div>
     <div className="files">{(source.data?.snapshot?.files ?? []).map((item: Json) => <button className={selected === item.path ? "active" : ""} key={item.path} onClick={() => load(item.path)}><span>⌗</span>{item.path}<small>{formatBytes(item.size_bytes)}</small></button>)}</div></aside>
@@ -475,7 +475,7 @@ function AnalysisPanel({ trialId, initial, initialSelected, sourceAvailable, onC
       body: JSON.stringify({ trial_id: trialId, prompt, mode }) }); setRuns([body.analysis, ...runs]); setSelected(body.analysis.id); await onChanged(); } catch (reason: any) { setError(reason.message); } finally { setBusy(false); } };
   const analysis = runDetail.data?.analysis; const result = analysis?.result;
   return <div className="analysis-layout"><aside className="surface analysis-control"><SectionHead title="AI 调查员" sub="Claude Agent SDK · DeepSeek · 只读" /><div className="authority-banner"><strong>诊断权，不是评分权</strong><p>能查证据、读源码、上网研究；不能改分、改 Trial 或执行修复。</p></div>
-    {!sourceAvailable && <div className="rule-note"><strong>本 Trial 暂不能启动 AI 调查</strong><p>工程测试替身没有与真实考生版本绑定的冻结源码。为避免把测试替身冒充真实产品，平台不会创建缺少源码证据的调查。</p></div>}
+    {!sourceAvailable && <div className="rule-note"><strong>本 Trial 暂不能启动 AI 调查</strong><p>没有找到跑这场的那个考生版本的冻结源码：工程测试替身本来就没有；真实考生则是该版本源码还没登记。平台不会创建缺少源码证据的调查。</p></div>}
     <label>分析目标<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} /></label><label>分析模式<select value={mode} onChange={(event) => setMode(event.target.value)}><option value="optimization_research">优化深研</option><option value="case_diagnosis">Case 诊断</option><option value="score_explanation">评分解释</option></select></label>
     {error && <ErrorBox text={error} />}<button className="primary-action" disabled={busy || !prompt.trim() || !sourceAvailable} onClick={start}>{busy ? "正在创建…" : sourceAvailable ? "✦ 开始 AI 深度分析" : "缺少冻结源码，不能启动"}</button>
     <div className="run-history">{runs.map((run) => <button key={run.id} className={selected === run.id ? "active" : ""} onClick={() => setSelected(run.id)}><Status status={run.status} /><span>{run.mode}</span><small>{formatTime(run.created_at)}</small></button>)}</div>
