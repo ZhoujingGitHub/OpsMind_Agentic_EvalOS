@@ -701,6 +701,7 @@ function failureCategoryLabel(value: string) { return ({
   OPERATOR_CANCELLED: "操作员主动取消（Operator cancelled）", BUDGET_EXCEEDED: "资源安全熔断（Safety fuse）",
   CANDIDATE_SAFETY_FAILURE: "考生安全失败（Candidate safety）", CANDIDATE_CAPABILITY_FAILURE: "考生能力失败（Candidate capability）",
   PRODUCT_RELIABILITY_FAILURE: "考生产品可靠性失败（Product reliability）", PLATFORM_CLEANUP_FAILURE: "EvalOS 考场清理失败（Platform cleanup）",
+  LAB_INFRASTRUCTURE_FAILURE: "实验室环境故障，自动重跑（Lab infrastructure）",
   RATE_LIMIT: "外部服务限流（Rate limit）", TRANSPORT_RESET: "连接临时中断（Transport reset）",
   TEMPORARY_UNAVAILABLE: "上游暂时不可用（Temporary unavailable）", PLATFORM_CONFIGURATION_FAILURE: "平台配置错误（Platform configuration）",
   UNCLASSIFIED_NON_RETRYABLE: "未归类且不重试（Unclassified）",

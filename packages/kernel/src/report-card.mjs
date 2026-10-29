@@ -1,3 +1,4 @@
+import { isCandidateOwnedFailure } from "./failure-policy.mjs";
 import { HARD_GATE_FUNNEL } from "./grader.mjs";
 import { OPS_CATEGORIES, OPS_VARIANTS } from "./m33-ops-cases.mjs";
 
@@ -11,13 +12,28 @@ import { OPS_CATEGORIES, OPS_VARIANTS } from "./m33-ops-cases.mjs";
 
 function bump(map, key, by = 1) { map[key] = (map[key] ?? 0) + by; }
 
+// The candidate's own failure to finish counts as not passed and stays in the
+// denominator (product manager, 2026-10-29). It has no grade, so it enters only
+// the pass ratio and the first-failure tally, not the business/root-cause rates.
+export const DID_NOT_FINISH_GATE = "did_not_finish";
+
+function didNotFinish(item) {
+  return !item.grade && item.trial?.status === "FAILED" && isCandidateOwnedFailure(item.failure);
+}
+
 function emptyCell() {
   return { trials: 0, graded: 0, passed: 0, root_cause_exact: 0, root_cause_applicable: 0,
-    business_recovered: 0, business_applicable: 0, first_failures: {}, not_completed: 0 };
+    business_recovered: 0, business_applicable: 0, first_failures: {}, not_completed: 0, did_not_finish: 0 };
 }
 
 function addToCell(cell, item) {
   cell.trials += 1;
+  if (didNotFinish(item)) {
+    cell.graded += 1;
+    cell.did_not_finish += 1;
+    bump(cell.first_failures, DID_NOT_FINISH_GATE);
+    return;
+  }
   if (!item.grade) { cell.not_completed += 1; return; }
   cell.graded += 1;
   if (item.grade.passed) cell.passed += 1;
@@ -48,7 +64,10 @@ function rows(items, keyOf, catalog, candidates) {
 
 function funnelFor(items) {
   const graded = items.filter((item) => item.grade?.funnel);
-  return HARD_GATE_FUNNEL.map(({ gate, stage, label }, index) => {
+  const unfinished = items.filter(didNotFinish).length;
+  const finishStep = unfinished ? [{ gate: DID_NOT_FINISH_GATE, stage: "finish", label: "考生自己把题答完",
+    reached: graded.length + unfinished, failed_here: unfinished }] : [];
+  return [...finishStep, ...HARD_GATE_FUNNEL.map(({ gate, stage, label }, index) => {
     let reached = 0;
     let failedHere = 0;
     for (const item of graded) {
@@ -61,7 +80,7 @@ function funnelFor(items) {
       }
     }
     return { gate, stage, label, reached, failed_here: failedHere };
-  });
+  })];
 }
 
 /**
@@ -81,6 +100,8 @@ export function examReportCard(items, { candidates = null } = {}) {
       trial_id: item.trial.id, passed: item.grade.passed, total: item.grade.total,
       first_failed_gate: item.grade.first_failed_gate, root_cause_verdict: item.grade.report_card?.root_cause_verdict ?? null,
       business_recovered: item.grade.report_card?.business_recovered ?? null,
+    } : didNotFinish(item) ? { trial_id: item.trial.id, passed: false, total: 0, did_not_finish: true,
+      first_failed_gate: { gate: DID_NOT_FINISH_GATE }, failure_category: item.failure.category, status: item.trial.status,
     } : { trial_id: item.trial.id, passed: null, status: item.trial.status };
     sameCase.set(key, entry);
   }
@@ -104,7 +125,7 @@ export function examReportCard(items, { candidates = null } = {}) {
   const sorted = (map) => Object.entries(map).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count }));
   return {
     contract: "evalos-exam-report-card/1.0",
-    notice: "按大类出，不算总分：每个格子是「通过 / 有效场次」，另列业务恢复率与根因精确率",
+    notice: "按大类出，不算总分：每个格子是「通过 / 有效场次」，考生自己没答完的场次按不通过计入，另列业务恢复率与根因精确率",
     candidates: refs,
     by_category: rows(items, (item) => profile(item).category, OPS_CATEGORIES, refs),
     by_variant: rows(items, (item) => profile(item).variant, Object.fromEntries(Object.entries(OPS_VARIANTS)

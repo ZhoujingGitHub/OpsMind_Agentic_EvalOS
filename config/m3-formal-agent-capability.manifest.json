@@ -406,7 +406,8 @@
       "RATE_LIMIT",
       "TRANSPORT_RESET",
       "TEMPORARY_UNAVAILABLE",
-      "RUNNER_LEASE_EXPIRED"
+      "RUNNER_LEASE_EXPIRED",
+      "LAB_SNAPSHOT"
     ],
     "capability_failures_retryable": false
   },

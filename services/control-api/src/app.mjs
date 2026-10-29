@@ -6,6 +6,7 @@ import {
   auditableGraderRunView, blindExperimentView, blindGraderRunView, blindTraceView, blindTrialView,
   expertCalibrationFromConsensusSamples, createEvalRegistry, createCaseEnvironment, createTestDouble,
   evaluationDecisionReport, evaluationEvidenceTraceView, explainTraceRecord, TRACE_FILTERS, readSnapshotFile, sha256,
+  isCandidateOwnedFailure,
   auditTrialEfficiency, candidateExecutionBudget, trialSettlementBudget, caseRunnability,
   CANDIDATE_PRESENCE_PATH, CandidatePresenceRegistry, assertCandidateBound, GRADER_CONTRACT_VERSION, GRADER_REF, examReportCard,
   openControlStore,
@@ -62,6 +63,13 @@ function isMeaningfulProgressRecord(item) {
 function parsedTime(value) {
   const parsed = value ? new Date(value).getTime() : Number.NaN;
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+// An experiment is closed once it reaches any terminal state. Treating only
+// COMPLETED as closed kept a FAILED formal run (one bad trial) blinded forever
+// and refused its AI analysis with 409 (2026-10-29).
+export function experimentClosed(experiment) {
+  return ["COMPLETED", "FAILED", "CANCELLED"].includes(experiment?.status);
 }
 
 export function trialLiveProgressView(trial, experiment, trace, nowMs = Date.now()) {
@@ -415,8 +423,8 @@ export function createApp({
   const auditTrial = (trial, experiment) => {
     if (!trial) return null;
     const publicView = publicTrial(trial);
-    return { ...publicView, contestant: experiment?.status === "COMPLETED" ? trial.contestant_ref : trial.blind_id,
-      identity_state: experiment?.status === "COMPLETED" ? "REVEALED_AFTER_CLOSE" : "BLINDED",
+    return { ...publicView, contestant: experimentClosed(experiment) ? trial.contestant_ref : trial.blind_id,
+      identity_state: experimentClosed(experiment) ? "REVEALED_AFTER_CLOSE" : "BLINDED",
       budget: trial.budget, duration_ms: trial.started_at && trial.completed_at
         ? Math.max(0, new Date(trial.completed_at).getTime() - new Date(trial.started_at).getTime()) : null };
   };
@@ -542,7 +550,7 @@ export function createApp({
       planned_trial_count: plannedCaseRefs.length * plannedContestants.length * plannedSeeds.length * plannedReplicates,
       partition_counts: partitionCounts,
       dataset_ref: experiment.dataset_ref, suite_ref: experiment.suite_ref, manifest_hash: experiment.manifest_hash,
-      model: experiment.manifest.model ?? null, contestants: experiment.status === "COMPLETED"
+      model: experiment.manifest.model ?? null, contestants: experimentClosed(experiment)
         ? experiment.manifest.contestants?.map(({ ref, kind, architecture, adapter_version, source_revision, artifact_digest }) =>
           ({ ref, kind, architecture, adapter_version, source_revision, artifact_digest }))
         : store.listBlinds(experiment.id).map(({ blind_id }) => ({ ref: blind_id, kind: "BLINDED" })),
@@ -603,7 +611,7 @@ export function createApp({
       affects_official_score: evaluationMode(experiment) === "FORMAL",
       candidate_kind: experiment?.manifest?.contestants?.find((item) => item.ref === trial.contestant_ref)?.kind ?? null,
       case_ref: trial.case_ref,
-      contestant: experiment?.status === "COMPLETED" ? trial.contestant_ref : trial.blind_id,
+      contestant: experimentClosed(experiment) ? trial.contestant_ref : trial.blind_id,
       status: trial.status,
       duration_ms: trial.started_at && trial.completed_at
         ? Math.max(0, new Date(trial.completed_at).getTime() - new Date(trial.started_at).getTime()) : null,
@@ -984,7 +992,11 @@ export function createApp({
         scheduleEvaluationRequest(request.id, 1000);
       } else {
         const summary = store.experimentSummary(experiment.id);
-        const status = summary.failed_trials ? "FAILED" : "COMPLETED";
+        // A candidate failing to finish is a result, not a broken run (2026-10-29):
+        // only a failure the lab or EvalOS owns closes the request as FAILED.
+        const platformFailures = currentTrials.filter((trial) => trial.status === "FAILED" && !isCandidateOwnedFailure(
+          store.listTrialAttemptResults(trial.id).at(-1)?.final_state?.failure_classification)).length;
+        const status = platformFailures ? "FAILED" : "COMPLETED";
         store.setExperimentStatus(experiment.id, status);
         const finished = store.finishEvaluationRunRequest(request.id, status);
         const report = runRequestView(finished).decision_report;
@@ -1612,10 +1624,12 @@ export function createApp({
           return { trial: { id: trial.id, contestant_ref: audited.contestant, case_ref: trial.case_ref, status: trial.status },
             case_profile: { category: truth.category ?? null, variant: truth.variant ?? null, scenario_id: truth.scenario_id ?? null },
             grade: grade?.grader_contract_version === "7.0" ? grade : null,
+            failure: trial.status === "FAILED"
+              ? store.listTrialAttemptResults(trial.id).at(-1)?.final_state?.failure_classification ?? null : null,
             analyses: store.listAnalysisRuns(trial.id).filter((item) => item.status === "COMPLETED"),
             annotations: store.listTrialAnnotations(trial.id, { latestPerAnnotator: true }) };
         });
-        return json({ experiment_id: experiment.id, identity_state: experiment.status === "COMPLETED" ? "REVEALED_AFTER_CLOSE" : "BLINDED",
+        return json({ experiment_id: experiment.id, identity_state: experimentClosed(experiment) ? "REVEALED_AFTER_CLOSE" : "BLINDED",
           ...examReportCard(items) }, 200, cors);
       }
       const trialAnnotationsMatch = url.pathname.match(/^\/api\/workbench\/trials\/([^/]+)\/annotations$/);
@@ -1650,7 +1664,7 @@ export function createApp({
           analysis_runs: store.listAnalysisRuns(trial.id).map((item) => ({ id: item.id, status: item.status, mode: item.mode,
             created_at: item.created_at, completed_at: item.completed_at })) }));
         return json({ experiment: summary, manifest: { ...experiment.manifest,
-          contestants: experiment.status === "COMPLETED" ? experiment.manifest.contestants : undefined }, trials }, 200, cors);
+          contestants: experimentClosed(experiment) ? experiment.manifest.contestants : undefined }, trials }, 200, cors);
       }
       const workbenchTrialTraceMatch = url.pathname.match(/^\/api\/workbench\/trials\/([^/]+)\/trace$/);
       if (request.method === "GET" && workbenchTrialTraceMatch) {
@@ -1721,7 +1735,7 @@ export function createApp({
         const trial = store.getTrial(body.trial_id);
         if (!trial || trial.status !== "COMPLETED") return json({ error: "completed trial is required" }, 400, cors);
         const experiment = store.getExperiment(trial.experiment_id);
-        if (experiment?.status !== "COMPLETED") return json({ error: "experiment must be closed before AI analysis" }, 409, cors);
+        if (!experimentClosed(experiment)) return json({ error: "experiment must be closed before AI analysis" }, 409, cors);
         // A trial is bound to the frozen source of exactly the version that ran it:
         // same candidate, same source revision, same artifact digest. Nothing else.
         const contestant = experiment.manifest.contestants?.find((item) => item.ref === trial.contestant_ref);

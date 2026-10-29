@@ -11,6 +11,8 @@ const FAILURE_CATEGORIES = Object.freeze({
     zh: "真实考生超时、无法终止或隔离未释放，属于产品可靠性失败。" },
   PLATFORM_CLEANUP_FAILURE: { owner: "EVALOS", retryable: false, policy_code: null,
     zh: "考场复位或隔离完整性失败；必须先修平台，不能直接重跑。" },
+  LAB_INFRASTRUCTURE_FAILURE: { owner: "INFRASTRUCTURE", retryable: true, policy_code: "LAB_SNAPSHOT",
+    zh: "实验室现场快照重试后仍没回话，属于考场环境故障，不算考生的错，按冻结政策自动重跑。" },
   RATE_LIMIT: { owner: "INFRASTRUCTURE", retryable: true, policy_code: "RATE_LIMIT",
     zh: "外部服务明确限流，可按冻结政策自动重试。" },
   TRANSPORT_RESET: { owner: "INFRASTRUCTURE", retryable: true, policy_code: "TRANSPORT_RESET",
@@ -39,6 +41,11 @@ export function classifyTrialFailure(error, { resetError = null, keepQuarantined
   } else if (error?.name === "BudgetExceededError" || error?.name === "BUDGET_EXCEEDED" ||
       candidateBudgetExhausted || /budget.+exceed|预算.+超限|冻结预算/i.test(message)) {
     category = "BUDGET_EXCEEDED";
+  } else if (!keepQuarantined && (error?.labSnapshotFailure === true || /(?:Candidate )?Twin snapshot failed/i.test(message))) {
+    // Ahead of the product-reliability patterns: "timed out after 45 seconds" is
+    // the lab's own command timing out, not the candidate. A candidate that would
+    // not stop (keepQuarantined) stays a product-reliability failure.
+    category = "LAB_INFRASTRUCTURE_FAILURE";
   } else if (error?.platformConfigurationFailure === true ||
       /candidate product\s+PUT\s+\/v2\/remediation\/mode\s+HTTP\s+403\b/i.test(message)) {
     category = "PLATFORM_CONFIGURATION_FAILURE";
@@ -68,6 +75,13 @@ export function classifyTrialFailure(error, { resetError = null, keepQuarantined
 
 export function isRetryableInfrastructureFailure(error) {
   return classifyTrialFailure(error).retryable === true;
+}
+
+// The candidate's own failure to finish (2026-10-29, product manager): it counts
+// as that question not passed, scored 0, and stays in the denominator. Failures
+// owned by the lab, EvalOS, the operator or nobody do not.
+export function isCandidateOwnedFailure(failure) {
+  return ["CANDIDATE", "CANDIDATE_PRODUCT"].includes(failure?.owner);
 }
 
 export function failureCategoryDefinition(category) {

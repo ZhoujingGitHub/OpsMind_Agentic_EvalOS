@@ -152,7 +152,8 @@
     "retryable_categories": [
       "RATE_LIMIT",
       "TRANSPORT_RESET",
-      "TEMPORARY_UNAVAILABLE"
+      "TEMPORARY_UNAVAILABLE",
+      "LAB_SNAPSHOT"
     ],
     "capability_failures_retryable": false
   },

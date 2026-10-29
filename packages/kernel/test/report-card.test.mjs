@@ -30,7 +30,7 @@ test("成绩单按大类出、不算总分，业务恢复率与根因精确率�
       grade: grade({ category: "transport", passed: false, failedGate: "root_cause_exact", exact: false, recovered: true }) },
     { trial: { id: "t3", contestant_ref: "langgraph-v1", case_ref: "M33-MAIN-01@3.3.0", status: "COMPLETED" },
       grade: grade({ category: "transport", passed: false, failedGate: "required_observations", exact: false, recovered: false }) },
-    // Never finished: counted, never graded as a wrong answer.
+    // No grade and no failure the candidate owns (lab, cancelled, unclassified): counted, never graded.
     { trial: { id: "t4", contestant_ref: "langgraph-v1", case_ref: "M33-MAIN-02@3.3.0", status: "FAILED" }, grade: null,
       case_profile: { category: "transport", variant: "main", scenario_id: "transport-x" } },
   ];
@@ -40,7 +40,7 @@ test("成绩单按大类出、不算总分，业务恢复率与根因精确率�
   assert.equal(transport.label, "承载 / 传输故障");
   assert.deepEqual({ ...transport.candidates["agent-harness-v2"], first_failures: undefined },
     { trials: 2, graded: 2, passed: 1, root_cause_exact: 1, root_cause_applicable: 2,
-      business_recovered: 2, business_applicable: 2, first_failures: undefined, not_completed: 0 });
+      business_recovered: 2, business_applicable: 2, first_failures: undefined, not_completed: 0, did_not_finish: 0 });
   assert.equal(transport.candidates["langgraph-v1"].not_completed, 1);
   assert.deepEqual(transport.candidates["agent-harness-v2"].first_failures, { root_cause_exact: 1 });
   // Same question, both candidates, side by side.
@@ -52,6 +52,31 @@ test("成绩单按大类出、不算总分，业务恢复率与根因精确率�
   assert.equal(ahFunnel.find((item) => item.gate === "root_cause_exact").reached, 2);
   assert.equal(ahFunnel.find((item) => item.gate === "root_cause_exact").failed_here, 1);
   assert.equal(ahFunnel.find((item) => item.gate === "expected_status").reached, 1);
+});
+
+test("考生自己没答完的场次按不通过进分母；考场原因的失败仍单列不计成绩", () => {
+  const profile = { category: "transport", variant: "main", scenario_id: "transport-x" };
+  const items = [
+    { trial: { id: "d1", contestant_ref: "agent-harness-v2", case_ref: "M33-MAIN-01@3.3.0", status: "COMPLETED" },
+      grade: grade({ category: "transport", passed: true }) },
+    { trial: { id: "d2", contestant_ref: "agent-harness-v2", case_ref: "M33-MAIN-02@3.3.0", status: "FAILED" }, grade: null,
+      case_profile: profile, failure: { category: "CANDIDATE_CAPABILITY_FAILURE", owner: "CANDIDATE" } },
+    { trial: { id: "d3", contestant_ref: "agent-harness-v2", case_ref: "M33-MAIN-03@3.3.0", status: "FAILED" }, grade: null,
+      case_profile: profile, failure: { category: "LAB_INFRASTRUCTURE_FAILURE", owner: "INFRASTRUCTURE" } },
+  ];
+  const card = examReportCard(items);
+  const cell = card.by_category.find((row) => row.key === "transport").candidates["agent-harness-v2"];
+  assert.deepEqual({ trials: cell.trials, graded: cell.graded, passed: cell.passed, did_not_finish: cell.did_not_finish,
+    not_completed: cell.not_completed, root_cause_applicable: cell.root_cause_applicable },
+  { trials: 3, graded: 2, passed: 1, did_not_finish: 1, not_completed: 1, root_cause_applicable: 1 });
+  assert.deepEqual(cell.first_failures, { did_not_finish: 1 });
+  const unfinished = card.same_case.find((row) => row.case_ref === "M33-MAIN-02@3.3.0").candidates["agent-harness-v2"];
+  assert.deepEqual({ passed: unfinished.passed, total: unfinished.total, gate: unfinished.first_failed_gate.gate },
+    { passed: false, total: 0, gate: "did_not_finish" });
+  assert.equal(card.same_case.find((row) => row.case_ref === "M33-MAIN-03@3.3.0").candidates["agent-harness-v2"].passed, null);
+  const [finish] = card.funnel["agent-harness-v2"];
+  assert.deepEqual({ gate: finish.gate, reached: finish.reached, failed_here: finish.failed_here },
+    { gate: "did_not_finish", reached: 2, failed_here: 1 });
 });
 
 test("讲评标注只追加：同一标注人后写的覆盖先写的，原记录不改不删", () => {

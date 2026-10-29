@@ -230,9 +230,17 @@ export class TrialRunner {
           decision: decision.decision, reason_code: decision.reason_code, policy_digest: decision.policy_digest }, agentSpan, "EVALUATOR");
         return decision;
       };
+      // A mid-run capture is evidence for the record, not for grading: a miss is
+      // logged and the candidate keeps working. Throwing here used to cancel a
+      // candidate that has no cancel API and halt the whole queue (2026-10-29).
       const captureEnvironment = async (reason = "candidate_progress") => {
         if (typeof environment.capture !== "function") return { captured: false, reason: "capture_not_supported" };
-        const capture = await environment.capture(reason);
+        let capture;
+        try { capture = await environment.capture(reason); }
+        catch (captureError) {
+          event("environment.capture_missed", "twin-manager", { reason, error: captureError.message });
+          return { captured: false, reason: "capture_failed" };
+        }
         event("environment.independent_capture", "twin-manager", capture ?? { captured: false, reason });
         return capture;
       };
@@ -259,7 +267,15 @@ export class TrialRunner {
       this.store.endSpan(trial.id, agentSpan, "agent.invoke", "AGENT", "contestant", "OK", { outcome });
       emitWarnings(budget.consume({ wallclock_ms: Math.max(1, Math.round(performance.now() - start)) }));
       const usage = measuredUsage(budget.snapshot().usage, candidateUsage, experiment.manifest.run_class);
-      environmentBeforeReset = typeof environment.snapshot === "function" ? await environment.snapshot() : {};
+      try {
+        environmentBeforeReset = typeof environment.snapshot === "function" ? await environment.snapshot() : {};
+      } catch (snapshotError) {
+        // The candidate has already finished; release it and reset the lab on
+        // the failure path, then let the policy schedule a rerun.
+        snapshotError.runRef = outcome.candidate_run_ref ?? snapshotError.runRef ?? null;
+        snapshotError.candidateTerminal = true;
+        throw snapshotError;
+      }
       let candidateFinalization = null;
       if (typeof adapter.finalize === "function") {
         try {
@@ -366,7 +382,7 @@ export class TrialRunner {
       const keepQuarantined = error.keepEnvironmentQuarantined === true;
       const quarantineStarted = error.quarantineStarted === true || keepQuarantined;
       if (environment && environmentReset === null && typeof environment.reset === "function" && !keepQuarantined) {
-        if (typeof environment.snapshot === "function") {
+        if (typeof environment.snapshot === "function" && error.labSnapshotFailure !== true) {
           try {
             environmentBeforeReset = await environment.snapshot();
           } catch (snapshotError) {

@@ -1,3 +1,4 @@
+import { isCandidateOwnedFailure } from "./failure-policy.mjs";
 import { mulberry32, seedFromString } from "./utils.mjs";
 
 function round(value, digits = 4) {
@@ -134,7 +135,13 @@ export function evaluationDecisionReport({ requestStatus, mode, items, contestan
   confidence = 0.95, iterations = 5000, seed = "evalos-decision-report" }) {
   const terminalStatuses = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
   const contestants = [...new Set(contestantOrder ?? items.map((item) => item.contestant_ref))];
-  const valid = items.filter((item) => item.status === "COMPLETED" && Number.isFinite(Number(item.current?.score)));
+  // A trial the candidate itself failed to finish is a result: not passed, 0
+  // points, in the denominator and in the pairs (product manager, 2026-10-29).
+  const didNotFinish = (item) => item.status === "FAILED" && isCandidateOwnedFailure(item.failure);
+  const valid = items.map((item) => didNotFinish(item)
+    ? { ...item, current: { ...(item.current ?? {}), score: 0, passed: false, qualification_passed: false, did_not_finish: true } }
+    : item).filter((item) => (item.status === "COMPLETED" || item.current?.did_not_finish)
+      && Number.isFinite(Number(item.current?.score)));
   const passedForMode = (item) => Boolean(mode === "FORMAL" ? item.current?.passed
     : item.current?.qualification_passed ?? item.current?.passed);
   const failureCounts = {};
@@ -150,6 +157,7 @@ export function evaluationDecisionReport({ requestStatus, mode, items, contestan
       passed: passedForMode(item) })), Math.max(1, Number(repetitions)));
     return [contestant, { trials: selected.length, scored_trials: scored.length,
       failed_trials: selected.filter((item) => item.status === "FAILED").length,
+      did_not_finish_trials: selected.filter(didNotFinish).length,
       cancelled_trials: selected.filter((item) => item.status === "CANCELLED").length,
       average_score: scores.length ? round(scores.reduce((sum, value) => sum + value, 0) / scores.length, 2) : null,
       pass_rate: scored.length ? round(scored.filter(passedForMode).length / scored.length) : null,
@@ -176,11 +184,14 @@ export function evaluationDecisionReport({ requestStatus, mode, items, contestan
       formal_winner: null };;
   }
   const terminal = items.filter((item) => terminalStatuses.has(item.status)).length;
-  const unresolvedEvidence = items.filter((item) => item.status === "COMPLETED" && (!item.trace_hash
+  const unresolvedEvidence = items.filter((item) => (item.status === "COMPLETED" || didNotFinish(item)) && (!item.trace_hash
     || item.cleanup?.reset_ok === false || item.cleanup?.quarantine_required && item.cleanup?.quarantine_released !== true)).length;
   const usageIncomplete = items.filter((item) => item.current?.usage_measurement?.complete === false).length;
-  const ready = requestStatus === "COMPLETED" && terminal === items.length && unresolvedEvidence === 0
-    && (!comparison || comparison.paired_trials === comparison.expected_pairs);
+  // A request whose only failures are the candidates' own still decides; one the
+  // lab or EvalOS failed (after its rerun), or one with cancelled trials, does not.
+  const unresolvedByPlatform = items.filter((item) => item.status !== "COMPLETED" && !didNotFinish(item)).length;
+  const ready = ["COMPLETED", "FAILED"].includes(requestStatus) && terminal === items.length && unresolvedByPlatform === 0
+    && unresolvedEvidence === 0 && (!comparison || comparison.paired_trials === comparison.expected_pairs);
   const authority = mode === "FORMAL" && ready ? "FORMAL_DECISION" : "DIAGNOSTIC_ONLY";
   if (comparison && authority === "FORMAL_DECISION" && comparison.clearly_different) {
     comparison = { ...comparison, formal_winner: comparison.observed_leader };
@@ -194,6 +205,7 @@ export function evaluationDecisionReport({ requestStatus, mode, items, contestan
   return { contract: "evalos-decision-report.1", request_status: requestStatus, mode, ready,
     decision_authority: authority, conclusion_code: conclusionCode, explanation_zh: explanationZh,
     sample: { trials: items.length, terminal_trials: terminal, scored_trials: valid.length,
+      did_not_finish_trials: items.filter(didNotFinish).length, unresolved_by_platform_trials: unresolvedByPlatform,
       cases: new Set(items.map((item) => item.case_ref)).size, repetitions },
     evidence_quality: { unresolved_evidence_trials: unresolvedEvidence, usage_incomplete_trials: usageIncomplete,
       note_zh: usageIncomplete ? "部分考生公开接口没有提供完整 Token/费用数据；平台明确标为未知，不按 0 计算。" : "本报告所需用量维度均已记录。" },

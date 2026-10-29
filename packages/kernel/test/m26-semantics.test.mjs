@@ -83,7 +83,12 @@ test("M3.3 真实场次里出现过的事件名都有中文标题，不会退成
     ["verification.completed", "AGENT"], ["candidate.environment.release_completed", "INTERNAL"],
     ["candidate.evidence.frozen", "AGENT"], ["task.received", "AGENT"],
     ["candidate.environment.release_completed_after_failure", "INTERNAL"], ["environment.reset_after_failure", "INTERNAL"],
-    ["trial.failed", "INTERNAL"]];
+    ["trial.failed", "INTERNAL"],
+    // Failure-path names: they show up exactly when someone has to read why a trial went wrong.
+    ["environment.capture_missed", "INTERNAL"], ["environment.snapshot_failed_after_failure", "INTERNAL"],
+    ["environment.reset_failed", "INTERNAL"], ["environment.quarantined", "INTERNAL"],
+    ["candidate.run.quarantine_released", "AGENT"], ["candidate.environment.release_failed", "INTERNAL"],
+    ["candidate.evaluation_context.restore_failed", "INTERNAL"], ["budget.exceeded", "INTERNAL"]];
   for (const [name, spanKind] of seen) {
     const title = explainTraceRecord({ name, span_kind: spanKind }).title.zh;
     assert.equal(title.includes(name), false, `${name} has no title: ${title}`);

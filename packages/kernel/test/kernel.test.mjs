@@ -16,7 +16,7 @@ import {
   BudgetExceededError, BudgetTracker, CASES, M2_CASES, OPS_CASES, DeterministicGradingService, EvalStore, EvaluationLedger, FrozenApprovalOracle,
   PrivateLabelStore, TrialRunner, binaryMetrics, clusteredPairedBootstrap, containsSensitiveMaterial,
   blindContentView, blindExperimentView, blindGraderRunView, blindTraceView, expertCalibrationFromConsensusSamples, createEvalRegistry, createM15Registry,
-  classifyTrialFailure, createTestDouble, evaluationDecisionReport, evaluationEvidenceTraceView,
+  classifyTrialFailure, isCandidateOwnedFailure, createTestDouble, evaluationDecisionReport, evaluationEvidenceTraceView,
   gradeTrial, judgeCalibrationGate, redact, reliabilityMetrics,
   seededShuffle, sha256, judgeSuiteCalibration, isRetryableInfrastructureFailure,
 } from "../src/index.mjs";
@@ -209,6 +209,25 @@ test("基础设施重试策略拒绝Agent选错工具，只接受明确瞬态故
   assert.equal(isRetryableInfrastructureFailure("HTTP 503 temporary service"), true);
   assert.equal(isRetryableInfrastructureFailure("ECONNRESET"), true);
   assert.equal(isRetryableInfrastructureFailure("output schema invalid"), false);
+});
+
+test("实验室快照重试后仍失败归为考场环境故障、可重跑；考生叫不停仍算产品可靠性", () => {
+  // The exact text of the 2026-10-29 formal-run failure, minus the quarantine wrapper.
+  const lab = "Candidate Twin snapshot failed: Command '['/usr/local/sbin/opsmind-harness-labctl', 'manage-status']' timed out after 45 seconds (after 3 attempts)";
+  const failure = classifyTrialFailure(lab);
+  assert.equal(failure.category, "LAB_INFRASTRUCTURE_FAILURE");
+  assert.equal(failure.owner, "INFRASTRUCTURE");
+  assert.equal(failure.retryable, true);
+  assert.equal(failure.policy_code, "LAB_SNAPSHOT");
+  assert.equal(isCandidateOwnedFailure(failure), false);
+  const flagged = Object.assign(new Error("lab went quiet"), { labSnapshotFailure: true });
+  assert.equal(classifyTrialFailure(flagged).category, "LAB_INFRASTRUCTURE_FAILURE");
+  assert.equal(classifyTrialFailure(`external candidate quarantine unresolved: ${lab}`, { keepQuarantined: true }).category,
+    "PRODUCT_RELIABILITY_FAILURE");
+  assert.equal(classifyTrialFailure(lab, { resetError: "reset not clean" }).category, "PLATFORM_CLEANUP_FAILURE");
+  assert.equal(isCandidateOwnedFailure(classifyTrialFailure("ReportDeliveryExhausted")), true);
+  assert.equal(isCandidateOwnedFailure(classifyTrialFailure("external candidate run timed out")), true);
+  assert.equal(isCandidateOwnedFailure(classifyTrialFailure("HTTP 503 temporary service")), false);
 });
 
 test("失败分类不会把考生能力、考生超时或考场清理故障洗成可重试网络问题", () => {
@@ -508,6 +527,67 @@ test("考生侧清场失败仍保留为产品证据，但独立Twin复位干净�
     assert.equal(attempt.final_state.reset.clean, true);
     assert.equal(attempt.error, "ReportNotSubmitted - Agent 未提交最终调查报告");
     assert.ok(store.getTrace(claimed.id).some((record) => record.name === "candidate.environment.release_failed"));
+  } finally { labels.close(); store.close(); }
+});
+
+test("答题途中实验室快照没回话只记一笔，考生照常答完、不取消不停队", async () => {
+  const { store, labels, ledger, gradingService } = fixture();
+  try {
+    const { experiment } = store.createExperiment(manifest, "mid-run-capture-missed");
+    const claimed = store.claimNext("capture-missed-worker", 1000, experiment.id);
+    const base = createTestDouble(claimed.contestant_ref, "context-first");
+    const seen = [];
+    const adapter = { ...base, async execute(args) {
+      seen.push(await args.captureEnvironment("evidence.collected"));
+      return base.execute(args);
+    } };
+    const runner = new TrialRunner({ store, ledger, gradingService, adapters: {
+      [`${claimed.contestant_ref}:ENGINEERING_TEST`]: adapter,
+    }, environmentFactory: async () => ({
+      async call() { return { ok: true }; },
+      async capture() {
+        throw new Error("Candidate Twin snapshot failed: Command '['/usr/local/sbin/opsmind-harness-labctl', 'manage-status']' timed out after 45 seconds");
+      },
+      async snapshot() { return { healthy: true }; },
+      async reset() { return { ok: true, clean: true }; },
+    }) });
+    const result = await runner.runTrial(claimed, { workerId: "capture-missed-worker" });
+    assert.equal(result.status, "COMPLETED");
+    assert.deepEqual(seen, [{ captured: false, reason: "capture_failed" }]);
+    const missed = store.getTrace(claimed.id).find((record) => record.name === "environment.capture_missed");
+    assert.match(missed.payload.error, /timed out after 45 seconds/);
+    assert.equal(missed.payload.reason, "evidence.collected");
+  } finally { labels.close(); store.close(); }
+});
+
+test("判分用的最后一次快照重试后仍失败：考生照常收尾、考场复位、记考场故障并可重跑一次", async () => {
+  const { store, labels, ledger, gradingService } = fixture();
+  const order = [];
+  try {
+    const { experiment } = store.createExperiment(manifest, "final-snapshot-lab-failure");
+    const claimed = store.claimNext("final-snapshot-worker", 1000, experiment.id);
+    const base = createTestDouble(claimed.contestant_ref, "context-first");
+    const adapter = { ...base,
+      async execute(args) { return { ...(await base.execute(args)), candidate_run_ref: "inv-final-snapshot" }; },
+      async finalize({ runRef }) { order.push(`candidate-released:${runRef}`); return { ok: true }; } };
+    const runner = new TrialRunner({ store, ledger, gradingService, adapters: {
+      [`${claimed.contestant_ref}:ENGINEERING_TEST`]: adapter,
+    }, environmentFactory: async () => ({
+      async call() { return { ok: true }; },
+      async snapshot() {
+        order.push("final-snapshot");
+        throw Object.assign(new Error("Candidate Twin snapshot failed: manage-status timed out after 45 seconds (after 3 attempts)"),
+          { labSnapshotFailure: true });
+      },
+      async reset() { order.push("evalos-twin-reset"); return { ok: true, clean: true }; },
+    }) });
+    const result = await runner.runTrial(claimed, { workerId: "final-snapshot-worker" });
+    assert.equal(result.status, "FAILED");
+    assert.deepEqual(order, ["final-snapshot", "candidate-released:inv-final-snapshot", "evalos-twin-reset"]);
+    const failure = store.listTrialAttemptResults(claimed.id).at(-1).final_state.failure_classification;
+    assert.equal(failure.category, "LAB_INFRASTRUCTURE_FAILURE");
+    const retried = store.retryFailedTrial(claimed.id, { maxRetries: 1, allowedCategories: ["LAB_SNAPSHOT"] });
+    assert.equal(retried.status, "QUEUED");
   } finally { labels.close(); store.close(); }
 });
 
@@ -1009,6 +1089,35 @@ test("统计报告只在正式完整配对且置信区间不跨0时给出胜者"
   assert.equal(incomplete.ready, false);
   assert.equal(incomplete.conclusion_code, "INCOMPLETE_EVIDENCE");
   assert.equal(incomplete.comparison.formal_winner, null);
+
+  // The candidate's own failure to finish is a result (product manager, 2026-10-29):
+  // not passed, 0 points, still paired; a FAILED request still decides.
+  const candidateFailed = items.map((item, index) => index === 0 ? { ...item, status: "FAILED",
+    failure: { category: "CANDIDATE_CAPABILITY_FAILURE", owner: "CANDIDATE" },
+    current: { ...item.current, score: null, passed: null } } : item);
+  const withDidNotFinish = evaluationDecisionReport({
+    requestStatus: "FAILED", mode: "FORMAL", items: candidateFailed,
+    contestantOrder: contestants, repetitions: 3, iterations: 300, seed: "did-not-finish",
+  });
+  assert.equal(withDidNotFinish.ready, true);
+  assert.equal(withDidNotFinish.decision_authority, "FORMAL_DECISION");
+  assert.equal(withDidNotFinish.sample.did_not_finish_trials, 1);
+  assert.equal(withDidNotFinish.comparison.paired_trials, 6);
+  assert.equal(withDidNotFinish.contestants["agent-harness-v2"].did_not_finish_trials, 1);
+  assert.equal(withDidNotFinish.contestants["agent-harness-v2"].scored_trials, 6);
+  assert.ok(withDidNotFinish.contestants["agent-harness-v2"].pass_rate < 1);
+  assert.ok(withDidNotFinish.contestants["agent-harness-v2"].average_score < 70);
+
+  // A failure that is the lab's (after its one rerun) leaves the formal decision open.
+  const labFailed = candidateFailed.map((item, index) => index === 0
+    ? { ...item, failure: { category: "LAB_INFRASTRUCTURE_FAILURE", owner: "INFRASTRUCTURE" } } : item);
+  const withLabFailure = evaluationDecisionReport({
+    requestStatus: "FAILED", mode: "FORMAL", items: labFailed,
+    contestantOrder: contestants, repetitions: 3, iterations: 100, seed: "lab-failure",
+  });
+  assert.equal(withLabFailure.ready, false);
+  assert.equal(withLabFailure.conclusion_code, "INCOMPLETE_EVIDENCE");
+  assert.equal(withLabFailure.sample.unresolved_by_platform_trials, 1);
 });
 test("人工复核要求两个独立身份、预分配、凭据验证和分歧升级", () => {
   const { store, labels } = fixture();

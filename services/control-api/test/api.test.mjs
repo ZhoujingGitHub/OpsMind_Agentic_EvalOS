@@ -532,6 +532,19 @@ test("M1.5 API运行原生Manifest、公开注册表、流式Span Trace并隐藏
     assert.equal(analysis.analysis.status, "COMPLETED");
     assert.equal(analysis.analysis.result.summary, "已完成只读调查");
     assert.deepEqual(analysis.analysis.budget, { wallclock_ms: 300000, cost_usd: 2, max_turns: 32, max_tool_calls: 24 });
+    // A run closed as FAILED (one bad trial) is closed: analysis is allowed and
+    // identities are revealed. Before 2026-10-29 this answered 409.
+    const analysedExperimentId = app.store.getTrial(trialId).experiment_id;
+    app.store.setExperimentStatus(analysedExperimentId, "FAILED");
+    const failedRunAnalysis = await app.handler(new Request("http://local/api/analysis-runs", { method: "POST",
+      headers: { authorization: "Bearer admin-secret", "content-type": "application/json", "idempotency-key": "analysis-after-failed-run" },
+      body: JSON.stringify({ trial_id: trialId, prompt: "只读分析失败收口实验里的这一场", mode: "case_diagnosis" }) }));
+    assert.equal(failedRunAnalysis.status, 202);
+    const failedRunCard = await (await app.handler(new Request(
+      `http://local/api/workbench/experiments/${analysedExperimentId}/report-card`, { headers: { authorization: "Bearer admin-secret" } }))).json();
+    assert.equal(failedRunCard.identity_state, "REVEALED_AFTER_CLOSE");
+    app.store.setExperimentStatus(analysedExperimentId, "COMPLETED");
+    await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(app.store.listGraderRuns(trialId)[0].result.total, graders.items[0].result.total);
     const emptyReviews = await (await app.handler(new Request("http://local/api/reviews"))).json();
     assert.equal(emptyReviews.optional, true);
@@ -638,6 +651,69 @@ test("评测任务只对冻结允许的瞬态限流自动重试一次并保留�
     }))).json();
     assert.equal(health.failure_categories.RATE_LIMIT, 1);
     assert.equal(health.retry_history.retried_trials, 1);
+  } finally { app.close(); }
+});
+
+test("实验室快照故障自动重跑一次；考生自己没答完记不通过，其余照跑、请求正常收口", async () => {
+  // The two rules of 2026-10-29: the lab's fault reruns once; the candidate's own
+  // failure to finish is a result, so it neither halts nor fails the request.
+  const root = mkdtempSync(path.join(os.tmpdir(), "evalos-api-lab-retry-"));
+  const baseA = createTestDouble("test-double-a", "context-first");
+  const baseB = createTestDouble("test-double-b", "metric-first");
+  let executionsA = 0;
+  const labFlaky = { ...baseA, async execute(context) {
+    executionsA += 1;
+    if (executionsA === 1) {
+      throw Object.assign(new Error("Candidate Twin snapshot failed: Command '['/usr/local/sbin/opsmind-harness-labctl', "
+        + "'manage-status']' timed out after 45 seconds (after 3 attempts)"), { labSnapshotFailure: true });
+    }
+    return baseA.execute(context);
+  } };
+  const givesUp = { ...baseB, async execute() { throw new Error("ReportDeliveryExhausted - 正式报告交付重试用尽"); } };
+  const app = createApp({
+    databasePath: path.join(root, "control.sqlite"),
+    privateLabelDatabasePath: path.join(root, "private.sqlite"),
+    runtimeRoot: root,
+    apiToken: "control-secret",
+    bootstrapEngineeringTestDesign: true,
+    engineeringAdapterOverrides: { "test-double-a:ENGINEERING_TEST": labFlaky, "test-double-b:ENGINEERING_TEST": givesUp },
+  });
+  try {
+    const source = app.store.listExperiments().find((item) => item.manifest.run_class === "ENGINEERING_TEST");
+    const response = await app.handler(new Request("http://local/api/workbench/run-requests", {
+      method: "POST",
+      headers: { authorization: "Bearer control-secret", "content-type": "application/json",
+        "idempotency-key": "lab-retry-and-did-not-finish" },
+      body: JSON.stringify({ request_kind: "NEW_EVALUATION", evaluation_purpose: "PAIRED_COMPARISON", mode: "QUICK_VALIDATION",
+        source_experiment_id: source.id, case_refs: [manifest.case_refs[0]],
+        contestant_refs: manifest.contestants.map((item) => item.ref),
+        environment_seeds: [manifest.environment_seeds[0]], repetitions: 1,
+        requested_by: "lab-retry-test", reason: "验证实验室故障重跑一次、考生没答完记不通过" }),
+    }));
+    assert.equal(response.status, 202);
+    const id = (await response.json()).request.id;
+    let request;
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      request = (await (await app.handler(new Request(`http://local/api/workbench/run-requests/${id}`, {
+        headers: { authorization: "Bearer control-secret" },
+      }))).json()).request;
+      if (["COMPLETED", "FAILED"].includes(request.status)) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(request.status, "COMPLETED");
+    const rerun = request.items.find((item) => item.contestant_ref === "test-double-a");
+    assert.equal(rerun.attempt, 2);
+    const attempts = app.store.listTrialAttemptResults(rerun.trial_id);
+    assert.deepEqual(attempts.map((item) => item.status), ["FAILED", "COMPLETED"]);
+    assert.equal(attempts[0].final_state.failure_classification.category, "LAB_INFRASTRUCTURE_FAILURE");
+    const unfinished = request.items.find((item) => item.contestant_ref === "test-double-b");
+    assert.equal(unfinished.status, "FAILED");
+    assert.equal(unfinished.attempt, 1);
+    assert.equal(unfinished.failure.category, "CANDIDATE_CAPABILITY_FAILURE");
+    assert.equal(request.decision_report.ready, true);
+    assert.equal(request.decision_report.sample.did_not_finish_trials, 1);
+    assert.equal(request.decision_report.contestants["test-double-b"].pass_rate, 0);
+    assert.equal(app.store.getExperiment(request.created_experiment_id).status, "COMPLETED");
   } finally { app.close(); }
 });
 

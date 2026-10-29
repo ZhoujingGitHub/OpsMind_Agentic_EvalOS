@@ -4,13 +4,34 @@ function allowedEvidence(definition) {
   return new Set(definition?.result?.evidence_refs ?? []);
 }
 
+// The snapshot that grading reads is retried before it is given up on (2026-10-29:
+// one lab-side `manage-status` timed out after 45 s, then answered in 1 s on retest).
+// A snapshot that still fails is the lab's fault, never the candidate's; the error
+// carries labSnapshotFailure so the failure policy can schedule a rerun.
+export const SNAPSHOT_RETRY = Object.freeze({ attempts: 3, intervalMs: 10000 });
+
+async function withSnapshotRetry(attemptOnce, { attempts, intervalMs }, prefix) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try { return await attemptOnce(); }
+    catch (error) { lastError = error; }
+    if (attempt < attempts && intervalMs > 0) await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  const detail = String(lastError?.message ?? lastError ?? "unknown").replace(/^(?:Candidate )?Twin snapshot failed:\s*/, "");
+  const error = new Error(`${prefix} snapshot failed: ${detail}${attempts > 1 ? ` (after ${attempts} attempts)` : ""}`);
+  error.labSnapshotFailure = true;
+  error.snapshotAttempts = attempts;
+  throw error;
+}
+
 export class ProtocolTwinEnvironment {
-  constructor({ client, caseSpec, trial }) {
+  constructor({ client, caseSpec, trial, snapshotRetry = SNAPSHOT_RETRY }) {
     if (!client?.invoke) throw new Error("Twin client with invoke() is required");
     if (caseSpec?.source?.level !== "L2" || !caseSpec?.environment?.scenario_id) throw new Error("L2 Twin environment contract is required");
     this.client = client;
     this.caseSpec = caseSpec;
     this.trial = trial;
+    this.snapshotRetry = snapshotRetry;
     this.calls = new Map();
     this.prepared = false;
     this.resetDone = false;
@@ -89,8 +110,11 @@ export class ProtocolTwinEnvironment {
 
   async snapshot() {
     if (!this.prepared) return { source: this.caseSpec.source, prepared: false };
-    const response = validateTwinResponse(await this.client.invoke({ operation: "snapshot", trial_id: this.trial.id }), "snapshot");
-    if (!response.ok) throw new Error(`Twin snapshot failed: ${response.error ?? "unknown"}`);
+    const response = await withSnapshotRetry(async () => {
+      const reply = validateTwinResponse(await this.client.invoke({ operation: "snapshot", trial_id: this.trial.id }), "snapshot");
+      if (!reply.ok) throw new Error(String(reply.error ?? "unknown"));
+      return reply;
+    }, this.snapshotRetry, "Twin");
     return { source: this.caseSpec.source, scenario_id: this.caseSpec.environment.scenario_id,
       observation_profile: this.caseSpec.environment.observation_profile ?? "public-baseline", overlay_failures: this.overlayFailures,
       fingerprint: this.fingerprint, tool_attempts: Object.fromEntries(this.calls), remote: response.snapshot ?? {} };
@@ -108,7 +132,7 @@ export class ProtocolTwinEnvironment {
 }
 
 export class ExternalProductTwinEnvironment {
-  constructor({ client, caseSpec, trial, candidateBinding, candidatePresenceVerifier = null }) {
+  constructor({ client, caseSpec, trial, candidateBinding, candidatePresenceVerifier = null, snapshotRetry = SNAPSHOT_RETRY }) {
     if (!client?.invoke) throw new Error("Twin manager client with invoke() is required");
     if (caseSpec?.source?.level !== "L2" || !caseSpec?.environment?.scenario_id) throw new Error("L2 Twin environment contract is required");
     this.client = client;
@@ -120,6 +144,7 @@ export class ExternalProductTwinEnvironment {
     }
     this.candidateBinding = structuredClone(candidateBinding);
     this.candidatePresenceVerifier = candidatePresenceVerifier;
+    this.snapshotRetry = snapshotRetry;
     this.managedTrialId = managedTwinTrialId(trial.contestant_ref, trial.id);
     this.prepared = false;
     this.resetDone = false;
@@ -199,14 +224,21 @@ export class ExternalProductTwinEnvironment {
       message: "The real candidate product must invoke its own MCP tools; EvalOS will not impersonate the candidate." } };
   }
 
-  async capture(reason = "adapter_observation") {
+  // Mid-run captures (one per batch of candidate milestones, 38~69 per AH trial)
+  // are tried once: grading reads only the last snapshot, and retrying a stuck
+  // lab here would stall the candidate's polling for minutes. The final capture
+  // in snapshot() is the one that is retried.
+  async capture(reason = "adapter_observation", { attempts = 1 } = {}) {
     if (!this.prepared || this.resetDone) return { captured: false, reason: "environment_not_active" };
-    const response = validateTwinManagerResponse(await this.client.invoke({
-      operation: "snapshot",
-      contestant_ref: this.trial.contestant_ref,
-      trial_id: this.managedTrialId,
-    }), "snapshot");
-    if (!response.ok) throw new Error(`Candidate Twin snapshot failed: ${managerError(response)}`);
+    const response = await withSnapshotRetry(async () => {
+      const reply = validateTwinManagerResponse(await this.client.invoke({
+        operation: "snapshot",
+        contestant_ref: this.trial.contestant_ref,
+        trial_id: this.managedTrialId,
+      }), "snapshot");
+      if (!reply.ok) throw new Error(managerError(reply));
+      return reply;
+    }, { attempts, intervalMs: this.snapshotRetry.intervalMs }, "Candidate Twin");
     if (response.snapshot && typeof response.snapshot === "object") {
       this.captureCount += 1;
       this.lastSnapshot = structuredClone(response.snapshot);
@@ -215,10 +247,11 @@ export class ExternalProductTwinEnvironment {
     return { captured: false, reason: response.already_reset ? "candidate_already_reset" : "snapshot_unavailable" };
   }
 
+  // The final capture is what the grader reads (changes, business verification).
+  // Falling back to a stale mid-run snapshot would grade the candidate on the
+  // wrong state, so a capture that still fails after retries fails the trial.
   async snapshot() {
-    let finalCapture = null;
-    try { finalCapture = await this.capture("adapter_completed"); }
-    catch (error) { finalCapture = { captured: false, reason: "capture_failed", error: error.message }; }
+    const finalCapture = await this.capture("adapter_completed", { attempts: this.snapshotRetry.attempts });
     return {
       source: this.caseSpec.source,
       scenario_id: this.caseSpec.environment.scenario_id,

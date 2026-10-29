@@ -181,6 +181,64 @@ test("考务管理器不再保留候选SSH授权、远程观察或健康监督�
   }
 });
 
+test("实验室快照：答题途中只试一次；判分用的最后一次重试 3 次，仍失败才报考场故障", async () => {
+  const caseSpec = opsCase("main", "amf-process-down");
+  const externalTrial = { id: "trial_snapshot_retry", contestant_ref: "agent-harness-v2", environment_seed: 2026081601 };
+  const candidateBinding = { context_digest: `sha256:${"a".repeat(64)}`,
+    environment_ref: "evalos-twin:trial_snapshot_retry", service_ids: ["amf"], resource_refs: [{
+      identifier_domain: "opsmind-twin", namespace: "ah-trial_snapshot_retry",
+      resource_type: "network_function", resource_id: "amf",
+    }] };
+  const timedOut = "Command '['/usr/local/sbin/opsmind-harness-labctl', 'manage-status']' timed out after 45 seconds";
+  const environmentWith = (snapshotReplies) => {
+    const calls = [];
+    const manager = { invoke: async (request) => {
+      calls.push(request.operation);
+      if (request.operation === "prepare") return { ok: true, operation: "prepare", fingerprint: "fp",
+        slot_lease_present: true, candidate_runtime_lease_bound: true, physical_lease: { lease_id: "lease-1" } };
+      if (request.operation === "snapshot") {
+        const reply = snapshotReplies.shift();
+        if (reply instanceof Error) throw reply;
+        return reply;
+      }
+      throw new Error("unexpected manager operation");
+    } };
+    const environment = new ExternalProductTwinEnvironment({ client: manager, caseSpec, trial: externalTrial,
+      candidateBinding, snapshotRetry: { attempts: 3, intervalMs: 0 } });
+    return { environment, calls };
+  };
+  const failed = { ok: false, operation: "snapshot", error: { code: "SNAPSHOT_FAILED", message: timedOut } };
+  const good = { ok: true, operation: "snapshot", snapshot: { recovery: { task_success: true } } };
+
+  // Mid-run: one attempt, the error says what the lab said.
+  const midRun = environmentWith([failed, good]);
+  await midRun.environment.prepare();
+  await assert.rejects(midRun.environment.capture("evidence.collected"), (error) => {
+    assert.equal(error.labSnapshotFailure, true);
+    assert.equal(error.message, `Candidate Twin snapshot failed: ${timedOut}`);
+    return true;
+  });
+  assert.deepEqual(midRun.calls, ["prepare", "snapshot"]);
+
+  // Final: two misses (one a transport error) then an answer — graded on the fresh state.
+  const recovers = environmentWith([failed, new Error("Twin manager SSH request failed: Connection reset"), good]);
+  await recovers.environment.prepare();
+  const state = await recovers.environment.snapshot();
+  assert.equal(state.final_capture.captured, true);
+  assert.equal(state.remote.recovery.task_success, true);
+  assert.deepEqual(recovers.calls, ["prepare", "snapshot", "snapshot", "snapshot"]);
+
+  // Final: three misses — the lab's fault, never graded on a stale snapshot.
+  const gone = environmentWith([failed, failed, failed]);
+  await gone.environment.prepare();
+  await assert.rejects(gone.environment.snapshot(), (error) => {
+    assert.equal(error.labSnapshotFailure, true);
+    assert.equal(error.message, `Candidate Twin snapshot failed: ${timedOut} (after 3 attempts)`);
+    return true;
+  });
+  assert.equal(gone.calls.filter((operation) => operation === "snapshot").length, 3);
+});
+
 test("候选租约准备失败归入平台配置，回滚不干净则停队并归入清场故障", async () => {
   const caseSpec = opsCase("main", "amf-process-down");
   const externalTrial = { id: "trial_binding_failure", contestant_ref: "agent-harness-v2",
